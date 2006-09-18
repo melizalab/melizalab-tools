@@ -58,6 +58,17 @@ class toelis(list):
 
         list.__getitem__(self, index[1])[index[0]] = value
 
+    def offset(self, offset):
+        """
+        Adds a fixed offset to all the time values in the object.
+        """
+        if not type(offset) in (int, float):
+            raise TypeError, " can only add scalars to toelis events"
+        for ri in range(self.nrepeats):
+            for ui in range(self.nunits):
+                self[ui,ri] = [a + offset for a in self[ui,ri]]
+                
+
     def __str__(self):
         return "toelis: (%d units, %d repeats)" % self.size
 
@@ -124,36 +135,36 @@ def readfile(filename):
         linenum += 1
         if not n_units:
             n_units = int(line)
-            print "n_units: %d" % n_units
+            #print "n_units: %d" % n_units
         elif not n_repeats:
             n_repeats = int(line)
-            print "n_repeats: %d" % n_repeats
+            #print "n_repeats: %d" % n_repeats
             # once we know n_units and n_repeats, initialize the output object
             out = toelis(n_units, n_repeats)
-            print "initialized toelis: %s" % out
+            #print "initialized toelis: %s" % out
         elif len(p_units) < n_units:
             # scan in pointers to unit starts until we have n_units
             p_units.append(int(line))
-            print "unit pointers: %s" % p_units
+            #print "unit pointers: %s" % p_units
         elif linenum in p_units:
             # if the line number matches a unit pointer, set the current_unit
             current_unit = p_units.index(linenum)
-            print "Start unit %d at line %d" % (current_unit, linenum)
+            #print "Start unit %d at line %d" % (current_unit, linenum)
             # and reset the repeat pointer list. Note that the read values
             # are lengths, so we have to convert to pointers
             p_repeats = [linenum + n_repeats]
             l_repeats = [int(line)]
-            print "repeat pointers: %s" % p_repeats
+            #print "repeat pointers: %s" % p_repeats
         elif len(p_repeats) < n_repeats:
             # if we don't have enough repeat pointers, read in integers
             # the pointer is p_repeats[-1] + l_repeats[-1]
             p_repeats.append(p_repeats[-1] + l_repeats[-1])
             l_repeats.append(int(line))
-            print "repeat pointers: %s" % p_repeats            
+            #print "repeat pointers: %s" % p_repeats            
         elif linenum in p_repeats:
             # now set the current_repeat index and read in a float
             current_repeat = p_repeats.index(linenum)
-            print "Start unit %d, repeat %d data at line %d" % (current_unit, current_repeat, linenum)
+            #print "Start unit %d, repeat %d data at line %d" % (current_unit, current_repeat, linenum)
             out[current_unit, current_repeat].append(float(line))
         else:
             out[current_unit, current_repeat].append(float(line))
@@ -217,4 +228,11 @@ if __name__=="__main__":
     print "Multi unit, single repeat:"
     c = readfile('st302_2006_09_04_20060904k004.toe_lis')
     print c
-    
+
+    print "Make a synthetic sequence from 2 copies of c[2,1]:"
+    d = c.unit(2)
+    d.extend(d)
+    print d
+
+    print "Add -2000 to values in synthetic sequence"
+    d.offset(-2000)
