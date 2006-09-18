@@ -1,0 +1,7 @@
+Project:	tsutils
+Codebase:	python
+Description:	Utilities for dealing with timeseries data, specifically
+		toe_lis and lbl files
+Official repos:	dmeliza@drozd.uchicago.edu:/home/dmeliza/src/tsutils
+Maintainer:	dmeliza@uchicago
+Requires:	aquery
