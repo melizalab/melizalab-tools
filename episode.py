@@ -21,18 +21,14 @@ class episode:
     and stimulus onset. Multiple stimuli can be stored in a single episode,
     although currently only onset times are supported.
     """
-    __slots__ = ['basename','entry','abstime','duration','stimulus','stim_start']
 
-    def __init__(self, basename=None, entry=None, abstime=None,
-                 duration=None, stimulus=None, stim_start=None):
-        self.basename = basename
-        self.entry = entry
-        self.abstime = abstime
-        self.duration = duration
-        if stimulus: self.stimulus = stimulus
-        else: self.stimulus = []
-        if stim_start: self.stim_start = stim_start
-        else: self.stim_start = []
+    def __init__(self):
+        self.basename = ""
+        self.entry = 0
+        self.abstime = 0
+        self.duration = 0
+        self.stimulus = []
+        self.stim_start = []
 
     def __str__(self):
         if not self.basename: return None
@@ -102,14 +98,18 @@ def readexplog(explog, samplerate=20000):
 
     currentfile  = None
     currententry = None
+    currentpen   = None
+    currentsite  = None
     entries = {}
     stimuli = {}
     episodes = []
     
-    reg_create = re.compile(r"'(\w*).pcm_seq2' created")
+    reg_create = re.compile(r"'(?P<file>\w*).pcm_seq2' created")
     reg_triggeron = re.compile(r"TRIG_ON.*:entry (?P<entry>\d*) \((?P<onset>\d*)\)")
     reg_triggeroff = re.compile(r"TRIG_OFF.*:entry (?P<entry>\d*), wrote (?P<samples>\d*)")
     reg_stimulus = re.compile(r"stimulus: REL:(?P<rel>[\d\.]*) ABS:(?P<abs>\d*) NAME:'(?P<stim>\S*)'")
+    reg_site = re.compile(r"site (?P<site>\d*)")
+    reg_pen  = re.compile(r"pen (?P<pen>\d*)")
 
     # we scan through the file looking for pcm_seq2 files being opened; this
     # gives us the root filenames that we'll use in generating the indexed
@@ -127,7 +127,7 @@ def readexplog(explog, samplerate=20000):
             try:
                 m1 = reg_create.search(line)
                 if m1:
-                    currentfile = m1.groups()[0]
+                    currentfile = m1.group('file')
                     #print currentfile
                 elif line.rstrip().endswith("closed"):
                     currentfile = None
@@ -136,6 +136,15 @@ def readexplog(explog, samplerate=20000):
             except:
                 print "Error parsing line (%d): %s" % (line_num, line)
                 print sys.exc_info()[0]
+
+        # new pen or new site
+        if line.startswith("IIII"):
+            m1 = reg_pen.search(line)
+            m2 = reg_site.search(line)
+            if m1:
+                currentpen = m1.group('pen')
+            elif m2:
+                currentsite = m2.group('site')
 
         # trigger lines
         if line.startswith("TTTT"):
@@ -155,7 +164,8 @@ def readexplog(explog, samplerate=20000):
                         if not closedentry==currententry:
                             print "Error: found TRIG_OFF for entry %d, but missed TRIG_ON" % closedentry
                         else:
-                            entries[(currentfile, currententry)] = (time_trig, n_samples)
+                            entries[(currentfile, currententry)] = \
+                                                  (time_trig, n_samples, currentpen, currentsite)
                             #print "Entry %d has %d samples" % (closedentry, n_samples)
                             currententry = None
                     else:
@@ -190,6 +200,8 @@ def readexplog(explog, samplerate=20000):
         (ep.basename, ep.entry) = key
         ep.abstime = obj[0] / msr
         ep.duration = obj[1] / msr
+        ep.pen = obj[2]
+        ep.site = obj[3]
 
         for (time_stim_abs, stim) in stimuli.items():
             if time_stim_abs >= obj[0] and time_stim_abs <= obj[0] + obj[1]:
@@ -205,7 +217,7 @@ def readexplog(explog, samplerate=20000):
 if __name__=="__main__":
     import sys
 
-    if len(sys.argv < 2):
+    if len(sys.argv) < 2:
         print "Usage: explog.py <explogfile>"
     else:
         stimfile = sys.argv[1]
