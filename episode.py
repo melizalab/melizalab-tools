@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
- explog.py - module for processing explog files - extracting labels, associated toe_lis files, etc
+ episode.py - module for episodic data functions. There is a class that
+              represents episodes (i.e. data collection periods in which
+              a stimulus is presented at some fixed offset), and some
+              functions for extracting episode information from explog files
 
  CDM, 9/2006
  
@@ -14,23 +17,87 @@ import re, sys
 class episode:
     """
     The episode structure has fields for storing information about
-    an episode: base filename, entry #, onset time, duration, and a dict of
-    stimuli with their onset times.  This can be easily turned into
-    an lbl file if needed.
+    an episode: base filename, entry #, onset time, duration, stimulus name,
+    and stimulus onset. Multiple stimuli can be stored in a single episode,
+    although currently only onset times are supported.
     """
-    pass
+    __slots__ = ['basename','entry','abstime','duration','stimulus','stim_start']
+
+    def __init__(self, basename=None, entry=None, abstime=None,
+                 duration=None, stimulus=None, stim_start=None):
+        self.basename = basename
+        self.entry = entry
+        self.abstime = abstime
+        self.duration = duration
+        if stimulus: self.stimulus = stimulus
+        else: self.stimulus = []
+        if stim_start: self.stim_start = stim_start
+        else: self.stim_start = []
+
+    def __str__(self):
+        if not self.basename: return None
+        out = "%s_%03d: ABS=%3.3f, DUR=%3.3f" % \
+               (self.basename, self.entry, self.abstime, self.duration)
+        for i in range(self.nstims):
+            out += "\n\tSTIM=%s ON=%3.3f" % (self.stimulus[i], self.stim_start[i])
+        return out
+
+    @property
+    def nstims(self):
+        return len(self.stimulus)
+
+    def addstimulus(self, stimulus, stim_start):
+        """
+        Adds a stimulus to the episode
+        """
+        self.stimulus.append(stimulus)
+        self.stim_start.append(stim_start)
+
+    def readlabel(self, filename):
+        """
+        Imports stimulus onsets from an lbl file. The lbl file doesn't
+        contain any information about the episode name, entry #, or
+        onset/duration, so all this does is append the stimulus onsets
+        found in the lbl file into episode
+        """
+        fp = open(filename,'rt')
+        hdr = True
+        for line in fp:
+            if line.startswith('#'): hdr = False
+            elif not hdr:
+                try:
+                    (time, dummy, name) = line.split()
+                    if name.endswith("-0"):
+                        self.addstimulus(name[:-2], float(time) * 1000)
+                except:
+                    print "Unparseable line in lbl file, skipping"
+
+            
+
+    def writelabel(self, filename):
+        """
+        Writes an episode to a lbl file. Another kludgy format, but
+        used by a lot of programs.
+        """
+        fp = open(filename,'wt')
+        try:
+            fp.write('signal feasd\n')
+            fp.write('type 0\n')
+            fp.write('color 121\n')
+            fp.write('font *-fixed-bold-*-*-*-15-*-*-*-*-*-*-*\n')
+            fp.write('separator ;\n')
+            fp.write('nfields 1\n')
+            fp.write('#\n')
+            for i in range(self.nstims):
+                fp.write("\t%12.6f   121 %s-0\n" % (self.stim_start[i] / 1000.0, self.stimulus[i]))
+        finally:
+            fp.close()
 
 
-
-def getepisodes(explog, multi_stimulus=False, samplerate=20000):
+def readexplog(explog, samplerate=20000):
     """
-    Parses episode information from the explog. Returns a list of dictionaries;
-    each dict contains the base filename (which can be used to look up the
-    pcm_seq2 file or any associated toe_lis files), the entry #, the episode
-    onset and duration (in ms), and the stimulus presented to the animal.
-    If the multi_stimulus argument is False (default), there are stimulus and stim_start
-    keys in the main dictionary; if True, there is a 'stimuli' field which is
-    a dictionary keyed by the stimulus name and with values of the stimulus onset
+    Parses episode information from the explog. Returns a list of episode structures.
+    Sample values are adjusted to real times using the sample rate
     """
 
     currentfile  = None
@@ -116,46 +183,30 @@ def getepisodes(explog, multi_stimulus=False, samplerate=20000):
 
     # done parsing file
     fp.close()
-    #return (entries, stimuli)
 
+    msr = samplerate / 1000    # values are in ms
     for (key, obj) in entries.items():
-        ep = {}
-        (ep['basename'], ep['entry']) = key
-        (ep['onset'], ep['duration']) = obj
-
-        if multi_stimulus:
-            ep['stimuli'] = {}
-        else:
-            ep['stimulus'] = None
-            ep['stim_start'] = None            
+        ep = episode()
+        (ep.basename, ep.entry) = key
+        ep.abstime = obj[0] / msr
+        ep.duration = obj[1] / msr
 
         for (time_stim_abs, stim) in stimuli.items():
             if time_stim_abs >= obj[0] and time_stim_abs <= obj[0] + obj[1]:
-                if multi_stimulus:
-                    ep['stimuli'][stim] = time_stim_abs - obj[0]
-                elif ep['stimulus']:
-                    print "Warning: multiple stimuli for %s, entry %d" % (ep['basename'], ep['entry'])
-                else:
-                    ep['stimulus'] = stim
-                    ep['stim_start'] = time_stim_abs - obj[0]
+                ep.addstimulus(stim, (time_stim_abs - obj[0]) / msr)
         
         episodes.append(ep)
 
     return episodes
 
-# end getepisodes()
-
-def writelabels(episodes):
-    """
-    Writes episodes to disk as label files (which can be read by aplot)
-    """
-    pass
-
-
+# end readexplog()
 
 # test
 if __name__=="__main__":
     import sys
 
-    stimfile = sys.argv[1]
-    z = getepisodes(stimfile)
+    if len(sys.argv < 2):
+        print "Usage: explog.py <explogfile>"
+    else:
+        stimfile = sys.argv[1]
+        z = readexplog(stimfile)

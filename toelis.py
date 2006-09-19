@@ -213,26 +213,30 @@ def writefile(filename, obj):
 
 
 if __name__=="__main__":
-    print "Test empty toelis:"
-    a = toelis(1,1)
-    print a
+
+    import sys
+
+    if len(sys.argv) < 2:
+        print "Usage: toelis.py <toe_lis file>"
+    else:
+        
+        print "Test empty toelis:"
+        a = toelis(1,1)
+        print a
     
-    print "Single unit, single repeat:"
-    a = readfile('st302_2006_09_04_20060904b_015.toe_lis')
-    print a
-    
-    print "Single unit, multiple repeats: "
-    b = readfile('st302_cell_1.toe_lis')
-    print b
+        print "Load file %s " % sys.argv[1]
+        a = readfile(sys.argv[1])
+        print a
 
-    print "Multi unit, single repeat:"
-    c = readfile('st302_2006_09_04_20060904k004.toe_lis')
-    print c
+        print "Extract first unit..."
+        b = a.unit(0)
+        print b
 
-    print "Make a synthetic sequence from 2 copies of c[2,1]:"
-    d = c.unit(2)
-    d.extend(d)
-    print d
+        print "Combine repeats..."
+        b.extend(b)
+        print b
 
-    print "Add -2000 to values in synthetic sequence"
-    d.offset(-2000)
+
+        print "Add -2000 to values..."
+        b.offset(-2000)
+        print b
