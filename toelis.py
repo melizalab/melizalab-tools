@@ -108,6 +108,35 @@ class toelis(list):
         else:
             raise IndexError, "Unit index must be a positive integer"
 
+    def writefile(self, filename):
+        """
+        Writes the data to a toe_lis file. This is (as I've expressed earlier in this file),
+        a horribly kludgy format.  See toelis.loadfile() for a description of the format
+        """
+        # this is much easier to construct in memory
+    
+        output = []
+        l_units = [0]
+        for ui in range(self.nunits):
+            serialized  = serializeunit(self.unit(ui))
+            l_units.append(len(serialized))
+            output.extend(serialized)
+
+        output.insert(0, self.nunits)
+        output.insert(1, self.nrepeats)
+        for ui in range(self.nunits):
+            output.insert(2+ui, 3 + self.nunits + sum(l_units[0:ui+1]))
+
+
+        try:
+            output = map(str, output)
+            fp = open(filename, 'wt')
+            fp.writelines("\n".join(output))
+        finally:
+            fp.close()
+    # end writefile    
+
+
 # end toelis
 
 def readfile(filename):
@@ -182,34 +211,6 @@ def serializeunit(X):
     return output
 # end serializeunit
             
-def writefile(filename, obj):
-    """
-    Writes the data to a toe_lis file. This is (as I've expressed earlier in this file),
-    a horribly kludgy format, so neither function goes in the toelis class. See
-    loadfile for a description of the format
-    """
-    # this is much easier to construct in memory
-    
-    output = []
-    l_units = [0]
-    for ui in range(obj.nunits):
-        serialized  = serializeunit(obj.unit(ui))
-        l_units.append(len(serialized))
-        output.extend(serialized)
-
-    output.insert(0, obj.nunits)
-    output.insert(1, obj.nrepeats)
-    for ui in range(obj.nunits):
-        output.insert(2+ui, 3 + obj.nunits + sum(l_units[0:ui+1]))
-
-
-    try:
-        output = map(str, output)
-        fp = open(filename, 'wt')
-        fp.writelines("\n".join(output))
-    finally:
-        fp.close()
-# end writefile    
 
 
 if __name__=="__main__":
@@ -218,25 +219,25 @@ if __name__=="__main__":
 
     if len(sys.argv) < 2:
         print "Usage: toelis.py <toe_lis file>"
-    else:
+        sys.exit(-1)
         
-        print "Test empty toelis:"
-        a = toelis(1,1)
-        print a
-    
-        print "Load file %s " % sys.argv[1]
-        a = readfile(sys.argv[1])
-        print a
+    print "Test empty toelis:"
+    a = toelis(1,1)
+    print a
 
-        print "Extract first unit..."
-        b = a.unit(0)
-        print b
+    print "Load file %s " % sys.argv[1]
+    a = readfile(sys.argv[1])
+    print a
 
-        print "Combine repeats..."
-        b.extend(b)
-        print b
+    print "Extract first unit..."
+    b = a.unit(0)
+    print b
+
+    print "Combine repeats..."
+    b.extend(b)
+    print b
 
 
-        print "Add -2000 to values..."
-        b.offset(-2000)
-        print b
+    print "Add -2000 to values..."
+    b.offset(-2000)
+    print b
