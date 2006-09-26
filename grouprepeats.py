@@ -8,7 +8,7 @@ grouprepeats.py - a module for grouping the event information in toe_lis
 
 import episode, toelis
 
-def grouprepeats(episodes, basename_list=None, stimulus_list=None):
+def grouprepeats(episodes):
     """
     
     Group repeats by stimulus and basename. Collects all the toe_lis
@@ -26,12 +26,8 @@ def grouprepeats(episodes, basename_list=None, stimulus_list=None):
     stimulus.
     """
 
-
     # need unique basenames, since we do this analysis on a per-site basis
     basenames = set([ep.basename for ep in episodes])
-    if basename_list:
-        basenames = basenames & \
-                    (isinstance(basename_list,str) and set([basename_list]) or set(basename_list))
 
     tl_dict = {}
     for basename in basenames:
@@ -39,13 +35,13 @@ def grouprepeats(episodes, basename_list=None, stimulus_list=None):
         bn_episodes = [ep for ep in episodes if ep.basename==basename]
 
 
-        tl_dict[basename] = groupstimuli(bn_episodes, stimulus_list)
+        tl_dict[basename] = groupstimuli(bn_episodes)
 
     return tl_dict
 # end grouprepeats
 
 
-def groupstimuli(episodes, stimulus_list=None):
+def groupstimuli(episodes):
     """
     This function groups all the toelis data for stimuli in the supplied
     episodes argument, ignoring basenames. By default, all stimuli will be
@@ -53,16 +49,11 @@ def groupstimuli(episodes, stimulus_list=None):
 
     Returns a dictionary of toelis objects, keyed by stimulus name
     """
-    # wrap the stimulus_list if needed
-    if stimulus_list:
-        stimulus_list = isinstance(stimulus_list,str) and set([stimulus_list]) or set(stimulus_list)
 
     # determine unique stimuli
     def add(x,y): return x+y
     stimuli  = reduce(add, [ep.stimulus for ep in episodes])
     stimuli  = set(stimuli)
-    if stimulus_list:
-        stimuli = stimuli & stimulus_list
 
     tl_dict = {}
     for stimulus in stimuli:
@@ -98,7 +89,45 @@ def groupstimuli(episodes, stimulus_list=None):
     return tl_dict
 # end groupstimuli
 
+def filterepisodes(episodes, basename_list=None, stimulus_list=None,
+                   start_entry=None, stop_entry=None):
+    """
+    This function allows filtering on a variety of fields in the episode
+    structure.  basename_list and stimulus_list must be None, in which
+    case no filtering occurs, or an iterable, in which case the episodes
+    not matching those constraints are rejected.
 
+    start_entry and stop_entry are also ignored if they are None, but
+    their behavior is somewhat unique.  Rather than applying to all
+    basenames, they only apply to the first and last, alphabetically.
+    This is to allow filtering 'in' of experiments that don't begin or
+    end on a basename boundary.  So to include episodes from ZZZb_004 to
+    ZZZd_007, set basename_list to ['ZZZb','ZZZc','ZZZd'], start_entry
+    to 4, and stop_entry to 7
+    """
+    # wrap lists in sets before filtering
+    if basename_list:
+        basename_list = (isinstance(basename_list,str) and set([basename_list]) or set(basename_list))
+        episodes = [ep for ep in episodes if ep.basename in basename_list]
+
+        if start_entry:
+            # can't sort a set
+            bn = list(basename_list)
+            bn.sort()
+            episodes = [ep for ep in episodes if not (ep.basename==bn[0] and ep.entry < start_entry)]
+        if stop_entry:
+            bn = list(basename_list)
+            bn.sort()
+            episodes = [ep for ep in episodes if not (ep.basename==bn[-1] and ep.entry > stop_entry)]
+            
+
+    if stimulus_list:
+        stimulus_list = (isinstance(stimulus_list,str)) and set([stimulus_list]) or set(stimulus_list)
+        episodes = [ep for ep in episodes if ep.stimulus in stimulus_list]
+
+    return episodes
+
+    
 
 
 if __name__=="__main__":
@@ -107,13 +136,25 @@ if __name__=="__main__":
 
     def usage():
         print "Usage: grouprepeats.py [--file=\"...\"] [--stimulus=\"...\"] "
+        print "                       [--start=1] [--stop=N] "
         print "                       [--allfiles [--basename=<basename>]] <explog>\n"
+        
         print "       --file specifies which files to include in the grouping."
         print "       Supply a comma-delimited list of basenames to include, e.g."
         print "       --file='st302_20060904b, st302_20060904c'\n"
-        print "       --stimulus specifies which stimuli to include in the grouping."
+        
+        print "       --stimulus specifies which stimuli to include in the grouping"
+        print "       (otherwise all stimuli are processed)"
         print "       Supply a comma-delimited list of the stimuli, without extensions, e.g."
         print "       --stimulus='A,B,C' (single or double quotes required)\n"
+
+        print "       --start and --stop control which entries will be included. This"
+        print "       is useful if you didn't type site at the start of a recording."
+        print "       For example, '--file='ZZZb' --start=4' will analyze all the toe_lis"
+        print "       files from ZZZb_004 to the end of ZZZb.  "
+        print "       '--file='ZZZb,ZZZc' --start=4 --stop=44' will analyze from ZZZb_004"
+        print "       to ZZZc_044.\n"
+        
         print "       The --allfiles flag instructs grouprepeats to group only by stimulus."
         print "       By default, output is grouped by basename and stimulus, and the "
         print "       output files have the name '<basename>_<stimulus>.toe_lis'; if this"
@@ -125,7 +166,7 @@ if __name__=="__main__":
     if len(sys.argv) < 2: usage()
     
     opts, args = getopt.getopt(sys.argv[1:], "h", \
-                               ["basename=", "stimulus=", "help", "allfiles", "file="])
+                               ["basename=", "stimulus=", "help", "allfiles", "file=", "start=", "stop="])
 
     opts = dict(opts)
     if opts.get('-h') or opts.get('--help'): usage()
@@ -138,12 +179,18 @@ if __name__=="__main__":
     file_list = None
     stimulus_list = None
     custom_basename = None
+    start_entry = None
+    stop_entry = None
     allfiles = False
     for o,a in opts.items():
         if o == '--file':
             file_list = map(trim, a.split(','))
         elif o == '--stimulus':
             stimulus_list = map(trim, a.split(','))
+        elif o == '--start':
+            start_entry = int(a)
+        elif o == '--stop':
+            stop_entry = int(a)
         elif o == '--allfiles':
             allfiles = True
         elif o == '--basename':
@@ -151,9 +198,10 @@ if __name__=="__main__":
 
     # read in episodes
     episodes = episode.readexplog(args[0])
+    episodes = filterepisodes(episodes, file_list, stimulus_list, start_entry, stop_entry)
 
     if not allfiles:
-        tl_dict = grouprepeats(episodes, file_list, stimulus_list)
+        tl_dict = grouprepeats(episodes)
         for (basename, obj) in tl_dict.items():
             for (stimname, tl) in obj.items():
                 if tl:
@@ -165,7 +213,7 @@ if __name__=="__main__":
         if file_list:
             file_list = (isinstance(file_list,str) and set([file_list]) or set(file_list))
             episodes = [ep for ep in episodes if ep.basename in file_list]
-        tl_dict = groupstimuli(episodes, stimulus_list)
+        tl_dict = groupstimuli(episodes)
         for (stimname, tl) in tl_dict.items():
             if tl:
                 if custom_basename:
