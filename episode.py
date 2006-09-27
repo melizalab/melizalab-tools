@@ -203,8 +203,7 @@ def readexplog(explog, samplerate=20000):
                 # the untriggered stimuli will get discarded
                 if stimname.startswith('File='):
                     stimname = stimname[5:]
-                if currentfile:
-                    stimuli[time_stim_abs] = stimname # (stimname, time_stim_rel)
+                stimuli[time_stim_abs] = stimname # (stimname, time_stim_rel)
             else:
                 print "Error: Unparseable QQQQ line: %s" % line
 
