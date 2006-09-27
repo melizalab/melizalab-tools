@@ -100,6 +100,8 @@ def readexplog(explog, samplerate=20000):
     currententry = None
     currentpen   = None
     currentsite  = None
+    lastabs      = 0
+    absoffset    = 0
     entries = {}
     stimuli = {}
     episodes = []
@@ -118,6 +120,7 @@ def readexplog(explog, samplerate=20000):
     # which entry they belong to later. So two tables are created, one keyed by
     # filename/entry with the start and stop times of each recording, and the
     # other keyed by the absolute start time of the stimuli
+
 
     fp = open(explog)
     line_num = 0
@@ -146,29 +149,42 @@ def readexplog(explog, samplerate=20000):
             elif m2:
                 currentsite = m2.group('site')
 
+        # when saber quits or stop/starts, the abstime gets reset. Since stimuli are matched with triggers
+        # by abstime, this can result in stimuli getting assigned to episodes deep in the past
+        # The workaround for this is to maintain an offset that gets set to the most recent
+        # abstime whenever a quit event is detected
+        if line.startswith('%%%%'):
+            if line.rstrip().endswith('start'):
+                absoffset = lastabs
+
+
         # trigger lines
         if line.startswith("TTTT"):
             try:
-                if not currentfile:
-                    print "Error: found trigger but don't know the base filename"
-                else:
-                    m1 = reg_triggeron.search(line)
-                    m2 = reg_triggeroff.search(line)
-                    if m1:
-                        currententry = int(m1.group('entry'))
-                        time_trig = int(m1.group('onset'))
-                        #print "Entry %d starts %d" % (currententry, time_trig)
-                    elif m2:
-                        closedentry = int(m2.group('entry'))
-                        n_samples = int(m2.group('samples'))
-                        if not closedentry==currententry:
-                            print "Error: found TRIG_OFF for entry %d, but missed TRIG_ON" % closedentry
-                        else:
-                            entries[(currentfile, currententry)] = \
-                                                  (time_trig, n_samples, currentpen, currentsite)
-                            #print "Entry %d has %d samples" % (closedentry, n_samples)
-                            currententry = None
+                m1 = reg_triggeron.search(line)
+                m2 = reg_triggeroff.search(line)
+                if m1:
+                    currententry = int(m1.group('entry'))
+                    time_trig = int(m1.group('onset')) + absoffset
+                    lastabs = time_trig
+                    #print "Entry %d starts %d" % (currententry, time_trig)
+                elif m2:
+                    closedentry = int(m2.group('entry'))
+                    n_samples = int(m2.group('samples'))
+                    if not closedentry==currententry:
+                        print "Error: found TRIG_OFF for entry %d, but missed TRIG_ON (line %d)" % \
+                              (closedentry, line_num)
+                    elif not currentfile:
+                        # we check to see if there's a file HERE because saber
+                        # occasionally fails to write the FFFF line before TRIG_ON
+                        print "Error: found entry %d but don't know the base filename (line %d)" % \
+                              (closedentry, line_num)
                     else:
+                        entries[(currentfile, currententry)] = \
+                                              (time_trig, n_samples, currentpen, currentsite)
+                        #print "Entry %d has %d samples" % (closedentry, n_samples)
+                        currententry = None
+                else:
                         print "Error: Unparseable TTTT line (%d): %s" % (line_num, line)
             except ValueError: 
                 print "Error parsing value (line %d): %s" % (line_num, line)
@@ -179,7 +195,8 @@ def readexplog(explog, samplerate=20000):
             m1 = reg_stimulus.search(line)
             if m1:
                 time_stim_rel = float(m1.group('rel'))
-                time_stim_abs = int(m1.group('abs'))
+                time_stim_abs = int(m1.group('abs')) + absoffset
+                lastabs = time_stim_abs
                 stimname = m1.group('stim')
                 # is it only triggered stimuli that start with "File="?
                 # I'm going to leave this as general as possible at some memory cost;

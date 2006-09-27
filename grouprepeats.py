@@ -69,6 +69,7 @@ def groupstimuli(episodes):
         toelises = None
         entries = []
         for ep in st_episodes:
+            #entries.append("%s_%03d" % (ep.basename, ep.entry))
             entries.append(ep.entry)
             toelis_name = "%s_%03d.toe_lis" % (ep.basename, ep.entry)
             try:
