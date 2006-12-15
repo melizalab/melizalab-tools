@@ -6,6 +6,7 @@
  CDM, 9/2006
  
 """
+from Numeric import arange, searchsorted, concatenate, sort
 
 class toelis(list):
     """
@@ -195,8 +196,29 @@ class toelis(list):
             y.extend([ri for i in range(nevents)])
             x.extend(X[0,ri])
         return (x,y)
+
+    def histogram(self, unit=0, binsize=20., normalize=False):
+        """
+        Converts the response data to a frequency histogram, i.e.
+        the number of events in a time bin. Returns a tuple
+        with the time bins and the frequencies
+        """
+        d = []
+        for ri in range(self.nrepeats):
+            d.extend(self[(unit,ri)])
+
+        binsize = float(binsize)
+        min_t = min(d)
+        max_t = max(d)
+        bins = arange(min_t, max_t + 2*binsize, binsize)  
+        n = searchsorted(sort(d), bins)
+        n = concatenate([n, [len(d)]])
+        freq = n[1:]-n[:-1]
+        if normalize:
+            freq = freq / float(self.nrepeats)
+        return (bins, freq)
         
-            
+        
 
 # end toelis
 
