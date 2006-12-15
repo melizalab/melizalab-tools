@@ -22,20 +22,51 @@ class toelis(list):
     """
 
 
-    def __init__(self, nunits=1, nrepeats=1):
+    def __init__(self, data=None, nunits=1, nrepeats=1):
         """
         Constructs the toelis object. Data is represented by a bunch
         of nested lists. The outer list has N elements, one for
         each repeat; each element contains M elements, one for each
         unit; and each of these elements contains a list of
-        event times.  Initialize with the dimensions of the toelis,
-        or with another list (which must be nested two levels deep,
-        although this isn't checked on construction)
+        event times.
+        The object can be initialized empty or with data;
+        
+        If the data is two-dimensional the size of this object
+        will be adjusted to match it.
+
+        If the data is one-dimensional, we try to adjust the size
+        of the object. By default the elements of <data> are considered
+        separate repeats; to change this, set nunits > 1.  If both
+        nunits and nrepeats are > 1, the data are reshaped (unit-major),
+        with extra elements discarded.
+
         """
-        if isinstance(nunits, list):
-            list.__init__(self, nunits)
+
+        if data:
+            dim = nestedarray_dim(data)
+            if dim == 0:
+                raise ValueError, "Input data must be a list"
+            elif dim >= 2:
+                list.__init__(self, data)
+            elif dim == 1:
+                if nunits==1:
+                    list.__init__(self, [[atom] for atom in data])
+                elif nrepeats==1:
+                    list.__init__(self, [[[atom]] for atom in data])
+                else:
+                    list.__init__(self, [[[] for i in range(nunits)] for j in range(nrepeats)])
+                    natoms = len(data)
+                    i = j = 0
+                    for atom in data:
+                        self.__setitem__((i,j), data)
+                        j += 1
+                        if (j > nrepeats):
+                            j = 0
+                            i += 1
+                        if (i > nunits):
+                            break
         else:
-            list.__init__(self, [[[] for i in range(nunits)] for j in range(nrepeats)])
+            list.__init__(self, [[[] for i in range(nunits)] for j in range(nrepeats)])            
 
 
     def __getitem__(self, index):
@@ -104,9 +135,23 @@ class toelis(list):
         
         """
         if type(units)==int:
-            return toelis([[a[units]] for a in self])
+            return toelis(data=[[a[units]] for a in self])
         else:
             raise IndexError, "Unit index must be a positive integer"
+
+    def __serializeunit(self, unit):
+        """
+        Generates a serialized representation of all the repeats in a unit.
+        """
+        output = []
+        X = self.unit(unit)
+        for ri in range(X.nrepeats):
+            events = X[0,ri]
+            output.insert(ri, len(events))
+            output.extend(events)
+        return output
+    # end serializeunit
+
 
     def writefile(self, filename):
         """
@@ -118,7 +163,7 @@ class toelis(list):
         output = []
         l_units = [0]
         for ui in range(self.nunits):
-            serialized  = serializeunit(self.unit(ui))
+            serialized  = self.__serializeunit(ui)
             l_units.append(len(serialized))
             output.extend(serialized)
 
@@ -136,6 +181,22 @@ class toelis(list):
             fp.close()
     # end writefile    
 
+    def rasterpoints(self, unit=0):
+        """
+        Rasterizes the data from a unit as a collection of x,y points,
+        with the x position determined by the event time and the y position
+        determined by the repeat index. Returns a tuple of lists, (x,y)
+        """
+        x = []
+        y = []
+        X = self.unit(unit)
+        for ri in range(self.nrepeats):
+            nevents = len(X[0,ri])
+            y.extend([ri for i in range(nevents)])
+            x.extend(X[0,ri])
+        return (x,y)
+        
+            
 
 # end toelis
 
@@ -169,7 +230,7 @@ def readfile(filename):
             n_repeats = int(line)
             #print "n_repeats: %d" % n_repeats
             # once we know n_units and n_repeats, initialize the output object
-            out = toelis(n_units, n_repeats)
+            out = toelis(None, n_units, n_repeats)
             #print "initialized toelis: %s" % out
         elif len(p_units) < n_units:
             # scan in pointers to unit starts until we have n_units
@@ -201,17 +262,26 @@ def readfile(filename):
     fp.close()
     return out
 # end readfile
-
-def serializeunit(X):
-    output = []
-    for ri in range(X.nrepeats):
-        events = X[0,ri]   
-        output.insert(ri, len(events))
-        output.extend(events)
-    return output
-# end serializeunit
             
-
+def nestedarray_dim(X, dim=0):
+    """
+    Returns the dimensionality of a nested array. The atoms can be
+    any type, but things get complicated if they're lists.  Basically
+    the way we tell if we're dealing with an array dimension is
+    if all the components are lists and they all have the same size
+    """
+    if not isinstance(X, list) or len(X)==0:
+        return dim
+    szatom = None
+    for atom in X:
+        if not isinstance(atom, list):
+            return dim + 1
+        elif not szatom:
+            szatom = len(atom)
+        elif not szatom == len(atom):
+            return dim + 1
+    # all components are lists and have the same size, recurse
+    return nestedarray_dim(X[0], dim + 1)
 
 if __name__=="__main__":
 
@@ -219,25 +289,25 @@ if __name__=="__main__":
 
     if len(sys.argv) < 2:
         print "Usage: toelis.py <toe_lis file>"
-        sys.exit(-1)
-        
-    print "Test empty toelis:"
-    a = toelis(1,1)
-    print a
+    else:
 
-    print "Load file %s " % sys.argv[1]
-    a = readfile(sys.argv[1])
-    print a
+        print "Test empty toelis:"
+        a = toelis(nunits=1,nrepeats=1)
+        print a
 
-    print "Extract first unit..."
-    b = a.unit(0)
-    print b
+        print "Load file %s " % sys.argv[1]
+        a = readfile(sys.argv[1])
+        print a
 
-    print "Combine repeats..."
-    b.extend(b)
-    print b
+        print "Extract first unit..."
+        b = a.unit(0)
+        print b
+
+        print "Combine repeats..."
+        b.extend(b)
+        print b
 
 
-    print "Add -2000 to values..."
-    b.offset(-2000)
-    print b
+        print "Add -2000 to values..."
+        b.offset(-2000)
+        print b
