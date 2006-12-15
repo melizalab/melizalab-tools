@@ -135,7 +135,7 @@ def readexplog(explog, samplerate=20000):
                 elif line.rstrip().endswith("closed"):
                     currentfile = None
                 else:
-                    print "Error: Unparseable FFFF line (%d): %s" % (line_num, line)
+                    print "parse error: Unparseable FFFF line (%d): %s" % (line_num, line)
             except:
                 print "Error parsing line (%d): %s" % (line_num, line)
                 print sys.exc_info()[0]
@@ -172,12 +172,12 @@ def readexplog(explog, samplerate=20000):
                     closedentry = int(m2.group('entry'))
                     n_samples = int(m2.group('samples'))
                     if not closedentry==currententry:
-                        print "Error: found TRIG_OFF for entry %d, but missed TRIG_ON (line %d)" % \
+                        print "parse error: found TRIG_OFF for entry %d, but missed TRIG_ON (line %d)" % \
                               (closedentry, line_num)
                     elif not currentfile:
                         # we check to see if there's a file HERE because saber
                         # occasionally fails to write the FFFF line before TRIG_ON
-                        print "Error: found entry %d but don't know the base filename (line %d)" % \
+                        print "parse error: found entry %d but don't know the base filename (line %d)" % \
                               (closedentry, line_num)
                     else:
                         entries[(currentfile, currententry)] = \
@@ -185,7 +185,7 @@ def readexplog(explog, samplerate=20000):
                         #print "Entry %d has %d samples" % (closedentry, n_samples)
                         currententry = None
                 else:
-                        print "Error: Unparseable TTTT line (%d): %s" % (line_num, line)
+                        print "parse error: Unparseable TTTT line (%d): %s" % (line_num, line)
             except ValueError: 
                 print "Error parsing value (line %d): %s" % (line_num, line)
 
@@ -205,7 +205,7 @@ def readexplog(explog, samplerate=20000):
                     stimname = stimname[5:]
                 stimuli[time_stim_abs] = stimname # (stimname, time_stim_rel)
             else:
-                print "Error: Unparseable QQQQ line: %s" % line
+                print "parse error: Unparseable QQQQ line: %s" % line
 
     # done parsing file
     fp.close()

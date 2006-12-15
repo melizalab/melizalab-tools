@@ -200,6 +200,9 @@ if __name__=="__main__":
     # read in episodes
     episodes = episode.readexplog(args[0])
     episodes = filterepisodes(episodes, file_list, stimulus_list, start_entry, stop_entry)
+    if not len(episodes):
+        print "ERROR: The query (--file & --stimulus) does not refer to any valid episodes"
+        sys.exit(-1)
 
     if not allfiles:
         tl_dict = grouprepeats(episodes)
@@ -208,12 +211,9 @@ if __name__=="__main__":
                 if tl:
                     toelis_name = "%s_%s.toe_lis" % (basename, stimname)
                     tl.writefile(toelis_name)
-                    print "Wrote combined repeats to %s" % toelis_name
+                    
     else:
-        # filter episodes on file_list here
-        if file_list:
-            file_list = (isinstance(file_list,str) and set([file_list]) or set(file_list))
-            episodes = [ep for ep in episodes if ep.basename in file_list]
+        print "Processing repeats for all files:"
         tl_dict = groupstimuli(episodes)
         for (stimname, tl) in tl_dict.items():
             if tl:
@@ -223,7 +223,7 @@ if __name__=="__main__":
                     toelis_name = "%s.toe_lis" % stimname
                     
                 tl.writefile(toelis_name)
-                print "Wrote combined repeats to %s" % toelis_name
+
     print "Done!"
                 
         
