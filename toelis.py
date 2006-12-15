@@ -6,7 +6,7 @@
  CDM, 9/2006
  
 """
-from Numeric import arange, searchsorted, concatenate, sort
+from numpy import arange, searchsorted, concatenate, sort
 
 class toelis(list):
     """
