@@ -6,9 +6,9 @@
  CDM, 9/2006
  
 """
-from numpy import arange, searchsorted, concatenate, sort
+import numpy
 
-class toelis(list):
+class toelis(object):
     """
     A toelis object represents a collection of events. Each event is
     simply a scalar time offset.  Events can be associated with a particular
@@ -16,138 +16,148 @@ class toelis(list):
     identical stimulus).  Frankly I think this is too much generality,
     but there's a lot of software that uses these things, so it's what
     I have to work with.
-
-    Some may also wonder why I index unit-major but store repeat-major;
-    this is simply to facilitate merges between toelis objects to create
-    multi-repeat objects.
     """
 
 
-    def __init__(self, data=None, nunits=1, nrepeats=1):
+    def __init__(self, data=None, nrepeats=1, nunits=1):
         """
-        Constructs the toelis object. Data is represented by a bunch
-        of nested lists. The outer list has N elements, one for
-        each repeat; each element contains M elements, one for each
-        unit; and each of these elements contains a list of
-        event times.
-        The object can be initialized empty or with data;
-        
-        If the data is two-dimensional the size of this object
-        will be adjusted to match it.
+        Constructs the toelis object. Events are stored in a list
+        of lists, and these lists are indexed in a nrepeats x nunits
+        array of integers.
 
-        If the data is one-dimensional, we try to adjust the size
-        of the object. By default the elements of <data> are considered
-        separate repeats; to change this, set nunits > 1.  If both
-        nunits and nrepeats are > 1, the data are reshaped (unit-major),
-        with extra elements discarded.
+        The object can be initialized empty or with data, which
+        can be a list of lists.  The <nunits> and <nrepeats>
+        parameters can be used to reshape the 1D data.
 
         """
 
         if data:
-            dim = nestedarray_dim(data)
-            if dim == 0:
-                raise ValueError, "Input data must be a list"
-            elif dim >= 2:
-                list.__init__(self, data)
-            elif dim == 1:
-                if nunits==1:
-                    list.__init__(self, [[atom] for atom in data])
-                elif nrepeats==1:
-                    list.__init__(self, [[[atom]] for atom in data])
-                else:
-                    list.__init__(self, [[[] for i in range(nunits)] for j in range(nrepeats)])
-                    natoms = len(data)
-                    i = j = 0
-                    for atom in data:
-                        self.__setitem__((i,j), data)
-                        j += 1
-                        if (j > nrepeats):
-                            j = 0
-                            i += 1
-                        if (i > nunits):
-                            break
+            for item in data:
+                if not isinstance(item, (list, tuple)):
+                    raise ValueError, "Input data must be a list"
+
+            nitems = len(data)
+            self.index = numpy.arange(nitems)
+            if nunits==1 and nrepeats==1:
+                nrepeats = nitems
+            if not (nunits * nrepeats == len(data)):
+                raise IndexError, "Number of units and repeats do not add up to data length (%d)" \
+                      % len(data)
+            
+            self.index.shape = (nrepeats, nunits)
+            self.events = data
+            
         else:
-            list.__init__(self, [[[] for i in range(nunits)] for j in range(nrepeats)])            
+            nlists = nrepeats * nunits
+            self.index = numpy.arange(nlists)
+            self.index.shape = (nrepeats, nunits)
+            self.events = [[] for i in range(nlists)]
 
 
     def __getitem__(self, index):
         """
-        Retrieves an event list by a 2-ple (iunit, irepeat). If
-        only a single integer is given, you get the repeat (since
-        this is the major index of the storage)
+        Retrieves an event list by a 2-ple (irepeat, iunit). If
+        only a single integer is given, the event lists are
+        returned in the order stored.
         """
-        if type(index)==int:
-            return list.__getitem__(self, index)
+        if isinstance(index, int):
+            return self.events[index]
         else:
-            return list.__getitem__(self, index[1])[index[0]]
+            id = self.index[index]
+            if id > -1:
+                return self.events[id]
+            else:
+                return []
 
     def __setitem__(self, index, value):
         """
-        Sets the value of an event, indexed by unit, repeat tuple
+        Sets the value of an event list. Index a single elist if indexed
+        by (irepeat, iunit); if indexed by a single integer, accesses
+        the event list storage.
         """
-        if type(index)==int:
-            raise IndexError, "index by (unit, repeat)"
-
-        list.__getitem__(self, index[1])[index[0]] = value
+        if isinstance(index, int):
+            if index > len(self):
+                raise IndexError, "Index out of range."
+            else:
+                self.events[index] = value
+        else:
+            id = self.index[index]
+            self.events[id] = value
 
     def offset(self, offset):
         """
         Adds a fixed offset to all the time values in the object.
         """
-        if not type(offset) in (int, float):
+        if not isinstance(offset,(int, float)):
             raise TypeError, " can only add scalars to toelis events"
-        for ri in range(self.nrepeats):
-            for ui in range(self.nunits):
-                self[ui,ri] = [a + offset for a in self[ui,ri]]
+        for el in self.events:
+            el = [a + offset for a in el]
                 
 
     def __str__(self):
-        return "toelis: (%d units, %d repeats)" % self.size
+        return "toelis: (%d repeats, %d repeats)" % self.size
+
+    def __len__(self):
+        return len(self.events)
 
     @property
     def size(self):
         """
         Returns the size of the object (a 2-ple)
         """
-        return (self.nunits, self.nrepeats)
+        return self.index.shape
 
     @property
     def nunits(self):
-        return len(list.__getitem__(self, 0))
+        return self.index.shape[1]
     
     @property
     def nrepeats(self):
-        return self.__len__()
+        return self.index.shape[0]
 
-    def extend(self, newlis):
+    @property
+    def range(self):
         """
-        Merges two toelis objects into a single multi-repeat toelis. This
-        can only be done along the repeat dimension, and the two toelis
-        objects must have the same number of units
+        The range of event times in the toelis
         """
-        if not self.nunits == newlis.nunits:
-            raise ValueError, "toelis objects must have same # of units to merge"
+        minx = []
+        maxx = []
+        for el in self:
+            minx.append(min(el))
+            maxx.append(max(el))
+            
+        return (min(minx), max(maxx))
 
-        list.extend(self, newlis)
 
-    def unit(self, units):
+    def extend(self, newlis, dim=0):
         """
-        Retrieves a single unit from the toelis object
-        
+        Concatenates two toelis objects along a dimension. By default, the second
+        toelis is treated as more repeats, but set <dim> to 1 to treat them as additional
+        units.
         """
-        if type(units)==int:
-            return toelis(data=[[a[units]] for a in self])
-        else:
-            raise IndexError, "Unit index must be a positive integer"
+        if not self.size[(1 - dim)]==newlis.size[(1 - dim)]:
+            raise ValueError, "Dimensions do not match for merging along dim %d " % dim
+
+        offset = len(self)
+        self.index = numpy.concatenate((self.index, newlis.index + offset))
+        self.events.extend(newlis.events)
+
+    def unit(self, unit):
+        """
+        Retrieves a single unit from the toelis object (as a new toelis)
+        """
+        id = self.index[:,unit]
+        return toelis(data=[self.events[i] for i in id])
+
 
     def __serializeunit(self, unit):
         """
         Generates a serialized representation of all the repeats in a unit.
         """
         output = []
-        X = self.unit(unit)
-        for ri in range(X.nrepeats):
-            events = X[0,ri]
+        id = self.index[:,unit]
+        for ri in range(len(id)):
+            events = self.events[id[ri]]
             output.insert(ri, len(events))
             output.extend(events)
         return output
@@ -180,7 +190,7 @@ class toelis(list):
             fp.writelines("\n".join(output))
         finally:
             fp.close()
-    # end writefile    
+    # end writefile
 
     def rasterpoints(self, unit=0):
         """
@@ -190,12 +200,14 @@ class toelis(list):
         """
         x = []
         y = []
-        X = self.unit(unit)
-        for ri in range(self.nrepeats):
-            nevents = len(X[0,ri])
-            y.extend([ri for i in range(nevents)])
-            x.extend(X[0,ri])
+        repnum = 0
+        for ri in self.index[:,unit]:
+            nevents = len(self.events[ri])
+            y.extend([repnum for i in range(nevents)])
+            x.extend(self.events[ri])
+            repnum += 1
         return (x,y)
+
 
     def histogram(self, unit=0, binsize=20., normalize=False):
         """
@@ -203,16 +215,14 @@ class toelis(list):
         the number of events in a time bin. Returns a tuple
         with the time bins and the frequencies
         """
-        d = []
-        for ri in range(self.nrepeats):
-            d.extend(self[(unit,ri)])
+        d = concatenate([self.events[ri] for ri in self.index[:,unit]])
 
         binsize = float(binsize)
         min_t = min(d)
         max_t = max(d)
-        bins = arange(min_t, max_t + 2*binsize, binsize)  
-        n = searchsorted(sort(d), bins)
-        n = concatenate([n, [len(d)]])
+        bins = numpy.arange(min_t, max_t + 2*binsize, binsize)  
+        n = numpy.searchsorted(sort(d), bins)
+        n = numpy.concatenate([n, [len(d)]])
         freq = n[1:]-n[:-1]
         if normalize:
             freq = freq / float(self.nrepeats)
@@ -252,7 +262,7 @@ def readfile(filename):
             n_repeats = int(line)
             #print "n_repeats: %d" % n_repeats
             # once we know n_units and n_repeats, initialize the output object
-            out = toelis(None, n_units, n_repeats)
+            out = toelis(None, nunits=n_units, nrepeats=n_repeats)
             #print "initialized toelis: %s" % out
         elif len(p_units) < n_units:
             # scan in pointers to unit starts until we have n_units
@@ -277,33 +287,13 @@ def readfile(filename):
             # now set the current_repeat index and read in a float
             current_repeat = p_repeats.index(linenum)
             #print "Start unit %d, repeat %d data at line %d" % (current_unit, current_repeat, linenum)
-            out[current_unit, current_repeat].append(float(line))
+            out[(current_repeat, current_unit)].append(float(line))
         else:
-            out[current_unit, current_repeat].append(float(line))
+            out[(current_repeat, current_unit)].append(float(line))
 
     fp.close()
     return out
 # end readfile
-            
-def nestedarray_dim(X, dim=0):
-    """
-    Returns the dimensionality of a nested array. The atoms can be
-    any type, but things get complicated if they're lists.  Basically
-    the way we tell if we're dealing with an array dimension is
-    if all the components are lists and they all have the same size
-    """
-    if not isinstance(X, list) or len(X)==0:
-        return dim
-    szatom = None
-    for atom in X:
-        if not isinstance(atom, list):
-            return dim + 1
-        elif not szatom:
-            szatom = len(atom)
-        elif not szatom == len(atom):
-            return dim + 1
-    # all components are lists and have the same size, recurse
-    return nestedarray_dim(X[0], dim + 1)
 
 if __name__=="__main__":
 
@@ -318,11 +308,15 @@ if __name__=="__main__":
         print a
 
         print "Load file %s " % sys.argv[1]
-        a = readfile(sys.argv[1])
-        print a
+        b = readfile(sys.argv[1])
+        print b
 
+        print "Add empty toelis..."
+        b.extend(a)
+        print b
+        
         print "Extract first unit..."
-        b = a.unit(0)
+        b = b.unit(0)
         print b
 
         print "Combine repeats..."
