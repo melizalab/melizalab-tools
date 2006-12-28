@@ -90,8 +90,8 @@ class toelis(object):
         """
         if not isinstance(offset,(int, float)):
             raise TypeError, " can only add scalars to toelis events"
-        for el in self.events:
-            el = [a + offset for a in el]
+        for i in range(len(self.events)):
+            self.events[i] = numpy.asarray(self.events[i]) + offset
                 
 
     def __str__(self):
