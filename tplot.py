@@ -98,16 +98,26 @@ if __name__=="__main__":
     # now plot it
     nplots = len(plotdata)
     g = Gnuplot(persist=1)
-    g("set multiplot layout %d,1" % nplots)
+    #g("set multiplot layout %d,1" % nplots)
+    g('set multiplot')
+    g('set mouse')
     g("set format x ''")
+    g('set lmargin 7; set tmargin 0; set bmargin 0')
+    #g('set rmargin 7')
+    y = .975
+    ystep = (y - 0.1) / nplots
     for i in range(nplots):
         (data, plotfun, title) = plotdata[i]
         if i == (nplots - 1):
             g("set format x")
             g.xlabel("Time (ms)")
 
+        #g("set tmargin screen %f" % y)
+        #g("set lmargin screen %f" % (y - ystep))
+        g("set origin 0, %f; set size 1.0, %f" % (y - ystep, ystep))
+          
+        y = y - ystep
         #g.title(title, offset=(0,-1))
-        g("set y2label '%s' " % title)
-        g("set lmargin 7")
+        #g("set y2label '%s' " % title)
         g = plotfun(data, g)
     
