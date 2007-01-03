@@ -27,6 +27,7 @@ makesequence.py [-m map.info] [-g 100] <motif1> <motif2> <motif3> ...
 """
 
 import os
+from motifdb import motifdb
 
 class sequencer(object):
     """
@@ -41,22 +42,12 @@ class sequencer(object):
     def __init__(self, map, motif_dir=None):
         """
         Initialize the sequencer with a motif map and a motif location.
-        map can be a python dictionary or a mapfile location
+        map can be a python dictionary or a mapfile location.
         """
 
         self.motif_dir = motif_dir
+        self.map = motifdb(map)
         
-        if isinstance(map,dict):
-            self.map = map
-        else:
-            self.map = self.__parsemapfile(map)
-
-    def __getitem__(self, key):
-        """
-        Returns the location of the soundfile for a symbol
-        """
-        #return os.path.join(self.motif_dir, self.map[key])
-        return self.map[key]
 
     def sequence(self, seq, prepend=100):
         """
@@ -73,7 +64,7 @@ class sequencer(object):
 
         file = ""
         for sym in seq:
-            cmd += " %s" % self[sym]
+            cmd += " %s" % self.map[sym]
             file += "%s%s" % (sym, self._file_delim)
         file = file[0:-1] + ".pcm"
         cmd += " " + file
@@ -91,31 +82,6 @@ class sequencer(object):
             if len(line.strip())==0 or line[0]=='#': continue
             self.sequence(line.split(), prepend)
 
-
-
-    def __parsemapfile(self, mapfile):
-        """
-        Reads in data from a map file. This is a simple tab-delimited file,
-        with the motif name in the first field and the file in the second.
-        Blank and comment lines ignored
-        """
-        fp = open(mapfile, 'rt')
-        map = {}
-        for line in fp:
-            if len(line.strip())==0 or line[0]=='#': continue
-            fields = line.split()
-            if len(fields)==1:
-                if os.path.exists(fields[0]):
-                    self.motif_dir = fields[0]
-                else:
-                    print "No such directory %s, ignoring" % fields[0]
-            else:
-                if not os.path.isabs(fields[1]) and self.motif_dir:
-                    fields[1] = os.path.join(self.motif_dir, fields[1])
-
-                map[fields[0]] = fields[1]
-
-        return map
             
 if __name__=="__main__":
 
@@ -147,6 +113,9 @@ if __name__=="__main__":
             sys.exit(-1)
         else:
             print "Unknown argument %s" % o    
+
+    if not os.path.exists(map_file):
+        map_file = None
 
     try:
         s = sequencer(map_file)

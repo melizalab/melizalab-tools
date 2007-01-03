@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
- toelis.py - module for processing toe_lis files
+module for processing toe_lis files
 
  CDM, 9/2006
  
 """
-import numpy
+import numpy as n
 
 class toelis(object):
     """
@@ -37,7 +37,7 @@ class toelis(object):
                     raise ValueError, "Input data must be a list"
 
             nitems = len(data)
-            self.index = numpy.arange(nitems)
+            self.index = n.arange(nitems)
             if nunits==1 and nrepeats==1:
                 nrepeats = nitems
             if not (nunits * nrepeats == len(data)):
@@ -49,7 +49,7 @@ class toelis(object):
             
         else:
             nlists = nrepeats * nunits
-            self.index = numpy.arange(nlists)
+            self.index = n.arange(nlists)
             self.index.shape = (nrepeats, nunits)
             self.events = [[] for i in range(nlists)]
 
@@ -91,7 +91,7 @@ class toelis(object):
         if not isinstance(offset,(int, float)):
             raise TypeError, " can only add scalars to toelis events"
         for i in range(len(self.events)):
-            self.events[i] = numpy.asarray(self.events[i]) + offset
+            self.events[i] = n.asarray(self.events[i]) + offset
                 
 
     def __str__(self):
@@ -103,7 +103,7 @@ class toelis(object):
     @property
     def size(self):
         """
-        Returns the size of the object (a 2-ple)
+        Returns the size of the object (repeats, units)
         """
         return self.index.shape
 
@@ -118,7 +118,7 @@ class toelis(object):
     @property
     def range(self):
         """
-        The range of event times in the toelis
+        The range of event times in the toelis.
         """
         minx = []
         maxx = []
@@ -139,7 +139,7 @@ class toelis(object):
             raise ValueError, "Dimensions do not match for merging along dim %d " % dim
 
         offset = len(self)
-        self.index = numpy.concatenate((self.index, newlis.index + offset))
+        self.index = n.concatenate((self.index, newlis.index + offset))
         self.events.extend(newlis.events)
 
     def unit(self, unit):
@@ -215,15 +215,15 @@ class toelis(object):
         the number of events in a time bin. Returns a tuple
         with the time bins and the frequencies
         """
-        d = concatenate([self.events[ri] for ri in self.index[:,unit]])
+        d = n.concatenate([self.events[ri] for ri in self.index[:,unit]])
 
         binsize = float(binsize)
         min_t = min(d)
         max_t = max(d)
-        bins = numpy.arange(min_t, max_t + 2*binsize, binsize)  
-        n = numpy.searchsorted(sort(d), bins)
-        n = numpy.concatenate([n, [len(d)]])
-        freq = n[1:]-n[:-1]
+        bins = n.arange(min_t, max_t + 2*binsize, binsize)  
+        N = n.searchsorted(n.sort(d), bins)
+        N = n.concatenate([N, [len(d)]])
+        freq = N[1:]-N[:-1]
         if normalize:
             freq = freq / float(self.nrepeats)
         return (bins, freq)
