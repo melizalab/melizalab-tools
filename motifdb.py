@@ -20,9 +20,10 @@ class motifdb(object):
 
     # default location of the mapfile
     _source = '/z1/users/dmeliza/stimsets/simplseq2/map.info'
+    _feats  = '/z1/users/dmeliza/stimsets/simplseq2/decompose'
 
 
-    def __init__(self, map=None):
+    def __init__(self, map=None, feat_dir=None):
         """
         Initialize the database with a flat mapfile.
         """
@@ -30,6 +31,8 @@ class motifdb(object):
             self.map = map
         else:
             self.map = self.__parsemapfile(map)
+
+        self.feat_dir = feat_dir or self._feats
 
     def __getitem__(self, key):
         """
@@ -57,6 +60,14 @@ class motifdb(object):
 
         fp.close()
         return len
+
+    def featuremap(self, key):
+        """
+        Returns the location of the feature map for a motif
+        """
+        wavefile = self[key]  # throws error if the key doesn't exist
+        return os.path.join(self.feat_dir, key, "%s_feats.bin" % key)
+        
 
     def __parsemapfile(self, mapfile):
         """
@@ -86,3 +97,4 @@ class motifdb(object):
                 map[fields[0]] = fields[1]
 
         return map
+
