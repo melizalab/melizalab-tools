@@ -7,7 +7,7 @@ CDM, 1/2007
  
 """
 
-import wave, os
+import os, wave, toelis
 
 
 class motifdb(object):
@@ -98,3 +98,70 @@ class motifdb(object):
 
         return map
 
+    def aggregate(self, basename, motifname, dir='.', motif_pos=None):
+        """
+        Uses the motifdb to aggregate toelis data in a directory
+        by motif name.
+        
+        Scans all the toe_lis files in a directory associated with
+        a particular motif; collects the rasters, adjusts the even times
+        by the onset time of the stimulus, and returns
+        a dictionary of toelis objects keyed by motif name
+
+        motif_pos - by default, rasters are collected regardless of
+                    when they occurred in the stimulus sequence; set this
+                    to an integer to restrict to particular sequence positions
+        """
+
+        _sep = '_'
+        _gap = 100
+
+        def mlist_ext(f):
+            return f[len(basename)+1:-8].split(_sep)
+
+        # build the toe_lis list
+        files = []
+        for f in os.listdir(dir):
+            if not f.startswith(basename): continue
+            if not f.endswith('.toe_lis'): continue
+
+            mlist = mlist_ext(f)
+            if motif_pos:
+                if len(mlist) > motif_pos and mlist[motif_pos].startswith(motifname):
+                    files.append(f)
+            else:
+                for m in mlist:
+                    if m.startswith(motifname):
+                        files.append(f)
+                        break
+
+        if len(files)==0:
+            raise Exception, "No toe_lis files matched %s and %s in %s." % (basename, motifname, dir)
+
+        # now aggregate toelises
+        tls = {}
+        for f in files:
+            # determine the stimulus start time from the filename
+            mlist = mlist_ext(f)
+            offset = 0
+            if len(mlist) > 1: offset = _gap
+
+            for m in mlist:
+                if m.startswith(motifname):
+                    mname = m
+                    break
+                else:
+                    offset += self.motiflength(m) + _gap
+
+            # load the toelis
+            tl = toelis.readfile(os.path.join(dir,f))
+            tl.offset(-offset)
+
+            # store in the dictionary
+            if tls.has_key(mname):
+                tls[mname].extend(tl)
+            else:
+                tls[mname] = tl
+
+
+        return tls

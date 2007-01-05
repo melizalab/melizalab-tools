@@ -102,11 +102,13 @@ def plot_motif(pcmfile, featfile=None, nfft=320, shift=10):
 
     # plot annotation if needed
     if featfile:
+        hold(True)
         I = bimatrix(featfile)
         # convert to masked array
         #Im = nx.ma.array(I, mask=I==-1)
-        hold(True)
         #imshow(Im, cmap=cm.jet, extent=extent, alpha=0.5)
+        if len(T) > I.shape[1]: T.resize(I.shape[1])
+        if len(F) > I.shape[0]: F.resize(F.shape[0])
         dcontour(I, T, F)  # this will barf if the feature file has the wrong resolution
 
         # locate the centroid of each feature and label it
@@ -114,14 +116,11 @@ def plot_motif(pcmfile, featfile=None, nfft=320, shift=10):
         if retio: ioff()
         for fnum in nx.unique(I[I>-1]):
             x,y = imgutils.centroid(I==fnum)
-            text(T[int(x)], F[int(y)], "%d" % fnum, color='w', fontsize=20)
+            text(T[int(x)], F[int(y)], "%d" % fnum, color=colorcycle(fnum), fontsize=20)
 
         draw()
         if retio: ion()
         hold(False)
-
-    xlabel('Time (ms)')
-    ylabel('Freq (Hz)')
     
 
 def colorcycle(ind=None):
@@ -135,3 +134,37 @@ def colorcycle(ind=None):
     else:
         return cc
     
+def cmap_discretize(cmap, N):
+    """Return a discrete colormap from the continuous colormap cmap.
+    
+        cmap: colormap instance, eg. cm.jet. 
+        N: Number of colors.
+    
+    Example
+        x = resize(arange(100), (5,100))
+        djet = cmap_discretize(cm.jet, 5)
+        imshow(x, cmap=djet)
+    """
+
+    cdict = cmap._segmentdata.copy()
+    # N colors
+    colors_i = linspace(0,1.,N)
+    # N+1 indices
+    indices = linspace(0,1.,N+1)
+    for key in ('red','green','blue'):
+        # Find the N colors
+        D = array(cdict[key])
+        I = interpolate.interp1d(D[:,0], D[:,1])
+        colors = I(colors_i)
+        # Place these colors at the correct indices.
+        A = zeros((N+1,3), float)
+        A[:,0] = indices
+        A[1:,1] = colors
+        A[:-1,2] = colors
+        # Create a tuple for the dictionary.
+        L = []
+        for l in A:
+            L.append(tuple(l))
+        cdict[key] = tuple(L)
+    # Return colormap object.
+    return matplotlib.colors.LinearSegmentedColormap('colormap',cdict,1024)

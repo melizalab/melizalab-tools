@@ -79,6 +79,7 @@ def spectro(S, **kwargs):
 
     C = stft(S, **kwargs)
     PSD = nx.log(abs(C))
+    PSD[PSD<0] = 0
     Fs = kwargs.get('Fs', 20000)
     shift = kwargs.get('shift', 128)
 
