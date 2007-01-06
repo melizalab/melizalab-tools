@@ -7,8 +7,8 @@ CDM, 1/2007
  
 """
 
-import os, wave, toelis
-
+import os, toelis
+from pcmio import sndfile
 
 class motifdb(object):
     """
@@ -52,13 +52,14 @@ class motifdb(object):
         exist.
         """
         wavefile = self[key]
-        fp = wave.open(wavefile)
         try:
-            len = float(fp.getnframes()) / fp.getframerate() * 1000
-        except IOError:
+            fp = sndfile(wavefile)
+            len = fp.length * 1000
+            fp.close()
+        except wave.Error, e:
+            print "Could not open wavefile %s: %s" % (wavefile, e)
             len = None
 
-        fp.close()
         return len
 
     def featuremap(self, key):
@@ -126,7 +127,7 @@ class motifdb(object):
             if not f.endswith('.toe_lis'): continue
 
             mlist = mlist_ext(f)
-            if motif_pos:
+            if motif_pos!=None:
                 if len(mlist) > motif_pos and mlist[motif_pos].startswith(motifname):
                     files.append(f)
             else:
