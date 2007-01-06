@@ -19,7 +19,8 @@ CDM, 1/2007
 
 
 from pylab import *
-import toelis, motifdb, plotutils, os
+from dlab import toelis, motifdb, plotutils
+import os
 
 
 def plotresps(basename, motifname, dir='.', motif_pos=None, padding=(-100, 200)):

@@ -6,7 +6,7 @@ grouprepeats.py - a module for grouping the event information in toe_lis
                   any number of parameters
 """
 
-import episode, toelis
+from dlab import episode, toelis
 
 def grouprepeats(episodes):
     """

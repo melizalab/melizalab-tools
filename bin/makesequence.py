@@ -27,7 +27,7 @@ makesequence.py [-m map.info] [-g 100] <motif1> <motif2> <motif3> ...
 """
 
 import os
-from motifdb import motifdb
+from dlab.motifdb import motifdb
 
 class sequencer(object):
     """
