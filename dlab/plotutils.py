@@ -93,7 +93,7 @@ def plot_motif(pcmfile, featfile=None, nfft=320, shift=10):
     plot of a motif
     """
     # generate the spectrogram
-    sig = pcmio.read(pcmfile)
+    sig = pcmio.sndfile(pcmfile).getsignal()
     (PSD, T, F) = signalproc.spectro(sig, NFFT=nfft, shift=shift)
 
     # set up the axes and plot PSD

@@ -63,11 +63,11 @@ class _wavfile(_sndfile):
         self.fp = wave.open(filename, 'r')
         bitdepth = self.fp.getsampwidth()
         if bitdepth == 1:
-            self.type = 'b'
+            self._dtype = 'b'
         elif bitdepth == 2:
-            self.type = 'h'
+            self._dtype = 'h'
         elif bitdepth == 4:
-            self.type = 'f'
+            self._dtype = 'f'
         else:
             raise IOError, "Unable to handle wave files with bitdepth %d" % bitdepth
         self._nframes = self.fp.getnframes()
@@ -82,7 +82,7 @@ class _wavfile(_sndfile):
             length = self.fp.getnframes()
 
         self.fp.rewind()
-        data = array(type, self.fp.readframes(length))
+        data = array(self._dtype, self.fp.readframes(length))
 
         return data
 
@@ -97,16 +97,17 @@ class _pcmfile(_sndfile):
         x = array(dataformat)
         self._nframes = bytes / x.itemsize
         self._framerate = framerate
+        self._dataformat = dataformat
 
 
     def getsignal(self, length=None):
 
         self.fp.seek(0,0)
-        x = array(dataformat)
+        x = array(self._dataformat)
         if length:
-            length = min(length, bytes / x.itemsize)
+            length = min(length, self._nframes)
         else:
-            length = bytes / x.itemsize
+            length = self._nframes
         
         x.fromfile(self.fp, length)
 
