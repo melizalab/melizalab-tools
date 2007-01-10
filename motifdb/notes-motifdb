@@ -1,0 +1,122 @@
+
+Notes for a motif database structure.  This database will provide
+python et al with access to a library of motifs, indexed by symbol
+name, and supplying metadata as well as pcm data (or the location of a
+pcm or wav file). Each motif comprises a number of features, so this
+database will also hold information on the feature composition of
+motifs.  Rather than try to set up a MySQL server, it makes more sense
+to use HDF5 files to store the data, since these are highly portable
+and allow storage of tables as well as array data (e.g.  for the pcm
+data).  The relationships between tables are hierarchical, so
+there is no need for the complexity of a relational database.
+
+The real purpose of this is to make sure that naming schemes are
+consistent, so that we can easily determine exactly what, for example,
+stimulus "A2_B2-3-4" actually means and quickly look up the metadata
+and pcm data associated with that stimulus.  A big question arises
+from the potential for multiple feature-breakdowns of a single motif.
+My current scheme of sequentially numbering the features is fine as
+long as the features are totally disjoint but this may not be the case
+for long once we start combining or splitting features.
+
+The solution is to store motif and feature data as flatly as possible,
+and then use a hierarchical, modular naming scheme to uniquely refer
+to features.  The "flat" data consists of two tables and the associated
+pcm data:
+
+motifs:
+	identifier
+	bird name
+	source file
+	source entry
+	date of recording
+	motif onset (ms into entry)
+	motif length (ms)
+	motif source (location, or key for in-db storage)
+
+features:
+	identifier
+	feature dimensions (duration, bandwidth)
+	feature offset (time, base frequency)
+	feature source (location, or key for in-db storage)
+
+Motifs and features are mapped to names with three other tables that establish
+a one-to-one hierarchical mapping.
+
+motifmap:
+	name
+	symbol
+	motif identifier
+
+featuremap:
+	motif identifier
+	map index
+	spectogram parameters (nfft, shift, mtm bw, etc)
+	nfeatures
+	index array (location)
+
+featureloc:
+	motif identifier
+	map index
+	feature identifier
+	
+
+Under this schema, a motif can be uniquely identified by specifying
+the motifmap and a key.  Since there will be little reason to vary the
+motif symbol mapping in an experiment, the motifmap can be set once
+and the motifs referred to by symbol, e.g. A2, B4, etc.
+
+Features require two keys, one to identify the particular mutually
+disjoint feature breakdown, and the other to identify the particular
+feature within that mapping.  The precise naming can be worked out
+later, but something like A2_0.0 could refer to the first feature in
+the first featuremap for A2, B4_1.4 would refer to the fourth feature
+in the 2nd featuremap for B4.
+
+The problem of specifying a synthetic motif with a sufficiently
+general syntax is beyond the scope of this document.
+
+
+
+It probably makes sense to store some of this data in separate
+files. For instance, the birds data should probably be maintained
+separately, and having a single .h5 file for each stimulus set may
+simplify things.  Under this scheme, a stimulus set defines a motif->symbol
+mapping
+
+birds:
+	bird name (key)
+	date of capture
+	capture location
+	date of death
+
+motifs:
+	index (key)
+	bird name
+	source file
+	source entry
+	date of recording
+	motif onset (in file)
+	motif length
+	motif source (location, or key for in-db storage)
+	featuremap key (used to establish "official" feature map)
+
+stimsets:
+
+featuremaps:
+	index (key)
+	motif name
+	map date
+	map resolution
+	map source (location or key)
+	?other map parameters
+	
+
+features:
+	index (key)
+	motif name
+	featuremap key
+	feature dimensions (duration, bandwidth)
+	feature offset (time, lowest frequency)
+	feature source (location or key)
+
