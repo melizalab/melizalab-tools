@@ -33,3 +33,23 @@ def bimatrix(filename, type='i'):
     out.shape = size
     return out
     
+def offset_add(offsets, data):
+    """
+    Adds multiple 1D arrays together at various offsets.
+    For example, if offsets are (0,2) and data (array(1,2,3), array(10,20,30)),
+    the output will be array(1,12,23,30)
+    """
+    if len(offsets) != len(data):
+        raise ValueError, "Offset vector must have as many elements as data"
+
+    data_len = nx.asarray([len(d) for d in data])
+    offsets = nx.asarray(offsets, dtype='int16')
+
+    stops = data_len + offsets
+
+    out = nx.zeros(stops.max())
+    for i in range(len(offsets)):
+        out[offsets[i]:stops[i]] += data[i]
+
+    return out
+    

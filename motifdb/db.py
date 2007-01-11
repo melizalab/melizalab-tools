@@ -71,10 +71,10 @@ class motifdb(object):
         if stimset:
             self.stimset = stimset
         else:
-            nodes = self.h5.root.stimsets._f_listNodes()
-            if nodes:
+            try:
+                nodes = self.h5.root.stimsets._f_listNodes()
                 self.stimset = nodes[0].name
-            else:
+            except NoSuchNodeError:
                 # generate a stimset called default
                 self.stimset = 'default'
 
@@ -229,7 +229,7 @@ class motifdb(object):
         # sampling rate, 16 bit signed integers
         featname = self._featname % (motifname, featmap, feature['id'])
         ca = self.h5.createCArray('/feat_data', featname, (len(feat_data),),
-                                  Int16Atom(shape = (len(feat_data),), flavor='numpy'))
+                                  FloatAtom(shape = (len(feat_data),), flavor='numpy'))
         ca[::] = feat_data
         ca.flush()
 

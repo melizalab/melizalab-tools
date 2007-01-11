@@ -36,7 +36,7 @@ def importlibrary(h5file, mapfile, stimsetname):
     contain a fully-qualified pathname, which is used to point the importer
     at a directory which is used in resolving relative paths for wavefiles.
     """
-    m = db.motifdb(h5file, stimsetname)
+    m = db.motifdb(h5file, stimset=stimsetname)
     
     basedir = os.path.dirname(mapfile)
     fp = open(mapfile, 'rt')
@@ -98,7 +98,7 @@ def importlibrary(h5file, mapfile, stimsetname):
 
     # end line loop
     print "Done importing file %s" % mapfile
-    m.close()
+    del(m)
 
 
 def genfeatures(m, motif, fmap, idxfile):
