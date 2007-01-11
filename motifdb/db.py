@@ -8,7 +8,8 @@ CDM, 1/2007
 """
 
 import os
-import tables as t
+from tables import *
+import schema
 
 
 class motifdb(object):
@@ -16,7 +17,7 @@ class motifdb(object):
     Retrieves and stores motif and feature data by symbol name.
     """
 
-    _h5filt = t.Filters(complevel=1, complib='lzo')
+    _h5filt = Filters(complevel=1, complib='lzo')
     _mapname = "%s_map%d"
     _featname = "%s_map%d_%d"
     
@@ -29,9 +30,9 @@ class motifdb(object):
         self.ro = read_only
         if os.path.exists(filename):
             if self.ro:
-                self.h5 = t.openFile(filename, mode='r')
+                self.h5 = openFile(filename, mode='r')
             else:
-                self.h5 = t.openFile(filename, mode='r+')
+                self.h5 = openFile(filename, mode='r+')
         else:
             self.__initfile(filename, stimset)
 
@@ -42,18 +43,16 @@ class motifdb(object):
         Initializes the database structure.
         """
 
-        self.h5 = t.openFile(filename, mode='w', title='motif database')
+        self.h5 = openFile(filename, mode='w', title='motif database')
 
         g = self.h5.createGroup('/', 'entities', 'Tables describing entities')
-        self.h5.createTable(g, 'motifs', Motif.descr)
-        self.h5.createTable(g, 'featmaps', Featmap.descr)
-        self.h5.createTable(g, 'features', Feature.descr)
+        self.h5.createTable(g, 'motifs', schema.Motif.descr)
+        self.h5.createTable(g, 'features', schema.Feature.descr)
 
         g = self.h5.createGroup('/', 'motifmaps', 'Tables describing motif maps')
-        self.h5.createTable(g, stimset, Motifmap.descr)
+        self.h5.createTable(g, stimset, schema.Motifmap.descr)
 
         g = self.h5.createGroup('/', 'featmaps', 'Tables describing feature maps')
-        #self.h5.createTable(g, 'map', Featmap.descr)
 
         g = self.h5.createGroup('/', 'featmap_data', 'Arrays holding feature index arrays',
                                 filters=self._h5filt)
@@ -78,8 +77,8 @@ class motifdb(object):
         table = self.h5.root.entities.motifs
 
         # check the object type
-        if not isinstance(motif, Motif):
-            motif = Motif(motif)
+        if not isinstance(motif, schema.Motif):
+            motif = schema.Motif(motif)
 
         addunique(table, motif, 'name')
 
@@ -98,7 +97,7 @@ class motifdb(object):
         if not mm:
             self.add_motif(motif)
 
-        addunique(table, Motifmap(symbol, mname), 'symbol')
+        addunique(table, schema.Motifmap(symbol, mname), 'symbol')
         
 
     def del_motif_key(self, symbol):
@@ -119,8 +118,8 @@ class motifdb(object):
         integers.
         """
         
-        if not isinstance(featmap, Featmap):
-            featmap = Featmap(featmap)
+        if not isinstance(featmap, schema.Featmap):
+            featmap = schema.Featmap(featmap)
             
         motifname = self.__getmotifid(motif)
 
@@ -128,14 +127,14 @@ class motifdb(object):
         try:
             table = self.h5.getNode("/featmaps/%s" % motifname)
             index = table.nrows - 1
-        except t.NoSuchNodeError:
-            table = self.h5.createTable('/featmaps', motifname, Featmap.descr)
+        except NoSuchNodeError:
+            table = self.h5.createTable('/featmaps', motifname, schema.Featmap.descr)
             index = 0
 
         # now store the data, in case something goes wrong
         mapname = self._mapname % (motifname, index)
         ca = self.h5.createCArray('/featmap_data', mapname, featmap_data.shape,
-                                  t.Int16Atom(shape = featmap_data.shape, flavor='numpy'))
+                                  Int16Atom(shape = featmap_data.shape, flavor='numpy'))
         ca[::] = featmap_data
         ca.flush()
 
@@ -152,8 +151,8 @@ class motifdb(object):
         unequivocally associated with a particular motif and a particular
         feature map.
         """
-        if not isinstance(feature, Feature):
-            feature = Feature(feature)
+        if not isinstance(feature, schema.Feature):
+            feature = schema.Feature(feature)
 
         motifname = self.__getmotifid(motif)
         fmap   = self.get_featmap(motif, featmap) # throws an error if no featmaps
@@ -168,7 +167,7 @@ class motifdb(object):
         # sampling rate, 16 bit signed integers
         featname = self._featname % (motifname, featmap, feature['id'])
         ca = self.h5.createCArray('/feat_data', featname, (len(feat_data),),
-                                  t.Int16Atom(shape = (len(feat_data),), flavor='numpy'))
+                                  Int16Atom(shape = (len(feat_data),), flavor='numpy'))
         ca[::] = feat_data
         ca.flush()
 
@@ -200,7 +199,7 @@ class motifdb(object):
         motid = self.__getmotifid(symbol)
         try:
             return self.h5.getNode("/featmaps/%s" % motid)
-        except t.NoSuchNodeError:
+        except NoSuchNodeError:
             raise IndexError, "No feature maps defined for %s" % symbol
         
     def get_motif(self, symbol):
@@ -209,7 +208,7 @@ class motifdb(object):
         the current stimset.
         """
         id = self.__getmotifid(symbol)
-        return Motif(getunique(self.h5.root.entities.motifs, 'name', id))
+        return schema.Motif(getunique(self.h5.root.entities.motifs, 'name', id))
 
     def get_featmap(self, motif, mapnum=0):
         """
@@ -218,7 +217,7 @@ class motifdb(object):
         table = self.__getfeatmaptable(motif)
         r = getunique(table, 'id', mapnum)
         if r:
-            return Featmap(r)
+            return schema.Featmap(r)
         else:
             raise IndexError, "No feature map %d is defined for motif %s" % (mapnum, motif)
 
@@ -230,7 +229,7 @@ class motifdb(object):
         try:
             node = self.h5.getNode("/featmap_data/" + self._mapname % (motid, mapnum))
             return node.read()
-        except t.NoSuchNodeError:
+        except NoSuchNodeError:
             raise IndexError, "No feature map %d defined for motif %s" % (mapnum, motif)
 
     def get_feature(self, motif, mapnum, featnum):
@@ -239,11 +238,10 @@ class motifdb(object):
         """
         motifname = self.__getmotifid(motif)
         table = self.h5.root.entities.features
-        rr = [r for r in table.where(table.cols.motif==motifname) if r['featmap']==mapnum]
-        if rr:
-            return Feature(rr[0])
-        else:
-            raise IndexError, "Feature %d not defined for %s_%d" % (featnum, motif, mapnum)
+        for r in table.where(table.cols.motif==motifname):
+            if r['featmap']==mapnum and r['id']==featnum: return schema.Feature(r)
+
+        raise IndexError, "Feature %d not defined for %s_%d" % (featnum, motif, mapnum)
 
     def get_feature_data(self, motif, mapnum, featnum):
         """
@@ -253,9 +251,8 @@ class motifdb(object):
         try:
             node = self.h5.getNode("/feat_data/" + self._featname % (motid, mapnum, featnum))
             return node.read()
-        except t.NoSuchNodeError:
+        except NoSuchNodeError:
             raise IndexError, "Feature %d not defined for %s_%d" % (featnum, motif, mapnum)
-
 
 # end motifdb class
 
@@ -289,8 +286,6 @@ def getunique(table, key, value):
     record. This is a common enough operation that this wrapper
     should save some labor.
     """
-    m = [r for r in table.where(table.cols._f_col(key)==value)]
-    if m:
-        return m[0]
-    else:
-        return None
+    for r in table.where(table.cols._f_col(key)==value):
+        return r
+    return None
