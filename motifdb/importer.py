@@ -61,6 +61,7 @@ def importlibrary(h5file, mapfile, stimsetname):
             motif = schema.Motif(mname)
             motif['length'] = s.length * 1000.
             motif['Fs'] = s.framerate
+            motif['loc'] = basedir
             s.close()
             
             m.add_motif(motif)

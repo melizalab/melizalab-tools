@@ -10,6 +10,7 @@ import os, re
 
 # define table structures
 
+
 class _recobj(object):
     """
     A recobj is an object that can interact with pytables
@@ -94,6 +95,7 @@ class Motif(_recobj):
         length = Float32Col(pos=4)
         type = StringCol(16, pos=5)  # 'wav', 'pcm', etc.
         Fs   = Float32Col(pos=6)     # sampling rate, in Hz
+        loc  = StringCol(128, pos=7) # directory where the file is stored
 
 
     def __init__(self, obj):

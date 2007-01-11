@@ -46,11 +46,11 @@ class motifdb(object):
         self.h5 = openFile(filename, mode='w', title='motif database')
 
         g = self.h5.createGroup('/', 'entities', 'Tables describing entities')
-        self.h5.createTable(g, 'motifs', schema.Motif.descr)
-        self.h5.createTable(g, 'features', schema.Feature.descr)
+        self.__maketable(g, 'motifs', schema.Motif.descr)
+        self.__maketable(g, 'features', schema.Feature.descr)
 
         g = self.h5.createGroup('/', 'motifmaps', 'Tables describing motif maps')
-        self.h5.createTable(g, stimset, schema.Motifmap.descr)
+        self.__maketable(g, stimset, schema.Motifmap.descr)
 
         g = self.h5.createGroup('/', 'featmaps', 'Tables describing feature maps')
 
@@ -59,6 +59,10 @@ class motifdb(object):
         g = self.h5.createGroup('/', 'feat_data', 'Arrays holding feature pcm data',
                                 filters=self._h5filt)
 
+    def __maketable(self, base, name, descr):
+        t = self.h5.createTable(base, name, descr)
+        t.flavor = 'numpy'
+        return t
 
     def close(self):
         """
@@ -128,7 +132,7 @@ class motifdb(object):
             table = self.h5.getNode("/featmaps/%s" % motifname)
             index = table.nrows - 1
         except NoSuchNodeError:
-            table = self.h5.createTable('/featmaps', motifname, schema.Featmap.descr)
+            table = self.__maketable('/featmaps', motifname, schema.Featmap.descr)
             index = 0
 
         # now store the data, in case something goes wrong
@@ -210,6 +214,18 @@ class motifdb(object):
         id = self.__getmotifid(symbol)
         return schema.Motif(getunique(self.h5.root.entities.motifs, 'name', id))
 
+    def get_featmaps(self, symbol):
+        """
+        Retrieve all the feature maps defined for a motif. Returned
+        as a numpy recarray rather than a bunch of objects.
+        """
+        try:
+            table = self.__getfeatmaptable(symbol)
+            return table[:]
+        except IndexError:
+            return []
+    
+
     def get_featmap(self, motif, mapnum=0):
         """
         Returns the Featmap object associated with a motif and an index
@@ -232,6 +248,18 @@ class motifdb(object):
         except NoSuchNodeError:
             raise IndexError, "No feature map %d defined for motif %s" % (mapnum, motif)
 
+    def get_features(self, motif, mapnum=0):
+        """
+        Retrieves all the features defined for a featuremap
+        """
+        motifname = self.__getmotifid(motif)        
+        table = self.h5.root.entities.features
+        coords = [r.nrow for r in table.where(table.cols.motif==motifname)
+                  if r['featmap']==mapnum]
+        return table.readCoordinates(coords)
+        
+            
+
     def get_feature(self, motif, mapnum, featnum):
         """
         Returns the Feature object associated with a motif and a map and an index
@@ -253,6 +281,44 @@ class motifdb(object):
             return node.read()
         except NoSuchNodeError:
             raise IndexError, "Feature %d not defined for %s_%d" % (featnum, motif, mapnum)
+
+
+    def get(self, symbol):
+        """
+        Access a motif, featuremap, or feature using a hierarchical symbol.
+        For example:
+        .get('A1') - retrieves motif A1
+        .get('A1_0') - retrieves featuremap 0 for motif A1
+        .get('A1_0.0') - retrieves feature 0 for featuremap 0 in motif A1
+        """
+        # first parse the symbol
+        fields = symbol.split('_')
+        if len(fields)==1:
+            return self.get_motif(fields[0])
+
+        fields2 = fields[1].split('.')
+        if len(fields2)==1:
+            return self.get_featmap(fields[0], int(fields[1]))
+
+        return self.get_feature(fields[0], int(fields2[0]), int(fields2[1]))
+
+    def get_data(self, symbol):
+        """
+        Similar to get, but retrieves the array data stored in the library.
+        For motifs, which are stored externally, get_data returns the full
+        filename of the wave or pcm file.
+        """
+        fields = symbol.split('_')
+        if len(fields)==1:
+            m = self.get_motif(fields[0])
+            return os.path.join(m['loc'], "%(name)s.%(type)s" % m)
+
+        fields2 = fields[1].split('.')
+        if len(fields2)==1:
+            return self.get_featmap_data(fields[0], int(fields[1]))
+
+        return self.get_feature_data(fields[0], int(fields2[0]), int(fields2[1]))        
+        
 
 # end motifdb class
 
