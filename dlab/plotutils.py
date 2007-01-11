@@ -86,41 +86,6 @@ def dcontour(*args, **kwargs):
     draw()
     if retio: ion()
     return h
-
-def plot_motif(pcmfile, featfile=None, nfft=320, shift=10):
-    """
-    This code should really go somewhere else. Produces an (annotated)
-    plot of a motif
-    """
-    # generate the spectrogram
-    sig = pcmio.sndfile(pcmfile).getsignal()
-    (PSD, T, F) = signalproc.spectro(sig, NFFT=nfft, shift=shift)
-
-    # set up the axes and plot PSD
-    extent = (T[0], T[-1], F[0], F[-1])
-    imshow(PSD, cmap=cm.Greys, extent=extent, origin='lower')
-
-    # plot annotation if needed
-    if featfile:
-        hold(True)
-        I = bimatrix(featfile)
-        # convert to masked array
-        #Im = nx.ma.array(I, mask=I==-1)
-        #imshow(Im, cmap=cm.jet, extent=extent, alpha=0.5)
-        if len(T) > I.shape[1]: T.resize(I.shape[1])
-        if len(F) > I.shape[0]: F.resize(F.shape[0])
-        dcontour(I, T, F)  # this will barf if the feature file has the wrong resolution
-
-        # locate the centroid of each feature and label it
-        retio = isinteractive()
-        if retio: ioff()
-        for fnum in nx.unique(I[I>-1]):
-            x,y = imgutils.centroid(I==fnum)
-            text(T[int(x)], F[int(y)], "%d" % fnum, color=colorcycle(fnum), fontsize=20)
-
-        draw()
-        if retio: ion()
-        hold(False)
     
 
 def colorcycle(ind=None):

@@ -17,28 +17,69 @@ class motifdb(object):
     Retrieves and stores motif and feature data by symbol name.
     """
 
+    _ENV = 'MOTIFDB'
     _h5filt = Filters(complevel=1, complib='lzo')
     _mapname = "%s_map%d"
     _featname = "%s_map%d_%d"
     
 
-    def __init__(self, filename, stimset, read_only=False):
+    def __init__(self, *args, **kwargs):
         """
         Initialize the database and connect to a stimset (i.e. motif
-        map. If the file does not exist, initializes it.
-        """
-        self.ro = read_only
-        if os.path.exists(filename):
-            if self.ro:
-                self.h5 = openFile(filename, mode='r')
-            else:
-                self.h5 = openFile(filename, mode='r+')
-        else:
-            self.__initfile(filename, stimset)
+        map. 
+        motifdb(<motiffile>) - opens the database found at <motiffile>
+        motifdb(<motiffile>:<stimset>) - as above, sets the stimset to <stimset>
+        motifdb() - use the value of the MOTIFDB environment variable
 
-        self.stimset = stimset
+        optional keywords:
+        stimset - set the stimulus set to this value. By default, the first
+                  defined stimset is used.
+        read_only - open the database in readonly mode
+
+        If the database does not exist, it is created.
+        """
+        self.ro = kwargs.get('read_only', False)
+
+        if len(args)>0 and args[0]:
+            motifpath = args[0]
+        elif os.environ.has_key(self._ENV):
+            motifpath = os.environ.get(self._ENV)
+        else:
+            raise ValueError, "You must specify a motif database either as an argument or \n" + \
+                  "as an environment variable %s " % self._ENV
+
+        # try to parse the motifpath
+        fields = motifpath.split(':')
+        if len(fields) > 1:
+            motifpath = fields[0]
+            stimset = fields[1]
+        else:
+            motifpath = fields[0]
+            stimset = None
+        if kwargs.has_key('stimset'):
+            stimset = kwargs.get('stimset')
+
+        # now open the file
+        if os.path.exists(motifpath):
+            if self.ro:
+                self.h5 = openFile(motifpath, mode='r')
+            else:
+                self.h5 = openFile(motifpath, mode='r+')
+        else:
+            self.__initfile(motifpath)
+
+        if stimset:
+            self.stimset = stimset
+        else:
+            nodes = self.h5.root.stimsets._f_listNodes()
+            if nodes:
+                self.stimset = nodes[0].name
+            else:
+                # generate a stimset called default
+                self.stimset = 'default'
+
         
-    def __initfile(self, filename, stimset):
+    def __initfile(self, filename):
         """
         Initializes the database structure.
         """
@@ -50,8 +91,6 @@ class motifdb(object):
         self.__maketable(g, 'features', schema.Feature.descr)
 
         g = self.h5.createGroup('/', 'motifmaps', 'Tables describing motif maps')
-        self.__maketable(g, stimset, schema.Motifmap.descr)
-
         g = self.h5.createGroup('/', 'featmaps', 'Tables describing feature maps')
 
         g = self.h5.createGroup('/', 'featmap_data', 'Arrays holding feature index arrays',
@@ -64,10 +103,29 @@ class motifdb(object):
         t.flavor = 'numpy'
         return t
 
-    def close(self):
+    def __makestimset(self, stimset):
+        return self.__maketable(self.h5.root.motifmaps, stimset, schema.Motifmap.descr)
+        
+    def __getstimset(self):
         """
-        Closes the h5 file. Further attempts to access the object will
-        raise errors.
+        The stimset attribute controls which symbol -> motif mapping is
+        used to resolve motif names
+        """
+        return self._stimset.name
+
+    def __setstimset(self, name):
+        try:
+            self._stimset = self.h5.getNode("/motifmaps/%s" % name)
+        except NoSuchNodeError:
+            # create the stimset
+            self._stimset = self.__makestimset(name)
+            
+    stimset = property(__getstimset, __setstimset,doc=__getstimset.__doc__)
+            
+
+    def __del__(self):
+        """
+        Closes the h5 file when reference count goes to zero.
         """
         self.h5.close()
 
@@ -93,7 +151,7 @@ class motifdb(object):
         or redefines an existing symbol. If the motif has not been defined,
         adds it to the library.
         """
-        table = self.h5.getNode("/motifmaps/%s" % self.stimset)
+        table = self._stimset
 
         # check that the motif is defined
         mname = os.path.splitext(motif)[0]
@@ -108,7 +166,7 @@ class motifdb(object):
         """
         Removes a symbol from the current stimulus set
         """
-        table = self.h5.getNode("/motifmaps/%s" % self.stimset)
+        table = self._stimset
         # check that the symbol isn't already defined
         for row in table.where(table.cols.symbol==symbol):
             table.removeRows(row.nrow)
@@ -189,7 +247,7 @@ class motifdb(object):
     # these methods are for common retrieval operations
 
     def __getmotifid(self, symbol):
-        table = self.h5.getNode("/motifmaps/%s" % self.stimset)
+        table = self._stimset
         try:
             id = [r['motif'] for r in table.where(table.cols.symbol==symbol)]
             return id[0]
