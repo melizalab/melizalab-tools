@@ -9,7 +9,9 @@ CDM, 1/2007
 
 import scipy as nx
 import scipy.fftpack as sfft
-from scipy.signal.signaltools import hamming
+from scipy.linalg import norm, get_blas_funcs
+from scipy.signal.signaltools import hamming, fftconvolve
+import tridiag
 
 def stft(S, **kwargs):
     """
@@ -88,3 +90,71 @@ def spectro(S, **kwargs):
 
     return (PSD, T, F)
                  
+
+def dpss(npoints, mtm_p):
+    """
+    Computes the discrete prolate spherical sequences used in the
+    multitaper method power spectrum calculations.
+
+    npoints - the number of points in the window
+    mtm_p - the time-bandwidth product. Must be an integer or half-integer
+            (typical choices are 2, 5/2, 3, 7/2, or 4)
+
+    returns:
+    v - 2D array of eigenvalues, length n = (mtm_p * 2 - 1)
+    e - 2D array of eigenvectors, shape (npoints, n)
+    """
+
+    if mtm_p >= npoints * 2:
+        raise ValueError, "mtm_p may only be as large as npoints/2"
+
+    W = mtm_p/npoints
+    ntapers = int(min(round(2*npoints*W),npoints))
+    ntapers = max(ntapers,1)
+
+    # generate diagonals
+    d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
+    ee = nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2
+
+    v = tridiag.dstegr(d, nx.concatenate((ee, [0])), npoints-ntapers+1, npoints)[1]
+    v = nx.flipud(v[0:ntapers])
+
+    # compute the eigenvectors
+    E = nx.zeros((npoints,ntapers), dtype='f')
+    t = nx.arange(0.,npoints)/(npoints-1)*nx.pi
+
+    for j in range(ntapers):
+        e = nx.sin((j+1.)*t)
+        e = tridiag.dgtsv(ee,d-v[j],ee,e)[0]
+        e = tridiag.dgtsv(ee,d-v[j],ee,e/norm(e))[0]
+        e = tridiag.dgtsv(ee,d-v[j],ee,e/norm(e))[0]
+        E[:,j] = e/norm(e)
+
+    d = E.mean(0)
+
+    for j in range(ntapers):
+        if j % 2 == 1:
+            if E[2,j]<0.: 
+                # anti-symmetric dpss
+                E[:,j] = -E[:,j]
+        elif d[j]<0.:
+            E[:,j] = -E[:,j]
+            
+    # calculate eigenvalues
+    s = nx.concatenate(([2*W], 4*W*sinc(2*W*nx.arange(1,npoints,dtype='f'))))
+    # filter each taper with its flipped version
+    fwd = sfft.fft(E,npoints*2,axis=0)
+    rev = sfft.fft(nx.flipud(E),npoints*2,axis=0)
+    q = (sfft.ifft(fwd * rev,axis=0)).real[0:npoints,:]
+    #q = nx.asmatrix(q)
+
+    gemm,= get_blas_funcs(('gemm',),(q, s))
+    V = gemm(1.,q.transpose(),nx.flipud(s))
+    V = nx.minimum(V,1)
+    V = nx.maximum(V,0)
+    V.shape = (ntapers,)
+
+    return (V,E)
+
+def sinc(v):
+    return nx.sin(v * nx.pi)/(v * nx.pi)

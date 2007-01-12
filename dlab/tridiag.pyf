@@ -18,9 +18,9 @@ interface
 
       integer depend(d),intent(hide):: n=len(d)
       integer depend(b),intent(hide):: nrhs=shape(b,1)
-      double precision dimension(n-1) :: dl
-      double precision dimension(n) :: d
-      double precision dimension(n-1) :: du
+      double precision dimension(n-1),intent(copy) :: dl
+      double precision dimension(n),intent(copy) :: d
+      double precision dimension(n-1),intent(copy) :: du
       double precision dimension(ldb,nrhs) :: b
       integer optional,check(shape(b,0)==ldb),depend(b)::ldb=shape(b,0)
       integer intent(out)::info
