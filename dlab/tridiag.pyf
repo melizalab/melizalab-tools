@@ -1,0 +1,68 @@
+!    -*- f90 -*-
+!
+! Signatures for f2py wrappers of symmetric tridiagonal problems
+!
+! when linking with atlas, use -llapack -lf77blas -latlas -lg2c
+
+python module tridiag
+interface
+
+  subroutine dgtsv(n, nrhs, dl, d, du, b, ldb, info)
+
+      ! w,info = gtsv(dl, d, du, b, overwrite_dl=0, overwrite_d=0, overwrite=du=0, overwrite_b=0)
+      ! Solve A * X = B
+      ! Where A is a tridiagonal matrix with DL, D, and DU diagonals
+
+      callstatement (*f2py_func)(&n, &nrhs, dl, d, du, b, &n, &info)
+      callprotoargument int*,int*,double*,double*,double*,double*,int*,int*
+
+      integer depend(d),intent(hide):: n=len(d)
+      integer depend(b),intent(hide):: nrhs=shape(b,1)
+      double precision dimension(n-1) :: dl
+      double precision dimension(n) :: d
+      double precision dimension(n-1) :: du
+      double precision dimension(ldb,nrhs) :: b
+      integer optional,check(shape(b,0)==ldb),depend(b)::ldb=shape(b,0)
+      integer intent(out)::info
+      intent(in,out,copy,out=x) b
+
+  end subroutine dgtsv
+
+  subroutine dstegr(n,d,e,vl,vu,il,iu,abstol,m,w,z,ldz,isuppz,work,lwork,iwork,liwork,info)
+
+      ! x,info stegr(d,e,il,iu,overwrite_d=0,overwrite_e=0)
+      ! Determine the eigenvalues of the symmetric tridiagonal matrix A
+      ! with diagonal D and superdiagonal E. Returns the eigenvalues
+      ! between IL and IU
+
+      callstatement '''
+                    (*f2py_func)("N","I",&n,d,e,&vl,&vu,&il,&iu,&abstol,&m,w,z,
+                                 &ldz,isuppz,work,&lwork,iwork,&liwork,&info)
+                    '''
+      callprotoargument '''
+                     char*,char*,int*,double*,double*,double*,double*,int*,int*,
+                     double*,int*,double*,double*,int*,int*,double*,int*,int*,int*,int*
+                     '''
+
+      integer depend(d),intent(hide) :: n=len(d)
+      double precision dimension(n),intent(copy) :: d
+      double precision dimension(n),intent(copy) :: e
+      double precision intent(hide) :: vl=0
+      double precision intent(hide) :: vu=0
+      integer optional:: il=1
+      integer optional:: iu=n
+      double precision intent(hide) :: abstol=0
+      integer intent(out) :: m
+      double precision dimension(n),intent(out) :: w
+      double precision dimension(n),intent(hide,cache) :: z
+      integer intent(hide) :: ldz=1
+      integer dimension(1),intent(hide) :: isuppz
+      double precision dimension(lwork),intent(hide,cache):: work
+      integer intent(hide),depend(n) :: lwork=13*n
+      integer dimension(liwork),intent(hide,cache) :: iwork
+      integer intent(hide),depend(n) :: liwork=10*n
+      integer intent(out) :: info
+  end subroutine dstegr
+end interface
+end python module tridiag
+      
