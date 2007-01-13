@@ -1,122 +1,102 @@
+motifdb python module
 
-Notes for a motif database structure.  This database will provide
-python et al with access to a library of motifs, indexed by symbol
-name, and supplying metadata as well as pcm data (or the location of a
-pcm or wav file). Each motif comprises a number of features, so this
-database will also hold information on the feature composition of
-motifs.  Rather than try to set up a MySQL server, it makes more sense
-to use HDF5 files to store the data, since these are highly portable
-and allow storage of tables as well as array data (e.g.  for the pcm
-data).  The relationships between tables are hierarchical, so
-there is no need for the complexity of a relational database.
+* Features and motifs
 
-The real purpose of this is to make sure that naming schemes are
-consistent, so that we can easily determine exactly what, for example,
-stimulus "A2_B2-3-4" actually means and quickly look up the metadata
-and pcm data associated with that stimulus.  A big question arises
-from the potential for multiple feature-breakdowns of a single motif.
-My current scheme of sequentially numbering the features is fine as
-long as the features are totally disjoint but this may not be the case
-for long once we start combining or splitting features.
+This module was written with the purpose of unifying how motifs and
+features are stored and symbolically referenced.  One of the main
+design considerations is that the same motif (which in this context is
+simply a chunk of sound data from a recording of a bird) may need to
+have different names in different experiments. Consequently, the
+database stores several lookup tables which are called _stimsets_, and
+the choice of stimset controls how symbols are resolved by the module.
 
-The solution is to store motif and feature data as flatly as possible,
-and then use a hierarchical, modular naming scheme to uniquely refer
-to features.  The "flat" data consists of two tables and the associated
-pcm data:
+Features are components of motifs; a motif can be divided into a set
+of disjoint spectrotemporal regions; this is called a _feature
+map_. This feature map can be thought of as a matrix of integers, with
+dimensions equal in size to some spectrotemporal representation of the
+motif.  The (x,y) locations in this matrix having a certain value
+comprise a mask which can be used in an ifft process to reconstruct
+the signal giving rise to that region of the STFT. Of course, there is
+more than one way to divide up the spectrotemporal space, which means
+that multiple feature maps may be associated with a single motif.
 
-motifs:
-	identifier
-	bird name
-	source file
-	source entry
-	date of recording
-	motif onset (ms into entry)
-	motif length (ms)
-	motif source (location, or key for in-db storage)
+Thus, to unequivocally refer to a particular feature of a motif (assuming
+that a particular stimset defines the base motif symbol), we use the symbol:
 
-features:
-	identifier
-	feature dimensions (duration, bandwidth)
-	feature offset (time, base frequency)
-	feature source (location, or key for in-db storage)
+<motif>_<featmap>.<feature>
 
-Motifs and features are mapped to names with three other tables that establish
-a one-to-one hierarchical mapping.
-
-motifmap:
-	name
-	symbol
-	motif identifier
-
-featuremap:
-	motif identifier
-	map index
-	spectogram parameters (nfft, shift, mtm bw, etc)
-	nfeatures
-	index array (location)
-
-featureloc:
-	motif identifier
-	map index
-	feature identifier
-	
-
-Under this schema, a motif can be uniquely identified by specifying
-the motifmap and a key.  Since there will be little reason to vary the
-motif symbol mapping in an experiment, the motifmap can be set once
-and the motifs referred to by symbol, e.g. A2, B4, etc.
-
-Features require two keys, one to identify the particular mutually
-disjoint feature breakdown, and the other to identify the particular
-feature within that mapping.  The precise naming can be worked out
-later, but something like A2_0.0 could refer to the first feature in
-the first featuremap for A2, B4_1.4 would refer to the fourth feature
-in the 2nd featuremap for B4.
-
-The problem of specifying a synthetic motif with a sufficiently
-general syntax is beyond the scope of this document.
+For example A2_0.0 refers to the first feature in the first featuremap
+associated with motif A2.
 
 
+* Data storage
 
-It probably makes sense to store some of this data in separate
-files. For instance, the birds data should probably be maintained
-separately, and having a single .h5 file for each stimulus set may
-simplify things.  Under this scheme, a stimulus set defines a motif->symbol
-mapping
+The database consists of a set of tables that (a) represent the
+mappings between symbols and motifs, featuremaps, and features, (b)
+store various bits of metadata about the entities, and (c) store the
+integer matrices for feature maps and pcm data for features.  The last
+of these functions is not strictly necessary, as this data can easily
+be stored in the filesystem, but the hdf5 format used to store the
+tables can also store numerical arrays in a compressed format.  Both
+of these types of data tend to be very low-entropy.
 
-birds:
-	bird name (key)
-	date of capture
-	capture location
-	date of death
 
-motifs:
-	index (key)
-	bird name
-	source file
-	source entry
-	date of recording
-	motif onset (in file)
-	motif length
-	motif source (location, or key for in-db storage)
-	featuremap key (used to establish "official" feature map)
+* Recombining signals
 
-stimsets:
+This sections deals with the grammar of specifying complex signal
+recombinations.  The math is extremely straightforward, given the
+time-series data for all the features and their relative offsets
+within their source motif (at least until we start considering
+frequency shifting). The grammar needs to strike a balance between
+compactness and completeness. Compact because the resulting sequence
+names need to be reasonable in length (since they will probably be
+used to name files), and complete because changing the grammar will
+make it difficult to compare results across multiple naming schemes.
 
-featuremaps:
-	index (key)
-	motif name
-	map date
-	map resolution
-	map source (location or key)
-	?other map parameters
-	
+The most common kind of artificial stimulus will be based on a single
+motif.  These include, in order of increasing complexity:
+	- complete reconstructions (all features)
+	- partial reconstructions (subset of features)
+	- reconstructions with time or frequency shifted features
+	- substitutions or insertions of features from other motifs
+	- substitutions or insertions of artificial noises
+	- random or pseudorandom combinations of features
 
-features:
-	index (key)
-	motif name
-	featuremap key
-	feature dimensions (duration, bandwidth)
-	feature offset (time, lowest frequency)
-	feature source (location or key)
+All but the last of these can be taken care with a modified slice
+notation. The notion has a couple of problematic shell characters, but
+I don't really see any way around it. Using A2 as an example:
+
+A2_0(:)		- a complete reconstruction of A2 based on featuremap 0
+
+A2_0(1)		- feature 1 from A2. This differs from A2_0.1 in that feature
+		1 is embedded at its original temporal offset
+
+A2_0(1:3)	- features 1 through 3 from A2
+
+A2_0(1,2,5) 	- features 1,2,5 from A2
+
+A2_0(-1)	- all the features from A2 except 1
+
+A2_0(-1:4) 	- all the features except 1..4.  The minus sign has lower
+		precedence than ..
+
+Comma and slice notation can be combined, as in A2_0(1:2,5). However, only
+individual atoms can take advantage of the following syntax for modifying
+feature placement
+
+A2_0(1,2t50)    - consists of feature 1 from A2, placed at its original
+		location, and feature 2, placed 50 ms later than its
+		original location.  Negative offsets work as well.
+
+A2_0(1,2f50)	- same as above, but feature 2 is upshifted 50 Hz.
+
+Modifiers may be combined, and other modifiers can be defined.
+
+Finally, the notation can accept "foreign" features and artificial
+sounds. For example, the following replaces feature 1 with feature 2
+from B2. The offset of any foreign feature is considered to be 0.
+
+A2_0(-1,B2_0.2t100)
+
+
 

@@ -248,11 +248,13 @@ class motifdb(object):
 
     def __getmotifid(self, symbol):
         table = self._stimset
-        try:
-            id = [r['motif'] for r in table.where(table.cols.symbol==symbol)]
-            return id[0]
-        except IndexError:
-            raise IndexError, "Motif symbol %s not defined." % symbol
+        id = [r['motif'] for r in table.where(table.cols.symbol==symbol)]
+        if len(id) > 0: return id[0]
+        # try lookup on full motif name
+        id = [r.nrow for r in table.where(table.cols.motif==symbol)]
+        if len(id) > 0: return symbol
+        
+        raise IndexError, "Motif symbol %s not defined." % symbol
 
     def __getfeatmaptable(self, symbol):
         """
@@ -270,7 +272,7 @@ class motifdb(object):
         the current stimset.
         """
         id = self.__getmotifid(symbol)
-        return schema.Motif(getunique(self.h5.root.entities.motifs, 'name', id))
+        return getunique(self.h5.root.entities.motifs, 'name', id)
 
     def get_featmaps(self, symbol):
         """
@@ -289,10 +291,9 @@ class motifdb(object):
         Returns the Featmap object associated with a motif and an index
         """
         table = self.__getfeatmaptable(motif)
-        r = getunique(table, 'id', mapnum)
-        if r:
-            return schema.Featmap(r)
-        else:
+        try:
+            return getunique(table, 'id', mapnum)
+        except IndexError:
             raise IndexError, "No feature map %d is defined for motif %s" % (mapnum, motif)
 
     def get_featmap_data(self, motif, mapnum=0):
@@ -324,10 +325,12 @@ class motifdb(object):
         """
         motifname = self.__getmotifid(motif)
         table = self.h5.root.entities.features
-        for r in table.where(table.cols.motif==motifname):
-            if r['featmap']==mapnum and r['id']==featnum: return schema.Feature(r)
-
-        raise IndexError, "Feature %d not defined for %s_%d" % (featnum, motif, mapnum)
+        coord = [r.nrow for r in table.where(table.cols.motif==motifname) \
+                 if r['featmap']==mapnum and r['id']==featnum]
+        if len(coord):
+            return table[coord[0]]
+        else:
+            raise IndexError, "Feature %d not defined for %s_%d" % (featnum, motif, mapnum)
 
     def get_feature_data(self, motif, mapnum, featnum):
         """
@@ -410,6 +413,5 @@ def getunique(table, key, value):
     record. This is a common enough operation that this wrapper
     should save some labor.
     """
-    for r in table.where(table.cols._f_col(key)==value):
-        return r
-    return None
+    rnum = table.getWhereList(table.cols._f_col(key)==value)
+    return table[rnum[0]]

@@ -14,7 +14,7 @@ import os, sys
 basename = sys.argv[1]
 
 featfile = basename + "_feature_%03d.pcm"
-features = set(range(0,4))
+features = set(range(0,6))
 combinecmd = "~/src/fog/fog_combine"
 
 for res in features:
@@ -27,7 +27,7 @@ for res in features:
     print cmd
     os.system(cmd)
 
-for res in range(0,3):
+for res in range(0,5):
 
     fstr = ""
     for feat in features.difference(set([res, res+1])):
