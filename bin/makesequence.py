@@ -1,91 +1,51 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-makesequence.py [-m map.info] [-g 100] <motif1> <motif2> <motif3> ...
+makesequence.py [-m motifdb] [-g 100] <motif1> <motif2> <motif3> ...
                 -f <batchfile>
 
       makesequence assembles motifs into a song by appending them
       in a given order. This order is either supplied on the command
       line or as a batch file.  The motif names are determined from
-      a map file (default map.info)
+      the motifdb (default is to use the value of $MOTIFDB)
 
-          -m <filename>  use a different motif map file
+          -m <filename>  use a different motifdb
           -g <float>     insert a gap of <float> ms before each motif
                          Default 100 ms, ignored for single motifs
           -f <batch>     reads in a batch file and generates sequences
                          for each line
 
-       The format of the mapfile is as follows: blank lines and lines
-       beginning with '#' are ignored; lines that have a single field
-       specify which directory the soundfiles which follow can be found
-       in; lines with two fields (whitespace separated) are mappings
-       from motif name (first field) to sound file (second field). If
-       no directory lines are found, files are assumed to come from the
-       current directory
-
      CDM, 12/2006
 """
 
 import os
-from dlab.motifdb import motifdb
+from motifdb import db, combiner
+from dlab import pcmio
 
-class sequencer(object):
+_file_delim = '_'
+
+def sequence(sequencer, seq):
+
+    outfile = _file_delim.join(seq) + ".pcm"
+    signal  = sequencer.getsignal(seq)
+    fp = pcmio.sndfile(outfile,'w')
+    fp.write(signal)
+    fp.close()
+
+def sequencebatch(sequencer, batchfile):
     """
-    The sequencer class generates motif sequences based on a map between
-    motif names and a wav file somewhere on disk.
+    Reads data from a batch file
     """
-
-    _soundcmd = 'pcmx'
-    _file_delim = '_'
-    
-
-    def __init__(self, map, motif_dir=None):
-        """
-        Initialize the sequencer with a motif map and a motif location.
-        map can be a python dictionary or a mapfile location.
-        """
-
-        self.motif_dir = motif_dir
-        self.map = motifdb(map)
-        
-
-    def sequence(self, seq, prepend=100):
-        """
-        Sequences motifs. <seq> can be either a symbol or a list of symbols.
-        Returns the names of the generated pcm files
-        """
-        if isinstance(seq, str):
-            seq = [seq]
-
-        if len(seq) > 1:
-            cmd = self._soundcmd + " -prepend %f" % prepend
-        else:
-            cmd = self._soundcmd
-
-        file = ""
-        for sym in seq:
-            cmd += " %s" % self.map[sym]
-            file += "%s%s" % (sym, self._file_delim)
-        file = file[0:-1] + ".pcm"
-        cmd += " " + file
-            
-        print "Executing " + cmd
-        os.system(cmd)
-
-
-    def sequencebatch(self, batchfile, prepend):
-        """
-        Reads data from a batch file
-        """
-        fp = open(batchfile, 'rt')
-        for line in fp:
-            if len(line.strip())==0 or line[0]=='#': continue
-            self.sequence(line.split(), prepend)
+    fp = open(batchfile, 'rt')
+    for line in fp:
+        line = line.strip()
+        if len(line)==0 or line[0]=='#': continue
+        sequence(sequencer, line.split())
 
             
 if __name__=="__main__":
 
-    map_file = "map.info"
+    map_file = None
     prepend = 100
     batch = None
 
@@ -114,16 +74,15 @@ if __name__=="__main__":
         else:
             print "Unknown argument %s" % o    
 
-    if not os.path.exists(map_file):
-        map_file = None
-
     try:
-        s = sequencer(map_file)
+        mdb = db.motifdb(map_file)
     except IOError:
-        print "Unable to read mapfile %s; aborting" % map_file
+        print "Unable to read motifdb %s; aborting" % map_file
         sys.exit(-1)
 
+    sequencer = combiner.motifseq(mdb, motif_gap = prepend)
+
     if batch:
-        seqlist = s.sequencebatch(batch, prepend)
+        sequencebatch(sequencer, batch)
     else:
-        s.sequence(args, prepend)
+        sequence(sequencer, args)

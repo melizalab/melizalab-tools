@@ -64,9 +64,11 @@ class motifseq(seqparser):
         self._parsers = parsers
         self._opts = kwargs
 
-    def parse(self, symstr):
+    def parse(self, motifs):
 
-        motifs = symstr.split(' ')
+        if isinstance(motifs, str):
+            motifs = motifs.split(' ')
+        
         symbols = self.db.get_motifs()
         out = []
         
@@ -94,9 +96,9 @@ class motifseq(seqparser):
         Generates the pcm signal associated with the symbolic string.
         """
         motifs = self.parse(symstr)
-        prepend = self._opts.get('motif_gap', 100)
         # figure out the Fs
         Fs = isinstance(motifs[0],featureset) and motifs[0].Fs or motifs[0]['Fs']
+        prepend = int(self._opts.get('motif_gap', 100) * Fs / 1000)
         
         offsets = []
         data = []

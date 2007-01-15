@@ -43,7 +43,7 @@ def offset_add(offsets, data, length=None):
         raise ValueError, "Offset vector must have as many elements as data"
 
     data_len = nx.asarray([len(d) for d in data])
-    offsets = nx.asarray(offsets, dtype='int16')
+    offsets = nx.asarray(offsets, dtype='int32')
 
     stops = data_len + offsets
     length = max(length, stops.max())
