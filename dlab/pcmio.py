@@ -5,7 +5,8 @@ Module with functions for reading pcm data from a variety of files,
 including wav, pcm, and pcm_seq2
 """
 
-from array import array
+from scipy.io import fread,fwrite
+from scipy import dtype, fromstring
 from os.path import splitext, exists
 import wave
 
@@ -51,30 +52,43 @@ class _sndfile(object):
         """
         self.fp.close()
 
-    def getsignal(self, length=None):
+    def __del__(self):
+        self.close()
+
+    def read(self, length=None, mem_type=None):
         """
         Returns the signal stored in the pcm file. If length
         is None, all the frames are read.
         """
+        raise NotImplementedError
+
+    def write(self, data):
+        """
+        Writes data to the end of the sound file
+        """
+        raise NotImplementedError
 
 class _wavfile(_sndfile):
 
-    def __init__(self, filename):
+    def __init__(self, filename, mode='r'):
+        if mode != 'r':
+            raise NotImplementedError, "Writing to wav files not implemented"
+        
         self.fp = wave.open(filename, 'r')
         bitdepth = self.fp.getsampwidth()
         if bitdepth == 1:
-            self._dtype = 'b'
+            self._dtype = dtype('b')
         elif bitdepth == 2:
-            self._dtype = 'h'
+            self._dtype = dtype('h')
         elif bitdepth == 4:
-            self._dtype = 'f'
+            self._dtype = dtype('f')
         else:
-            raise IOError, "Unable to handle wave files with bitdepth %d" % bitdepth
+            raise NotImplementedError, "Unable to handle wave files with bitdepth %d" % bitdepth
         self._nframes = self.fp.getnframes()
         self._framerate = self.fp.getframerate()
 
 
-    def getsignal(self, length=None):
+    def read(self, length=None):
     
         if length:
             length = min(length, self.fp.getnframes())
@@ -82,36 +96,47 @@ class _wavfile(_sndfile):
             length = self.fp.getnframes()
 
         self.fp.rewind()
-        data = array(self._dtype, self.fp.readframes(length))
+        return fromstring(self.fp.readframes(length), dtype=self._dtype)
 
-        return data
 
 class _pcmfile(_sndfile):
 
-    def __init__(self, filename, framerate=20000, dataformat='h'):
+    def __init__(self, filename, mode='r', framerate=20000, dataformat='h'):
 
-        self.fp = open(filename, 'rb')
+        self.fp = open(filename, mode+'b')
+        self._dtype = dtype(dataformat)
+        self._framerate = framerate
+
+    @property
+    def nframes(self):
+        """
+        The number of frames in the sound file.
+        """
+        pos = self.fp.tell()
         self.fp.seek(0,2)
         bytes = self.fp.tell()
+        self.fp.seek(pos,0)
+        return bytes / self._dtype.itemsize
 
-        x = array(dataformat)
-        self._nframes = bytes / x.itemsize
-        self._framerate = framerate
-        self._dataformat = dataformat
-
-
-    def getsignal(self, length=None):
+    def read(self, length=None, mem_type=None):
 
         self.fp.seek(0,0)
-        x = array(self._dataformat)
         if length:
-            length = min(length, self._nframes)
+            length = min(length, self.nframes)
         else:
-            length = self._nframes
-        
-        x.fromfile(self.fp, length)
+            length = self.nframes
 
-        return x
+        if mem_type==None:
+            mem_type = self._dtype.char
+            
+        return fread(self.fp, length, self._dtype.char, mem_type)
+
+    def write(self, data):
+
+        self.fp.seek(0,2)
+        fwrite(self.fp, len(data), data, self._dtype.char)
+        
+
 
 class _sndfilemetaclass(object):
     def __init__(self, name, bases, attributes):
