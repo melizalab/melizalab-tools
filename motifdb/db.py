@@ -265,6 +265,14 @@ class motifdb(object):
             return self.h5.getNode("/featmaps/%s" % motid)
         except NoSuchNodeError:
             raise IndexError, "No feature maps defined for %s" % symbol
+
+    def get_motifs(self):
+        """
+        Returns a list of all the defined motif symbols in the current
+        stimset.
+        """
+        table = self._stimset
+        return table.cols.symbol[:]
         
     def get_motif(self, symbol):
         """
@@ -273,6 +281,11 @@ class motifdb(object):
         """
         id = self.__getmotifid(symbol)
         return getunique(self.h5.root.entities.motifs, 'name', id)
+
+    def get_motif_data(self, symbol):
+        m = self.get_motif(symbol)
+        return os.path.join(m['loc'], "%(name)s.%(type)s" % m)
+        
 
     def get_featmaps(self, symbol):
         """
@@ -371,8 +384,7 @@ class motifdb(object):
         """
         fields = symbol.split('_')
         if len(fields)==1:
-            m = self.get_motif(fields[0])
-            return os.path.join(m['loc'], "%(name)s.%(type)s" % m)
+            return self.get_motif_data(fields[0])
 
         fields2 = fields[1].split('.')
         if len(fields2)==1:
@@ -382,8 +394,6 @@ class motifdb(object):
         
 
 # end motifdb class
-
-
 
 # some general purpose functions
 
