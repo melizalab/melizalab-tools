@@ -286,6 +286,37 @@ class featmerge(seqparser):
             raise ValueError, "Unable to parse feature options %s for %d" % (options, feat['id'])
 
 
+class oldfeatmerge(featmerge):
+    """
+    This class parses old-style synthetic motif grammars. Some sample
+    translations:
+
+    A2-0 -> A2_0(-0)
+    B6-3-4 -> B6_0(-3,-4)
+    CcR  -> Cc_0
+    Bb.1 -> Bb_0(1)
+    """
+
+    def parse(self, symbol):
+
+        # we're going to assume that no motifs have more than two characters
+        motif = symbol[0:2]
+        if symbol[2]=='R':
+            return featmerge.parse(self, motif + "_0")
+        elif symbol[2]=='.':
+            posfeats = symbol[3:].split('.')
+            return featmerge.parse(self, "%s_0(%s)" % (motif, ','.join(posfeats)))
+        elif symbol[2]=='-':
+            negfeats = symbol[3:].split('-')
+            negfeats = ['-'+f for f in negfeats]
+            return featmerge.parse(self, "%s_0(%s)" % (motif, ','.join(negfeats)))
+        else:
+            raise ValueError, "Unable to parse symbol %s" % symbol
+        
+        
+        
+    
+
 
 class featureset(recarray):
     """
