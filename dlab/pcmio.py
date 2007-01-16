@@ -50,7 +50,7 @@ class _sndfile(object):
         """
         Closes the connection to the soundfile
         """
-        self.fp.close()
+        pass
 
     def __del__(self):
         self.close()
@@ -135,6 +135,9 @@ class _pcmfile(_sndfile):
 
         self.fp.seek(0,2)
         fwrite(self.fp, len(data), data, self._dtype.char)
+
+    def close(self):
+        self.fp.close()
         
 
 

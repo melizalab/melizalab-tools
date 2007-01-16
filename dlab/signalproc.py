@@ -135,27 +135,29 @@ def mtm(signal, **kwargs):
     ntapers = max(2*mtm_p-1,1)
     v = v[0:ntapers]
 
+    S_tmp = nx.array(signal, 'd')
+    S_tmp.resize(len(signal) + nfft-1)    
     offsets = nx.arange(0, len(signal), shift)
     ncols = len(offsets)
-    S_tmp = nx.copy(signal)
-    S_tmp.resize(len(signal) + nfft-1)    
     workspace = nx.zeros((nfft, ncols, ntapers),'d')
+    
     for i in range(nfft):
         workspace[i,:,:] = ger(1.,S_tmp[offsets+i-1],e[i,0:ntapers])
+        #workspace[i,:,:] = ger(1.,S_tmp[offsets+i-1],nx.ones(ntapers)
 
     # calculate the windowed FFTs
     C = nx.power(nx.absolute(sfft.fft(workspace, nfft, axis=0, overwrite_x=1)),2)
 
     if adapt:
-        sig2 = nx.dot(signal,signal)/nfft  # power
+        sig2 = nx.dot(S_tmp,S_tmp) / len(S_tmp)  # power - not sure this right
         S = mtm_adapt(C, v, sig2)
     else:
-        Sk.shape = (nfft * ncols, ntapers)
-        S = gemv(1./ntapers,Sk,v)
+        C.shape = (nfft * ncols, ntapers)
+        S = gemv(1./ntapers,C,v)
         S.shape = (nfft, ncols)
 
     # for real signals the spectrogram is one-sided
-    if signal.dtype.kind=='f':
+    if signal.dtype.kind!='c':
         outrows = nfft % 2 and nfft/2+1 or (nfft+1)/2
         return S[0:outrows,:]
     else:
@@ -190,10 +192,11 @@ def mtm_adapt(Sk,V,sig2):
     S = (Sk[:,0] + Sk[:,1])/2
 
     code = """
-        # line 202 "signalproc.py"
+        # line 194 "signalproc.py"
 	int i,k;
 	double est, num, den, w;
         double err;
+        int iter=0;
 
         do {
 		err = 0;
@@ -209,12 +212,14 @@ def mtm_adapt(Sk,V,sig2):
 			S(i) = num/den;
 			err += fabs(num/den-est);
 		}
-	} while(err > tol);        
+                ++iter;
+	} while(err > tol);
+        return_val = iter;
     """
 
     try:
-        weave.inline(code,['Sk','S','V','a','ni','nk','tol'],
-                     type_converters=weave.converters.blitz)
+        rv = weave.inline(code,['Sk','S','V','a','ni','nk','tol'],
+                          type_converters=weave.converters.blitz)
         S.shape = orig_shape[0:2]
     finally:
         Sk.shape = orig_shape
