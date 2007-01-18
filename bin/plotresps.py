@@ -23,7 +23,8 @@ CDM, 1/2007
 
 from pylab import *
 from motifdb import db
-from dlab import toelis, plotutils, pcmio, signalproc, imgutils
+from dlab import toelis, plotutils, pcmio, signalproc
+from scipy.ndimage import center_of_mass
 import numpy as nx
 import os
 import pdb
@@ -166,7 +167,7 @@ def plot_motif(pcmfile, features=None, nfft=320, shift=10):
     plot of a motif
     """
     # generate the spectrogram
-    sig = pcmio.sndfile(pcmfile).getsignal()
+    sig = pcmio.sndfile(pcmfile).read()
     (PSD, T, F) = signalproc.spectro(sig, NFFT=nfft, shift=shift)
 
     # set up the axes and plot PSD
@@ -187,7 +188,7 @@ def plot_motif(pcmfile, features=None, nfft=320, shift=10):
         retio = isinteractive()
         if retio: ioff()
         for fnum in nx.unique(features[features>-1]):
-            x,y = imgutils.centroid(features==fnum)
+            y,x = center_of_mass(features==fnum)
             text(T[int(x)], F[int(y)], "%d" % fnum, color=plotutils.colorcycle(fnum), fontsize=20)
 
         draw()
