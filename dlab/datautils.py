@@ -6,8 +6,8 @@ module with useful data functions (data processing and I/O)
 CDM, 1/2007
  
 """
-import numpy as nx
-import array as pyarr
+import scipy as nx
+from scipy.io import fread, fwrite
 
 def isnested(x):
     """
@@ -19,19 +19,41 @@ def isnested(x):
     except TypeError:
         return False
 
-def bimatrix(filename, type='i'):
+def bimatrix(filename, read_type='i', **kwargs):
     """
-    Reads the contents of a .bin file as a matrix
+    Reads the contents of a .bin file as a matrix. The shape
+    of the data is determined from the file, but the data type
+    has to be specified as an argument.
     """
-    fp = open(filename, 'rb')
-    size = pyarr.array('i')
-    size.fromfile(fp,2)
-    data = pyarr.array(type)
-    data.fromfile(fp, nx.prod(size))
+    mem_type = kwargs.get('mem_type', read_type)
     
-    out = nx.asarray(data)
-    out.shape = size
-    return out
+    fp = open(filename, 'rb')
+    shape = fread(fp, 2, 'i')
+    data = fread(fp, shape.prod(), read_type, mem_type)
+    data.shape = shape
+    fp.close()
+    return data.squeeze()
+
+def bomatrix(data, filename, write_type=None):
+    """
+    Writes a matrix to to a .bin file. The shape is recorded in
+    the first two int16 of the file.  The data type is determined
+    from the matrix's dtype attribute, or it can be overridden
+    with the dtype argument.
+    """
+    assert data.ndim < 3
+    fp = open(filename, 'wb')
+    if data.ndim==1:
+        shape = nx.contatenate([data.shape, (1)])
+    else:
+        shape = nx.asarray(data.shape)
+
+    if write_type==None:
+        write_type = data.dtype.char
+
+    fwrite(fp, 2, shape, 'i')
+    fwrite(fp, data.size, data, write_type)
+    fp.close()
     
 def offset_add(offsets, data, length=None):
     """
