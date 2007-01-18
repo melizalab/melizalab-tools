@@ -28,21 +28,21 @@ def stft(S, **kwargs):
     FFT of each segment is computed after applying a windowing function.
     Optional arguments and their default values are as follows
 
-    NFFT - Size of the FFT timeframe (default 256)
+    nfft - Size of the FFT timeframe (default 256)
     shift - number of samples to shift the window by (default 128)
     window - the window applied to the samples before FFT
              this can be a function that generates the window or a 1D
              vector with the window values.  If a vector is supplied,
-             the window is clipped or padded with zeros to match NFFT
+             the window is clipped or padded with zeros to match nfft
              By default scipy.signal.signaltools.hamming is used to generate
              the window
     Fs - the sampling rate of the signal, in Hz (default 20 kHz)
 
-    Returns a 2D array C, which has NFFT rows (NFFT/2 for real inputs)
+    Returns a 2D array C, which has nfft rows (nfft/2 for real inputs)
     and (len(S)/shift) columns
 
     """
-    NFFT = int(kwargs.get('NFFT', 256))
+    nfft = int(kwargs.get('nfft', 256))
     shift = int(kwargs.get('shift', 128))
     window = kwargs.get('window', hamming)
     Fs = kwargs.get('Fs', 20000)
@@ -50,33 +50,33 @@ def stft(S, **kwargs):
     if len(S) == 0:
         raise ValueError, "Empty input signal."
 
-    if NFFT <= 2:
-        raise ValueError, "NFFT must be greater than 2"
+    if nfft <= 2:
+        raise ValueError, "nfft must be greater than 2"
 
     # generate the window
     if callable(window):
-        window = window(NFFT)
-    elif len(window) != NFFT:
-        window.resize(NFFT, refcheck=True)
+        window = window(nfft)
+    elif len(window) != nfft:
+        window.resize(nfft, refcheck=True)
 
     offsets = nx.arange(0, len(S), shift)
     ncols = len(offsets)
     S_tmp = nx.copy(S)
-    S_tmp.resize(len(S) + NFFT-1)
-    workspace = nx.zeros((NFFT, ncols),'d')
+    S_tmp.resize(len(S) + nfft-1)
+    workspace = nx.zeros((nfft, ncols),'d')
 
-    for i in range(NFFT):
+    for i in range(nfft):
         workspace[i,:] = S_tmp[offsets+i-1] * window[i]
 
-    C = sfft.fft(workspace, NFFT, axis=0, overwrite_x=1)
+    C = sfft.fft(workspace, nfft, axis=0, overwrite_x=1)
     if nx.isreal(S).all():
-        NFFT = nx.floor(NFFT/2)
-        return C[1:(NFFT+2), :]
+        nfft = nx.floor(nfft/2)
+        return C[1:(nfft+2), :]
     else:
         return C
     
 
-def spectro(S, **kwargs):
+def spectro(S, fun=stft, **kwargs):
     """
     Computes the spectrogram of a 1D time series, i.e. the 2-D
     power spectrum density.
@@ -87,8 +87,12 @@ def spectro(S, **kwargs):
     for time and frequency
     """
 
-    C = stft(S, **kwargs)
-    PSD = nx.log(abs(C))
+    
+    C = fun(S, **kwargs)
+    if C.dtype.kind=='c':
+        C = nx.power(nx.absolute(C),2)  # compute power from full complex stft
+    
+    PSD = nx.log10(C)
     PSD[PSD<0] = 0
     Fs = kwargs.get('Fs', 20000)
     shift = kwargs.get('shift', 128)
@@ -98,7 +102,8 @@ def spectro(S, **kwargs):
 
     return (PSD, T, F)
 
-def mtm(signal, **kwargs):
+
+def mtmspec(signal, **kwargs):
     """
     Computes the time-frequency power spectrogram of a signal using the
     multitaper method
@@ -140,17 +145,18 @@ def mtm(signal, **kwargs):
     offsets = nx.arange(0, len(signal), shift)
     ncols = len(offsets)
     workspace = nx.zeros((nfft, ncols, ntapers),'d')
+    sigpow = nx.zeros(ncols,'d')
     
     for i in range(nfft):
-        workspace[i,:,:] = ger(1.,S_tmp[offsets+i-1],e[i,0:ntapers])
-        #workspace[i,:,:] = ger(1.,S_tmp[offsets+i-1],nx.ones(ntapers)
+        val = S_tmp[offsets+i-1]
+        workspace[i,:,:] = ger(1.,val,e[i,0:ntapers])
+        sigpow += nx.power(val,2)  # dot product of the signal is used in mtm_adapt
 
     # calculate the windowed FFTs
     C = nx.power(nx.absolute(sfft.fft(workspace, nfft, axis=0, overwrite_x=1)),2)
 
     if adapt:
-        sig2 = nx.dot(S_tmp,S_tmp) / len(S_tmp)  # power - not sure this right
-        S = mtm_adapt(C, v, sig2)
+        S = mtm_adapt(C, v, sigpow / nfft)
     else:
         C.shape = (nfft * ncols, ntapers)
         S = gemv(1./ntapers,C,v)
@@ -165,14 +171,17 @@ def mtm(signal, **kwargs):
 
 
 
-def mtm_adapt(Sk,V,sig2):
+def mtm_adapt(Sk,V,sigpow):
     """
     Computes an adaptive average for mtm spectrogramtapers. Sk is a 3D
-    array, (nfft, ncols, ntapers) V is a 1D array (ntapers,). 
+    array, (nfft, ncols, ntapers) V is a 1D array (ntapers,). Sigpow
+    is a 1D array (ncols,) giving the normalized power in each window
 
     We have to compute an array of adaptive weights based on an initial
     estimate:
     w_{i,j,k}=(S_{i,j}/(S_{i,j}V_k + a_k))^2V_k
+
+    a_k and the error tolerance is determined by the signal power in each window
 
     And then use the weights to calculate the new estimate:
     S_{i,j} = \sum_k w_{i,j,k} Sk_{i,j,k} / \sum_k w_{i,j,k}
@@ -181,48 +190,39 @@ def mtm_adapt(Sk,V,sig2):
     assert Sk.ndim == 3
     assert len(V) == Sk.shape[2]
 
-    # reshape Sk
-    orig_shape = Sk.shape
-    ni = int(nx.prod(Sk.shape[0:2]))
-    nk = Sk.shape[2]
-    Sk.shape = (ni,nk)
-    # these arrays hold our estimates
-    a = sig2*(1-V)
-    tol = 0.0005 * sig2
-    S = (Sk[:,0] + Sk[:,1])/2
+    ni,nj,nk = Sk.shape
+    S = (Sk[:,:,0] + Sk[:,:,1])/2
 
     code = """
-        # line 194 "signalproc.py"
-	int i,k;
+        # line 193 "signalproc.py"
+	int i,j,k;
 	double est, num, den, w;
-        double err;
-        int iter=0;
+        double sig2, tol, err;
 
-        do {
+	for (j=0;j<nj;j++) {
+		sig2 = sigpow(j);
+		tol = 0.0005 * sig2;
 		err = 0;
-		for (i=0; i < ni; i++) {
-			est = S(i);
-			num = den = 0;
-			for (k=0; k < nk; k++) {
-				w = est / (est * V(k) + a(k));
-				w = pow(w,2) * V(k);
-				num += w * Sk(i,k);
-				den += w;
+		while (err > tol) {
+			for (i=0; i < ni; i++) {
+				est = S(i,j);
+				num = den = 0;
+				for (k=0; k < nk; k++) {
+					w = est / (est * V(k) + sig2 * (1 -V(k)));
+					w = pow(w,2) * V(k);
+					num += w * Sk(i,j,k);
+					den += w;
+				}
+				S(i,j) = num/den;
+				err += fabs(num/den-est);
 			}
-			S(i) = num/den;
-			err += fabs(num/den-est);
 		}
-                ++iter;
-	} while(err > tol);
-        return_val = iter;
+	}
     """
 
-    try:
-        rv = weave.inline(code,['Sk','S','V','a','ni','nk','tol'],
-                          type_converters=weave.converters.blitz)
-        S.shape = orig_shape[0:2]
-    finally:
-        Sk.shape = orig_shape
+        
+    weave.inline(code,['Sk','S','V','sigpow','ni','nj','nk'],
+                 type_converters=weave.converters.blitz)
 
     return S
     
@@ -245,7 +245,7 @@ def dpss(npoints, mtm_p):
     if mtm_p >= npoints * 2:
         raise ValueError, "mtm_p may only be as large as npoints/2"
 
-    W = mtm_p/npoints
+    W = float(mtm_p)/npoints
     ntapers = int(min(round(2*npoints*W),npoints))
     ntapers = max(ntapers,1)
 

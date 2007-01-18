@@ -1,4 +1,4 @@
-1#!/usr/bin/env python
+#!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
 Module with functions for reading pcm data from a variety of files,
