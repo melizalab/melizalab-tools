@@ -267,7 +267,8 @@ class featmerge(seqparser):
 
         # compute the set of features from this motif
         motif_feats = self.db.get_features(mm['motif'],int(mm['featmap']))
-        outfeats.extend(motif_feats[list(posfeats)])
+        for f in posfeats:
+            outfeats.append(self.db.get("%s.%s" % (fmap_name, f)))
 
         return featureset(outfeats,
                           motif['length'],
