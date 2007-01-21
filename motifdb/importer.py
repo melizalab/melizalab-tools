@@ -22,7 +22,7 @@ _fbdw = 512
 _tbdw = 2
 _extractor = '/home/dmeliza/src/fog/fog_extract'
 
-def importlibrary(h5file, mapfile, stimsetname):
+def importlibrary(h5file, mapfile, stimsetname, featuredir=None):
     """
     This function generates an h5 motif database from a modified
     old-style mapfile. This file consists of lines with 3 white-space
@@ -73,12 +73,12 @@ def importlibrary(h5file, mapfile, stimsetname):
             print "---> Symbol %s" % symbol
 
             # then the feature map, if it exists
-            if len(fields)>2:
-                if not os.path.exists(fields[2]):
-                    print "---> Error: %s does not exist " % fields[2]
+            if featuredir != None:
+                idxfile = os.path.join(featuredir, symbol, "%s_feats.bin" % symbol)
+                if not os.path.exists(idxfile):
+                    print "---> Error: %s does not exist " % idxfile
                     continue
 
-                idxfile = fields[2]
                 fmap_dat = bimatrix(idxfile)
 
                 # first sort the feature map
@@ -98,15 +98,14 @@ def importlibrary(h5file, mapfile, stimsetname):
                 # now do the decomposition
 
                 # generate a temporary directory for all the crap fog_extract will produce
-                # I'm going to cheat here and assume that one directory above the idxfile
-                # is something called <motif>.pcm, because fog_extract won't load wavefiles
                 idxdir = os.path.dirname(idxfile)
                 tdir = tempfile.mkdtemp()
-                pcmname = "%s.pcm" % symbol
 
-                shutil.copyfile(os.path.join(idxdir, '..', pcmname),
-                                os.path.join(tdir, pcmname))
-
+                # copy the signal to a pcm file in the temp dir
+                signal = sndfile(m.get_data(symbol)).read()
+                pcmname = os.path.join(tdir, "%s.pcm" % symbol)
+                sndfile(pcmname, 'w').write(signal)
+                
                 cmd = "%s -v --nfft %d --fftshift %d --fbdw %f --tbdw %f --lbfile %s %s" % \
                       (_extractor, fmap['nfft'], fmap['shift'],  _fbdw, _tbdw,
                        idxfile, os.path.join(tdir, pcmname))
