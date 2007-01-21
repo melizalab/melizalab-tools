@@ -20,45 +20,6 @@ gemv,= get_blas_funcs(('gemv',),(nx.array([1.,2.],'d'),))
 # outer product
 ger, = get_blas_funcs(('ger',),(nx.array([1.,2.],'d'),))
 
-    
-def spectro(S, fun=stft, **kwargs):
-    """
-    Computes the spectrogram of a 1D time series, i.e. the 2-D
-    power spectrum.
-
-    fun - the function that computes the time-frequency density
-          from the signal S.  If the result of this function is
-          complex, the spectrogram is symmetric, and only the unique
-          rows of the output are returned.  If the result of S
-          is real, the power spectrum is assumed to have been already
-          cut in half and converted to power.
-          
-    Fs - the sampling rate of the signal, in Hz (default 20 kHz)
-
-    Returns a tuple (PSD, T, F), where T and F are the bins
-    for time and frequency
-    """
-    Fs = kwargs.get('Fs', 20000.)
-    nfft = kwargs.get('nfft', 320)
-    shift = kwargs.get('shift', 10)
-    
-    PSD = fun(S, **kwargs)
-    if PSD.dtype.kind=='c':
-        PSD = nx.power(nx.absolute(PSD),2)  # compute power from full complex stft
-    
-    if S.dtype.kind!='c':
-        nfft = nx.floor(nfft/2)
-        PSD = PSD[1:(nfft+2), :]
-        F = nx.arange(0, Fs/2., (Fs/2.)/PSD.shape[0])
-    else:
-        F = nx.arange(-Fs/2., Fs/2., float(Fs)/PSD.shape[0])
-    
-    PSD = nx.log10(PSD)
-    PSD[PSD<0] = 0
-
-    T = nx.arange(0, PSD.shape[1] * 1000. / Fs * shift, 1000. / Fs * shift)
-
-    return (PSD, T, F)
 
 
 def stft(S, **kwargs):
@@ -183,6 +144,45 @@ def istft(C, **kwargs):
 
     return R
 
+    
+def spectro(S, fun=stft, **kwargs):
+    """
+    Computes the spectrogram of a 1D time series, i.e. the 2-D
+    power spectrum.
+
+    fun - the function that computes the time-frequency density
+          from the signal S.  If the result of this function is
+          complex, the spectrogram is symmetric, and only the unique
+          rows of the output are returned.  If the result of S
+          is real, the power spectrum is assumed to have been already
+          cut in half and converted to power.
+          
+    Fs - the sampling rate of the signal, in Hz (default 20 kHz)
+
+    Returns a tuple (PSD, T, F), where T and F are the bins
+    for time and frequency
+    """
+    Fs = kwargs.get('Fs', 20000.)
+    nfft = kwargs.get('nfft', 320)
+    shift = kwargs.get('shift', 10)
+    
+    PSD = fun(S, **kwargs)
+    if PSD.dtype.kind=='c':
+        PSD = nx.power(nx.absolute(PSD),2)  # compute power from full complex stft
+    
+    if S.dtype.kind!='c':
+        nfft = nx.floor(nfft/2)
+        PSD = PSD[1:(nfft+2), :]
+        F = nx.arange(0, Fs/2., (Fs/2.)/PSD.shape[0])
+    else:
+        F = nx.arange(-Fs/2., Fs/2., float(Fs)/PSD.shape[0])
+    
+    PSD = nx.log10(PSD)
+    PSD[PSD<0] = 0
+
+    T = nx.arange(0, PSD.shape[1] * 1000. / Fs * shift, 1000. / Fs * shift)
+
+    return (PSD, T, F)
 
 
 def mtmspec(signal, **kwargs):
@@ -227,7 +227,7 @@ def mtmspec(signal, **kwargs):
         grid = kwargs.get('grid')
     else:
         onset = int(kwargs.get('onset',0))
-        offset = S.size - int(kwargs.get('offset',0))
+        offset = signal.size - int(kwargs.get('offset',0))
         shift = int(kwargs.get('shift', 10))
         grid = nx.arange(onset, offset, shift)
 
