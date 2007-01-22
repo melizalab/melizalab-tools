@@ -9,7 +9,7 @@ CDM, 1/2007
 
 import re
 from dlab import datautils, pcmio
-from numpy import recarray
+from numpy import recarray, record
 
 class seqparser(object):
     """
@@ -242,7 +242,7 @@ class featmerge(seqparser):
                         # reset the start time
                         feat['offset'][0] = 0.
                         if m.group('opts'):
-                            self.__applyopts(feat, m.group('opts'))
+                            feat = self.__applyopts(feat, m.group('opts'))
                         outfeats.append(feat)
                         continue
                     m = self._re_opted.match(item)
@@ -250,7 +250,7 @@ class featmerge(seqparser):
                         # insert feature after modifying it
                         # note that "2t50" implies "-2"
                         feat = self.db.get("%s.%s" % (fmap_name, m.group('feature')))
-                        self.__applyopts(feat, m.group('opts'))
+                        feat = self.__applyopts(feat, m.group('opts'))
                         if neg: negfeats.add(int(m.group('feature')))
                         outfeats.append(feat)
                         continue
@@ -277,14 +277,25 @@ class featmerge(seqparser):
 
     def __applyopts(self, feat, options):
         """
-        Applies transformations to a feature.  Currently we understand one,
-        t<number>, which adjusts the time of the feature by <number> ms
+        Applies transformations to a feature.  Currently we understand
+        t<number>, which adjusts the time of the feature by <number> ms,
+        and a<factor>, which adjusts the amplitude of the feature by <factor>
         """
+        if not hasattr(feat, 'options'):
+            feat.options = {}
         if options.startswith('t'):
             offset = options[1:]
             feat['offset'][0] += float(offset)
+        elif options.startswith('a'):
+            # adjust amplitude by a factor
+            factor = float(options[1:])
+            data = self.db.get_feature_data(feat['motif'], feat['featmap'], feat['id'])
+            feat = (feat['offset'][0],
+                    data * factor)
         else:
             raise ValueError, "Unable to parse feature options %s for %d" % (options, feat['id'])
+
+        return feat
 
 
 class oldfeatmerge(featmerge):
@@ -321,27 +332,57 @@ class oldfeatmerge(featmerge):
 
 class featureset(recarray):
     """
-    Container to hold a bunch of features and some metadata
+    Container to hold a bunch of features and some metadata. There are
+    two kinds of features: 'natural' features, which are present in the
+    database, and 'synthetic' features, which are not present in the
+    database (even though they may be derived from database features)
+    and must be specified by a complete timeseries. Synthetic features
+    are specified by a tuple (offset, data), where offset is a float
+    giving the temporal offset of the feature, and data is a 1D array.
     """
     
     def __new__(cls, data, length, Fs):
         """
-        Create a new feature set from a list of records. The feature
-        set is initialized with a set of feature records, and the
-        following required bits of metadata:
+        Create a new feature set from a list of records (i.e. 'natural'
+        features) and synthetic features.  We also require a a few
+        bits of metadata:
 
         min_length - reconstructions should be padded out to at least this long
         Fs         - the sampling rate of the features
         """
-        self = recarray.__new__(cls, len(data), dtype=data[0].dtype)
+        nrecs = 0
+        for d in data:
+            if isinstance(d, record):
+                nrecs += 1
+                mydtype = d.dtype
+        
+        self = recarray.__new__(cls, nrecs, dtype=mydtype)
         return self
 
     def __init__(self, data, length, Fs):
-        for i in range(len(data)):
-            self[i] = data[i]
+        self.syn_offsets = []
+        self.syn_data = []
+
+        rnum = 0
+        for item in data:
+            if isinstance(item, record):
+                self[rnum] = item
+                rnum += 1
+            else:
+                self.syn_offsets.append(item[0])
+                self.syn_data.append(item[1])
+        
         self.length = length
         self.Fs = Fs
 
+    def synfeats(self):
+        """
+        Generator for synthetic features
+        """
+        i = 0
+        while i < len(self.syn_data):
+            yield (self.syn_offsets[i], self.syn_data[i])
+            i += 1
 
 class grouchyset(set):
     """

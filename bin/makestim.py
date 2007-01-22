@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-makestim.py [-d <motifdb>] [-m <num>] <motif> <stimdir> <macrodir>
+makestim.py [-d <motifdb>] [-m <num>] <stimdir> <macrodir> <motif1> [<motif2>...]
 
 Generates several stimulus sets for use in exploring a cell's response
 to a motif.  These are: 
@@ -35,12 +35,12 @@ _copy_cmd = "rsync -avz"
 def makefeatureset(parser, motif, fmap, tdir):
 
     db = parser.db
-    motif_signal = pcmio.sndfile(db.get_data(motif)).read()
+    #motif_signal = pcmio.sndfile(db.get_data(motif)).read()
     motif_len    = db.get(motif)['length']
     features = db.get_features(motif, fmap)
     
     macro_file = open(os.path.join(tdir, "%s_feat.s" % motif), 'w')
-    macro_file.write("stim -rtrig %0.1f -dur %0.1f -prewait %0.1f -random -reps 10 %s" %
+    macro_file.write("stim -rtrig %0.0f -dur %0.0f -prewait %0.0f -random -reps 10 %s" %
                      (motif_len + _prerec + _postrec,
                      motif_len + _prerec + _postrec + _gap,
                      _prerec, motif + _fext))
@@ -52,11 +52,15 @@ def makefeatureset(parser, motif, fmap, tdir):
     macro_file.write(" %s" % os.path.join(motif, recon_name + _fext))
     for f in features:
         feat_name = "%s_%d(%d)" % (motif, fmap, f['id'])
-        resid_name = "%sr%d(%d)" % (motif, fmap, f['id'])
-        signal = nx.resize(db.reconstruct(parser.parse(feat_name)), motif_signal.shape)
+        resid_name = "%s_%d(-%d)" % (motif, fmap, f['id'])
+        signal = db.reconstruct(parser.parse(feat_name))
         
         pcmio.sndfile(os.path.join(tdir, feat_name + _fext), 'w').write(signal)
-        pcmio.sndfile(os.path.join(tdir, resid_name + _fext), 'w').write(motif_signal - signal)
+##         pcmio.sndfile(os.path.join(tdir, resid_name + _fext),
+##                       'w').write(motif_signal - nx.resize(signal, motif_signal.shape))
+        
+        signal = db.reconstruct(parser.parse(resid_name))
+        pcmio.sndfile(os.path.join(tdir, resid_name + _fext), 'w').write(signal)
         macro_file.write(" %s %s" %
                          (os.path.join(motif, feat_name + _fext),
                          os.path.join(motif, resid_name + _fext)))
@@ -75,7 +79,7 @@ def makeshiftset(parser, motif, fmap, tdir, noffsets=2):
     features = db.get_features(motif, fmap)
 
     macro_file = open(os.path.join(tdir, "%s_shift.s" % motif), 'w')
-    macro_file.write("stim -rtrig %0.1f -dur %0.1f -prewait %0.1f -random -reps 10 %s" %
+    macro_file.write("stim -rtrig %0.0f -dur %0.0f -prewait %0.0f -random -reps 10 %s" %
                      (motif_len + _prerec + _postrec,
                      motif_len + _prerec + _postrec + _gap,
                      _prerec,
@@ -96,8 +100,36 @@ def makeshiftset(parser, motif, fmap, tdir, noffsets=2):
             pcmio.sndfile(os.path.join(tdir, new_motif_sym + _fext),'w').write(new_motif)
             macro_file.write(" %s" % os.path.join(motif, new_motif_sym + _fext))
 
+    macro_file.close()
     print "Generated feature shiftset for %s" % motif
 
+def makeamplset(parser, motif, fmap, tdir):
+
+    db = parser.db
+    motif_signal = pcmio.sndfile(db.get_data(motif)).read()
+    motif_len    = db.get(motif)['length']    
+    features = db.get_features(motif, fmap)
+    
+    macro_file = open(os.path.join(tdir, "%s_ampl.s" % motif), 'w')
+    macro_file.write("stim -rtrig %0.0f -dur %0.0f -prewait %0.0f -random -reps 10 %s" %
+                     (motif_len + _prerec + _postrec,
+                     motif_len + _prerec + _postrec + _gap,
+                     _prerec, motif + _fext))
+
+    factors = [1./4, 4.]
+
+    for feat in features:
+        sym = "%s_%d(%d)" % (motif, fmap, feat['id'])
+        signal = nx.resize(db.reconstruct(parser.parse(sym)), motif_signal.shape)
+        resid  = motif_signal - signal
+        for fac in factors:
+            new_motif_sym = "%sr%d(-%da%0.1f)%s" % (motif, fmap, feat['id'], fac, _fext) 
+            pcmio.sndfile(os.path.join(tdir, new_motif_sym), 'w').write(resid + signal * fac)
+            macro_file.write(" %s" % os.path.join(motif, new_motif_sym))
+
+    macro_file.close()
+    print "Generated feature contrast set for %s" % motif
+    
 
 if __name__=="__main__":
     
@@ -137,16 +169,18 @@ if __name__=="__main__":
     parser = combiner.featmerge(mdb)
 
     motif   = args[0]
-    tdir = tempfile.mkdtemp()
+    for motif in args[2:]:
+        tdir = tempfile.mkdtemp()
     
-    makefeatureset(parser, motif, featmap_num, tdir)
-    makeshiftset(parser, motif, featmap_num, tdir)
+        makefeatureset(parser, motif, featmap_num, tdir)
+        makeshiftset(parser, motif, featmap_num, tdir)
+        makeamplset(parser, motif, featmap_num, tdir)
 
-    stimdir = os.path.join(args[1], motif)
-    macrodir = args[2]
-    os.system("%s %s %s" % (_copy_cmd, os.path.join(tdir, "*.pcm"), stimdir))
-    os.system("%s %s %s" % (_copy_cmd, os.path.join(tdir, "*.s"), macrodir))
+        stimdir = os.path.join(args[0], motif)
+        macrodir = args[1]
+        os.system("%s %s %s" % (_copy_cmd, os.path.join(tdir, "*.pcm"), stimdir))
+        os.system("%s %s %s" % (_copy_cmd, os.path.join(tdir, "*.s"), macrodir))
 
-    shutil.rmtree(tdir)
+        shutil.rmtree(tdir)
     
     

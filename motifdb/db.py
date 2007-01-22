@@ -403,9 +403,15 @@ class motifdb(object):
         data = []
         for feat in features:
             offsets.append(feat['offset'][0] * features.Fs / 1000)
-            data.append(self.get_feature_data(feat['motif'],
-                                              feat['featmap'],
-                                              feat['id']))
+            d = self.get_feature_data(feat['motif'],
+                                      feat['featmap'],
+                                      feat['id'])
+            # process feature options
+            data.append(d)
+
+        for start, feat in features.synfeats():
+            offsets.append(start * features.Fs / 1000)
+            data.append(feat)
 
         if features.length!=None:
             length = features.length * features.Fs / 1000
