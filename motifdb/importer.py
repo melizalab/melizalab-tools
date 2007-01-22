@@ -13,7 +13,6 @@ from dlab.pcmio import sndfile
 from dlab.datautils import bimatrix
 import scipy as nx
 import tempfile, shutil
-import pdb
 
 _nfft = 320
 _shift = 10
@@ -25,12 +24,9 @@ _extractor = '/home/dmeliza/src/fog/fog_extract'
 def importlibrary(h5file, mapfile, stimsetname, featuredir=None):
     """
     This function generates an h5 motif database from a modified
-    old-style mapfile. This file consists of lines with 3 white-space
+    old-style mapfile. This file consists of lines with 2 white-space
     delimited fields.  The first gives the symbol name; the second
-    gives the filename of the wavefile containing the full motif, and
-    the third points to a feature mapfile.  We're going to regenerate
-    the features using this file.  If the motif is not decomposed,
-    there should be no 3rd field.
+    gives the filename of the wavefile containing the full motif.
 
     The file can also contain lines with a single entry; these should
     contain a fully-qualified pathname, which is used to point the importer
@@ -76,63 +72,9 @@ def importlibrary(h5file, mapfile, stimsetname, featuredir=None):
             if featuredir != None:
                 idxfile = os.path.join(featuredir, symbol, "%s_feats.bin" % symbol)
                 if not os.path.exists(idxfile):
-                    print "---> Error: %s does not exist " % idxfile
-                    continue
-
-                fmap_dat = bimatrix(idxfile)
-
-                # first sort the feature map
-                fmap_srt,old_srt,new_srt = sortfeatures(fmap_dat)
-                
-                fname = os.path.basename(idxfile)
-                fmap = schema.Featmap({
-                    'name' : os.path.splitext(fname)[0] + "_sort",
-                    'nfeats' : nx.amax(fmap_dat) + 1,
-                    'nfft' : _nfft,
-                    'shift' : _shift,
-                    'mtm_bw' : _mtm_bw
-                    })
-                m.add_featmap(symbol, fmap, fmap_srt)
-                print "---> Sorted feature map from %s" % idxfile
-
-                # now do the decomposition
-
-                # generate a temporary directory for all the crap fog_extract will produce
-                idxdir = os.path.dirname(idxfile)
-                tdir = tempfile.mkdtemp()
-
-                # copy the signal to a pcm file in the temp dir
-                signal = sndfile(m.get_data(symbol)).read()
-                pcmname = os.path.join(tdir, "%s.pcm" % symbol)
-                sndfile(pcmname, 'w').write(signal)
-                
-                cmd = "%s -v --nfft %d --fftshift %d --fbdw %f --tbdw %f --lbfile %s %s" % \
-                      (_extractor, fmap['nfft'], fmap['shift'],  _fbdw, _tbdw,
-                       idxfile, os.path.join(tdir, pcmname))
-
-                print cmd
-                fp = os.popen(cmd)
-                # parse the output from fog_extract
-                for line in fp:
-                     if len(line) > 0 and line[0].isdigit():
-                         fields = line.split()
-                         featnum = int(fields[0])
-                         feat = schema.Feature({
-                             'id' : new_srt[featnum],
-                             'offset' : (float(fields[1]), float(fields[2])),
-                             'dim' : (float(fields[3]), float(fields[4])),
-                             'bdw' : (_fbdw, _tbdw),
-                             'maxpower' : float(fields[5]),
-                             'area' : int(fields[6])
-                             })
-                         s = sndfile(os.path.join(tdir, "%s_sfeature_%03d.pcm" % (symbol, featnum)))
-                         # add the feature to the sorted featuremap
-                         m.add_feature(symbol, 0, feat, s.read())
-                         print "---> Import feature %d " % featnum
-                # end loop through output
-                fp.close()
-                # cleanup
-                shutil.rmtree(tdir)
+                    print "---> Feature map %s does not exist, skipping " % idxfile
+                else:
+                    importfeaturemap(m, symbol, idxfile)
                 
             else:
                 print "---> No feature map defined"
@@ -140,6 +82,84 @@ def importlibrary(h5file, mapfile, stimsetname, featuredir=None):
     # end line loop
     print "Done importing file %s" % mapfile
     del(m)
+
+
+
+def importfeaturemap(m, symbol, idxfile):
+    """
+    Imports a single feature map into the database. Checks to see
+    if the map already exists (by comparing it to all the other defined
+    feature maps); if it does not exists, imports the map, and generates
+    the feature set and imports those too.
+
+    Assumes that the motif symbol is already defined.
+    """
+
+    fmap_dat = bimatrix(idxfile)
+
+    # first sort the feature map
+    fmap_srt,old_srt,new_srt = sortfeatures(fmap_dat)
+    # check for something that's byte-identical in the db
+    defined_fmaps = m.get_featmaps(symbol)
+    for f in defined_fmaps:
+        idx = m.get_featmap_data(symbol, f['id'])
+        if nx.all(idx==fmap_srt):
+            print "---> Feature map already in DB, skipping..."
+            return
+        
+
+    fname = os.path.basename(idxfile)
+    fmap = schema.Featmap({
+        'name' : os.path.splitext(fname)[0] + "_sort",
+        'nfeats' : nx.amax(fmap_dat) + 1,
+        'nfft' : _nfft,
+        'shift' : _shift,
+        'mtm_bw' : _mtm_bw
+        })
+
+    
+    fmap_num = m.add_featmap(symbol, fmap, fmap_srt)
+    print "---> Imported feature map %d from %s" % (fmap_num, idxfile)
+
+    # now do the decomposition
+
+    # generate a temporary directory for all the crap fog_extract will produce
+    idxdir = os.path.dirname(idxfile)
+    tdir = tempfile.mkdtemp()
+
+    # copy the signal to a pcm file in the temp dir
+    signal = sndfile(m.get_data(symbol)).read()
+    pcmname = os.path.join(tdir, "%s.pcm" % symbol)
+    sndfile(pcmname, 'w').write(signal)
+
+    cmd = "%s -v --nfft %d --fftshift %d --fbdw %f --tbdw %f --lbfile %s %s" % \
+          (_extractor, fmap['nfft'], fmap['shift'],  _fbdw, _tbdw,
+           idxfile, os.path.join(tdir, pcmname))
+
+    print cmd
+    fp = os.popen(cmd)
+    # parse the output from fog_extract
+    for line in fp:
+         if len(line) > 0 and line[0].isdigit():
+             fields = line.split()
+             featnum = int(fields[0])
+             feat = schema.Feature({
+                 'id' : new_srt[featnum],
+                 'offset' : (float(fields[1]), float(fields[2])),
+                 'dim' : (float(fields[3]), float(fields[4])),
+                 'bdw' : (_fbdw, _tbdw),
+                 'maxpower' : float(fields[5]),
+                 'area' : int(fields[6])
+                 })
+             s = sndfile(os.path.join(tdir, "%s_sfeature_%03d.pcm" % (symbol, featnum)))
+             # add the feature to the sorted featuremap
+             m.add_feature(symbol, fmap_num, feat, s.read())
+             print "---> Import feature %d " % featnum
+    # end loop through output
+    fp.close()
+    # cleanup
+    shutil.rmtree(tdir)
+
 
 def sortfeatures(fmap):
     out = fmap.copy()

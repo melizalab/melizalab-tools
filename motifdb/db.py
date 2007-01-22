@@ -9,6 +9,7 @@ CDM, 1/2007
 
 import os
 from tables import *
+from dlab import datautils
 import schema
 
 
@@ -188,10 +189,10 @@ class motifdb(object):
         # first determine the correct index to use
         try:
             table = self.h5.getNode("/featmaps/%s" % motifname)
-            index = table.nrows - 1
         except NoSuchNodeError:
             table = self.__maketable('/featmaps', motifname, schema.Featmap.descr)
-            index = 0
+
+        index = table.nrows
 
         # now store the data, in case something goes wrong
         mapname = self._mapname % (motifname, index)
@@ -206,6 +207,7 @@ class motifdb(object):
         featmap.copyto(r)
         r.append()
         table.flush()
+        return index
 
     def add_feature(self, motif, featmap, feature, feat_data):
         """
@@ -391,6 +393,24 @@ class motifdb(object):
             return self.get_featmap_data(fields[0], int(fields[1]))
 
         return self.get_feature_data(fields[0], int(fields2[0]), int(fields2[1]))        
+
+
+    def reconstruct(self, features):
+        """
+        Uses the database to reconstruct a signal from a collection of features
+        """
+        offsets = []
+        data = []
+        for feat in features:
+            offsets.append(feat['offset'][0] * features.Fs / 1000)
+            data.append(self.get_feature_data(feat['motif'],
+                                              feat['featmap'],
+                                              feat['id']))
+
+        if features.length!=None:
+            length = features.length * features.Fs / 1000
+
+        return datautils.offset_add(offsets, data, length)
         
 
 # end motifdb class

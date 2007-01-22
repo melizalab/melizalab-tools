@@ -106,7 +106,7 @@ class motifseq(seqparser):
         for motif in motifs:
             offsets.append(offset)
             if isinstance(motif, featureset):
-                S = motif.reconstruct(self.db)
+                S = self.db.reconstruct(motif)
             else:
                 wavfile = self.db.get_motif_data(motif['name'])
                 s = pcmio.sndfile(wavfile)
@@ -342,26 +342,6 @@ class featureset(recarray):
         self.length = length
         self.Fs = Fs
 
-    def reconstruct(self, db):
-        """
-        Generates the signal for the feature set.
-        db - a db.motifdb object, used to look up feature data
-        """
-        # if the sampling rates don't match there's no easy solution,
-        # so I'm just going to force all the features to use the sampling
-        # rate of the first one
-        offsets = []
-        data = []
-        for feat in self:
-            offsets.append(feat['offset'][0] * self.Fs / 1000)
-            data.append(db.get_feature_data(feat['motif'],
-                                            feat['featmap'],
-                                            feat['id']))
-
-        if self.length!=None:
-            length = self.length * self.Fs / 1000
-
-        return datautils.offset_add(offsets, data, length)
 
 class grouchyset(set):
     """
