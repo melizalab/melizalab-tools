@@ -7,92 +7,227 @@
  */
 
 #include <Python.h>
-#include <pcmio.h>
-//#include <numpy/arrayobject.h>
 
-static PyObject*
-dataio(PyObject* self, PyObject* args)   /* proto for all exposed funcs */
+#include "numpy/arrayobject.h"
+#include <pcmio.h>
+
+typedef struct {
+	PyObject_HEAD
+	PCMFILE *pfp;
+} PcmfileObject;
+
+/* destructor */
+static void
+pcmfile_dealloc(PcmfileObject* self) 
 {
-	if(!PyArg_ParseTuple(args, ""))    /* receive arguments (no args) */
-		return 0;                      /* propagate error if any */
-	return Py_BuildValue("s","it works!"); /* build and return result */
+	if (self->pfp)
+		pcm_close(self->pfp);
+	self->ob_type->tp_free((PyObject*)self);
 }
 
-/*
- * Reads in a pcm file as an array
- */
-/* static PyObject* */
-/* readpcm(PyObject* self, PyObject* args) */
-/* { */
-/* 	const int entry=1; */
-/* 	char *filename; */
-/* 	PCMFILE *pfp; */
-/* 	struct pcmstat pstat; */
-/* 	int len; */
-
-/* 	short *buf_p; */
-/* 	PyArrayObject *pcmdata; */
-	
-/* 	/\* parse args *\/ */
-/* 	if(!PyArg_ParseTuple(args, "s", &filename))     */
-/* 		return NULL; */
-
-/* 	/\* open pcm file *\/ */
-/* 	pfp = pcm_open(filename, "r"); */
-/* 	pcm_stat(pfp, &pstat); */
-
-/* 	if (pcm_seek(pfp, entry) == -1) { */
-/* 		pcm_close(pfp); */
-/* 		PyErr_SetString(PyExc_IOError, "Unable to seek to entry 1 of file."); */
-/* 		return NULL; */
-/* 	} */
-
-/* 	/\* allocate data *\/ */
-/* 	len = pstat.nsamples; */
-/* 	pcmdata = (PyArrayObject*) PyArray_FromDims(1,&len,PyArray_SHORT); */
-/* 	buf_p = (short *)pcmdata->data; */
-	
-/* 	/\* read it in *\/ */
-/* 	if (pcm_read(pfp, &buf_p, &len) == -1) { */
-/* 		pcm_close(pfp); */
-/* 		Py_XDECREF(pcmdata); */
-/* 		PyErr_SetString(PyExc_IOError, "Unable to read from file."); */
-/* 		return NULL; */
-/* 	} */
-	
-/* 	//ret = PyBuildValue("O", pcmdata); */
-/* 	pcm_close(pfp); */
-/* 	//Py_XDECREF(pcmdata); */
-/* 	return PyArray_Return(pcmdata); */
-/* } */
-	
-static PyObject*
-getentries(PyObject* self, PyObject* args)
+/* ctor */
+static int
+pcmfile_init(PcmfileObject* self, PyObject* args)
 {
 	char *filename;
-	PCMFILE *pfp;
+	char *mode = "r";
 
-	/* parse args */
-	if(!PyArg_ParseTuple(args, "s", &filename))    
-		return NULL;
-	
-	if ((pfp = pcm_open(filename, "r")) == NULL) {
-		PyErr_SetString(PyExc_IOError, "Unable to open file.");
-		return NULL;
+	if (!PyArg_ParseTuple(args, "s|s", &filename, &mode))
+		return -1;
+
+	if (self->pfp)
+		pcm_close(self->pfp);
+
+	if ((self->pfp = pcm_open(filename, mode)) == NULL) {
+		PyErr_SetString(PyExc_IOError, "Unable to open file");
+		return -1;
 	}
-	return Py_BuildValue("i", pfp->nentries);
-	
+
+	return 0;
 }
 
+/* methods */
 
-static PyMethodDef dataioMethods[] = {   /* methods exposed from module */
-	{"dataio", dataio, METH_VARARGS, "A dataio function"},    /* descriptor */
-	{"getentries", getentries, METH_VARARGS, "Returns the number of entries in a pcm_seq2 file"},
-	{0}                                                 /* sentinel   */
+static PyObject*
+pcmfile_nentries(PcmfileObject* self)
+{
+	return Py_BuildValue("i", self->pfp->nentries);
+}
+
+static PyObject*
+pcmfile_samplerate(PcmfileObject* self)
+{
+	struct pcmstat s;
+	pcm_stat(self->pfp, &s);
+	return Py_BuildValue("i", s.samplerate);
+}
+
+static PyObject*
+pcmfile_nsamples(PcmfileObject* self)
+{
+	struct pcmstat s;
+	pcm_stat(self->pfp, &s);
+	return Py_BuildValue("i", s.nsamples);
+}
+
+static PyObject*
+pcmfile_entry(PcmfileObject* self)
+{
+	return Py_BuildValue("i", self->pfp->entry);
+}
+
+static PyObject*
+pcmfile_seek(PcmfileObject* self, PyObject* args)
+{
+	int entry;
+	if (!PyArg_ParseTuple(args, "i", &entry))
+		return NULL;
+
+	if (pcm_seek(self->pfp, entry) != 0) {
+		PyErr_SetString(PyExc_IOError, "Invalid entry");
+		return NULL;
+	}
+
+	return Py_BuildValue("");
+}
+
+static PyObject*
+pcmfile_read(PcmfileObject* self)
+{
+	/* allocate data */
+ 	int nsamples;
+ 	npy_intp shape[1];
+	short *buf_p;
+ 	PyArrayObject *pcmdata;
+
+	if (pcm_read(self->pfp, &buf_p, &nsamples) == -1) {
+		PyErr_SetString(PyExc_IOError, "Unable to read from file.");
+		return NULL;
+	}
+ 	shape[0] = nsamples;
+
+ 	pcmdata  = (PyArrayObject*) PyArray_SimpleNew(1,shape,NPY_SHORT);
+ 	memcpy(PyArray_DATA(pcmdata), (void*)buf_p, nsamples * sizeof(short));
+	free(buf_p);
+	//pcmdata = (PyArrayObject*) PyArray_SimpleNewFromData(1,shape,NPY_SHORT, buf_p);
+
+	return Py_BuildValue("N", pcmdata);
+}
+
+static PyObject*
+pcmfile_write(PcmfileObject* self, PyObject* args)
+{
+	PyObject* o;
+	PyArrayObject* data;
+	if (!PyArg_ParseTuple(args, "O", &o))
+		return NULL;
+
+	data = (PyArrayObject*) PyArray_FromAny(o, PyArray_DescrFromType(NPY_SHORT), 
+						1, 1, NPY_CONTIGUOUS, NULL);
+	if (data==NULL)
+		return NULL;
+	
+	pcm_write(self->pfp, (short *)PyArray_DATA(data), PyArray_DIM(data, 0));
+	Py_XDECREF(data);
+	return Py_BuildValue("");
+}	
+	
+
+static PyMethodDef pcmfile_methods[]= {
+	{"nentries", (PyCFunction)pcmfile_nentries, METH_NOARGS,
+	 "Returns the number of entries in the file"},
+	{"samplerate", (PyCFunction)pcmfile_samplerate, METH_NOARGS,
+	 "Returns the sample rate of the current entry"},
+	{"nsamples", (PyCFunction)pcmfile_nsamples, METH_NOARGS,
+	 "Returns the number of samples in the current entry"},
+	{"entry", (PyCFunction)pcmfile_entry, METH_NOARGS,
+	 "Returns the current entry"},
+	{"seek", (PyCFunction)pcmfile_seek, METH_VARARGS,
+	 "Seek to a specific entry in the file"},
+	{"read", (PyCFunction)pcmfile_read, METH_NOARGS,
+	 "Read data from the current entry"},
+	{"write", (PyCFunction)pcmfile_write, METH_VARARGS,
+	 "Write data to the current entry"},
+	{NULL}
 };
 
-PyMODINIT_FUNC
-initdataio()                             /* called by Python on import */
+static PyTypeObject PcmfileType = {
+	PyObject_HEAD_INIT(NULL)
+	0,                             /*ob_size*/
+	"dataio.pcmfile",              /*tp_name*/
+	sizeof(PcmfileObject), /*tp_basicsize*/
+	0,                             /*tp_itemsize*/
+	(destructor)pcmfile_dealloc,                         /*tp_dealloc*/
+	0,                         /*tp_print*/
+	0,                         /*tp_getattr*/
+	0,                         /*tp_setattr*/
+	0,                         /*tp_compare*/
+	0,                         /*tp_repr*/
+	0,                         /*tp_as_number*/
+	0,                         /*tp_as_sequence*/
+	0,                         /*tp_as_mapping*/
+	0,                         /*tp_hash */
+	0,                         /*tp_call*/
+	0,                         /*tp_str*/
+	0,                         /*tp_getattro*/
+	0,                         /*tp_setattro*/
+	0,                         /*tp_as_buffer*/
+	Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /*tp_flags*/
+	"Wrapper class for pcm files",           /* tp_doc */
+	0,		               /* tp_traverse */
+	0,		               /* tp_clear */
+	0,		               /* tp_richcompare */
+	0,		               /* tp_weaklistoffset */
+	0,		               /* tp_iter */
+	0,		               /* tp_iternext */
+	pcmfile_methods,             /* tp_methods */
+	0,             /* tp_members */
+	0,                         /* tp_getset */
+	0,                         /* tp_base */
+	0,                         /* tp_dict */
+	0,                         /* tp_descr_get */
+	0,                         /* tp_descr_set */
+	0,                         /* tp_dictoffset */
+	(initproc)pcmfile_init,      /* tp_init */
+	0,                         /* tp_alloc */
+	0,                 /* tp_new */
+};
+
+static PyObject*
+zeros(PyObject* self)
 {
-	Py_InitModule("dataio", dataioMethods);  /* init module with methods */
+	npy_intp shape[1];
+	shape[0] = 100;
+	
+	fprintf(stderr, "pre-alloc\n");
+	PyArrayObject *pcmdata  = (PyArrayObject*) PyArray_SimpleNew(1,shape,NPY_DOUBLE);
+	fprintf(stderr, "post-alloc\n");
+	PyArray_FILLWBYTE(pcmdata, 0);
+
+	return Py_BuildValue("N", pcmdata);
+}
+
+static PyMethodDef dataio_methods[] = {
+	{"zeros", (PyCFunction)zeros, METH_NOARGS, "test function"},
+	{NULL}  /* Sentinel */
+};
+
+#ifndef PyMODINIT_FUNC	/* declarations for DLL import/export */
+#define PyMODINIT_FUNC void
+#endif
+PyMODINIT_FUNC
+initdataio(void)
+{
+	import_array();
+	PyObject* m;
+	
+	PcmfileType.tp_new = PyType_GenericNew;
+	if (PyType_Ready(&PcmfileType) < 0)
+		return;
+	
+	m = Py_InitModule3("dataio", dataio_methods,
+                       "Wrapper module for libdataio");
+	
+	Py_INCREF(&PcmfileType);
+	PyModule_AddObject(m, "pcmfile", (PyObject *)&PcmfileType);
 }
