@@ -108,10 +108,8 @@ pcmfile_read(PcmfileObject* self)
 
  	pcmdata  = (PyArrayObject*) PyArray_SimpleNew(1,shape,NPY_SHORT);
  	memcpy(PyArray_DATA(pcmdata), (void*)buf_p, nsamples * sizeof(short));
-	free(buf_p);
-	//pcmdata = (PyArrayObject*) PyArray_SimpleNewFromData(1,shape,NPY_SHORT, buf_p);
 
-	return Py_BuildValue("N", pcmdata);
+	return PyArray_Return(pcmdata);
 }
 
 static PyObject*
