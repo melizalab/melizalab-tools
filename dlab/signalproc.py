@@ -254,8 +254,8 @@ def mtmspec(signal, **kwargs):
 
     # for real signals the spectrogram is one-sided
     if signal.dtype.kind!='c':
-        outrows = nfft % 2 and nfft/2+1 or (nfft+1)/2
-        return S[0:outrows,:]
+        outrows = nfft % 2 and (nfft+1)/2 or nfft/2+1
+        return S[0:outrows+1,:]
     else:
         return S
 
