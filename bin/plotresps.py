@@ -189,7 +189,8 @@ def plot_motif(pcmfile, features=None, nfft=320, shift=10):
         if retio: ioff()
         for fnum in nx.unique(features[features>-1]):
             y,x = center_of_mass(features==fnum)
-            text(T[int(x)], F[int(y)], "%d" % fnum, color=plotutils.colorcycle(fnum), fontsize=20)
+##            text(T[int(x)], F[int(y)], "%d" % fnum, color=plotutils.colorcycle(fnum), fontsize=20)
+            text(T[int(x)], F[int(y)], "%d" % fnum, color='w', fontsize=20)            
 
         draw()
         if retio: ion()
