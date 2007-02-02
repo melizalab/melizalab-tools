@@ -13,64 +13,64 @@ import pdb
 _dtype = nx.int16
 
 
-## def find_spikes(fp, **kwargs):
-##     """
-##     Extracts spike data from raw pcm data.  A spike occurs when
-##     the signal crosses a threshold.  This threshold can be defined
-##     in absolute terms, or relative to the RMS of the signal.
+def find_spikes(fp, **kwargs):
+    """
+    Extracts spike data from raw pcm data.  A spike occurs when
+    the signal crosses a threshold.  This threshold can be defined
+    in absolute terms, or relative to the RMS of the signal.
 
-##     fp - list of pcmfile objects. Needs to support nentries(), seek(int)
-##          and read()
+    fp - list of pcmfile objects. Needs to support nentries(), seek(int)
+         and read()
 
-##     Optional arguments:
-##     rms_thres  = 4.5  - factor by which the signal must exceed the
-##                         rms of the whole file
-##     abs_thresh        - absolute threshold spikes must cross. if this is
-##                         defined, the rms_thresh value is ignored
+    Optional arguments:
+    rms_thres  = 4.5  - factor by which the signal must exceed the
+                        rms of the whole file
+    abs_thresh        - absolute threshold spikes must cross. if this is
+                        defined, the rms_thresh value is ignored
 
-##     refrac            - the closest two events can be (in samples)
-##     window            - the number of points on each side of the spike peak to be
-##                         extract
+    refrac            - the closest two events can be (in samples)
+    window            - the number of points on each side of the spike peak to be
+                        extract
 
-##     Returns a tuple of three arrays: (spikes, entries, events)
+    Returns a tuple of three arrays: (spikes, entries, events)
 
-##     If N events are detected, spikes has dimension (window*2 x N),
-##     entries has dimension (N) and events has dimension (N)
-##     """
-##     if kwargs.has_key('abs_thresh'):
-##         fac = False;
-##         abs_thresh = kwargs['abs_thresh']
-##     else:
-##         fac = True;
-##         rms_fac = kwargs.get('rms_thresh',4.5)
+    If N events are detected, spikes has dimension (window*2 x N),
+    entries has dimension (N) and events has dimension (N)
+    """
+    if kwargs.has_key('abs_thresh'):
+        fac = False;
+        abs_thresh = kwargs['abs_thresh']
+    else:
+        fac = True;
+        rms_fac = kwargs.get('rms_thresh',4.5)
 
-##     nchan = len(fp)
+    nchan = len(fp)
 
-##     # some sanity checks
-##     nentries = nx.asarray([f.nentries() for f in fp],_dtype)
-##     if not (nentries==nentries[0]).all():
-##         raise ValueError, "All files must have the same number of entries"
-##     nentries = nentries[0]
+    # some sanity checks
+    nentries = nx.asarray([f.nentries() for f in fp],_dtype)
+    if not (nentries==nentries[0]).all():
+        raise ValueError, "All files must have the same number of entries"
+    nentries = nentries[0]
     
-##     # need to collect stats for all files
-##     thresh = nx.zeros(nchan,_dtype);
-##     for i in range(nchan):
-##         stats = signalstats(fp[i])
-##         if not fac:
-##             thresh[i] = stats['dcoff'] + abs_thresh
-##         else:
-##             thresh[i] = stats['dcoff'] + rms_fac * stats['rms']
+    # need to collect stats for all files
+    thresh = nx.zeros(nchan,_dtype);
+    for i in range(nchan):
+        stats = signalstats(fp[i])
+        if not fac:
+            thresh[i] = stats['dcoff'] + abs_thresh
+        else:
+            thresh[i] = stats['dcoff'] + rms_fac * stats['rms']
 
-##     spikes = []
-##     events = []
-##     for i in range(1,nentries+1):
-##         signal = combine_channels(fp, i)
+    spikes = []
+    events = []
+    for i in range(1,nentries+1):
+        signal = combine_channels(fp, i)
 
-##         ev = thresh_spikes(signal, thresh, **kwargs)
-##         spikes.append(extract_spikes(signal, ev, **kwargs))
-##         events.append(ev)
+        ev = thresh_spikes(signal, thresh, **kwargs)
+        spikes.append(extract_spikes(signal, ev, **kwargs))
+        events.append(ev)
 
-##     return (spikes, events)
+    return (spikes, events)
 
 
 def extract_spikes(S, events, **kwargs):
@@ -225,11 +225,6 @@ def combine_channels(fp, entry):
         
     return signal
 
-def write_features(filename, fet):
-    fp = open(filename,'wt')
-    fp.write("%d\n" % fet.shape[1])
-    io.write_array(fp, fet.astype('i'))
-
 
 if __name__=="__main__":
 
@@ -240,33 +235,17 @@ if __name__=="__main__":
     pcmfiles = [basedir + pattern % d for d in range(2,3)]
 
     # open files
+    print "---> Open test files"
     pfp = [dataio.pcmfile(fname) for fname in pcmfiles]
 
-    print "---> Generating raw data file"
+    print "---> Extract raw data from files"
     signal = combine_channels(pfp, 2)
-    fp = open('test.dat', 'wb')
-    io.fwrite(fp, signal.size, signal)
 
     print "---> Finding spikes..."
     spikes,events = find_spikes(pfp)
-    allspikes = nx.concatenate((spikes),axis=0)
-    fp = open('test.spk.1','wb')
-    io.fwrite(fp, allspikes.size, allspikes.squeeze())
-    fp.close()
     
     print "---> Computing features..."
     pcs = get_pcs(allspikes, ndims=3)
+    
     print "---> Calculating projections..."
-    n,ndims,nchans = pcs.shape
     proj = get_projections(allspikes, pcs)
-    # need to calculate time stamps
-    proj.shape = (proj.shape[0], ndims*nchans)
-    proj.resize((proj.shape[0], proj.shape[1]+1))
-    offset = 0
-    for i in range(len(events)):
-        e = events[i]
-        proj[offset:offset+len(e),-1] = e
-        proj[offset:offset+len(e),-1] += i * 80000
-        offset += len(e)
-
-    write_features('test.fet.1', proj)
