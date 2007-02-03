@@ -7,7 +7,7 @@ time offsets for triggers and stimulus presentation
 """
 
 import tables as t
-import re, sys
+import re, sys, os, shutil
     
 
 class explog(object):
@@ -133,13 +133,17 @@ class Channels(t.IsDescription):
     name     = t.StringCol(64)
 
 
-def readexplog(explog, outfile):
+def readexplog(logfile, outfile, site_sort=False):
     """
     Parses episode information from the explog. Generates an h5
     file with the entry data in one table and the stimulus data in
     another.
+
+    site_sort - if true, makes a directory for each pen/site and moves
+                the files into that directory.
     """
 
+    expdir = os.path.dirname(logfile)
     channels = []
     files  = {}
     triggers = {}
@@ -159,10 +163,10 @@ def readexplog(explog, outfile):
     # other keyed by the absolute start time of the stimuli
 
 
-    fp = open(explog)
+    fp = open(logfile)
     line_num = 0
 
-    h5 = t.openFile(outfile, mode='w', title="parsed explog %s" % explog,
+    h5 = t.openFile(outfile, mode='w', title="parsed explog %s" % logfile,
                     filters=t.Filters(complevel=1, complib='zlib'))
     entries = _maketable(h5, h5.root,'entries',Entries)
     stimuli = _maketable(h5, h5.root,'stimuli',Stimuli)
@@ -175,7 +179,17 @@ def readexplog(explog, outfile):
             m1 = _reg_create.search(line)
             if m1:
                 if m1.group('action')=='created':
-                    files[m1.group('base')] = m1.group('file')
+                    # we try to locate the file either in the current directory
+                    # or in a subdirectory site_<pen>_<site>
+                    seqfile = m1.group('file')
+                    subdir = "site_%d_%d" % (currentpen, currentsite)
+                    if site_sort and os.path.exists(seqfile):
+                        if not os.path.exists(subdir): os.mkdir(subdir)
+                        print "%s -> %s" % (seqfile, subdir)
+                        os.system("mv %s %s " % (seqfile, subdir))
+                    if os.path.exists(os.path.join(subdir, seqfile)):
+                        seqfile = os.path.join(subdir, seqfile)
+                    files[m1.group('base')] = seqfile
                     entryoffset = lastentry
                 else:
                     files.pop(m1.group('base'))
@@ -300,5 +314,3 @@ if __name__=="__main__":
     test_file = '../data/test.explog'
 
     z = explog(test_file)
-        
-    

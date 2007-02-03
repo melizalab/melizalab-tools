@@ -55,10 +55,6 @@ class site(explog.explog):
         self._filecache = filecache()
         self._statscache = statscache(self._filecache)
 
-
-    def __del__(self):
-        self.elog.close()
-
     def getsiteentry(self, entry, channels=None):
         return explog.explog.getsiteentry(self, self.site, entry, channels)
 
