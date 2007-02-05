@@ -430,29 +430,3 @@ def sincresample(S, npoints, shift=0):
 
     return y[npoints:npoints*2,:]
 
-
-def sinc_table(factors, window_len, precision=nx.float32):
-    """
-    Generates a sinc kernel table for fast sinc interpolation
-    """
-    window_len = window_len*2+1
-    PI = nx.pi
-    asinc = nx.zeros((factors,window_len), dtype=precision)
-    code = """
-        #line 423 "signalproc.py"
-	double DSINC = 1.0/(factors-1);
-	asinc(0,window_len/2-1) = 1.0f;
-	asinc(factors-1,window_len/2) = 1.0f;
-	for (int isinc=1; isinc<factors-1; ++isinc) {
-		double x = -window_len/2+1-DSINC*isinc;
-		for (int i=0; i<window_len; ++i,x+=1.0) {
-			asinc(isinc,i) = sin(PI*x)/(PI*x) *
-                                         (0.54 - 0.46 * cos(PI * (2*x + window_len)/window_len));
-		}
-	}
-        """
-
-    weave.inline(code,['asinc','PI','factors','window_len'],
-                 type_converters=weave.converters.blitz)
-
-    return asinc
