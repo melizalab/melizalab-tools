@@ -10,7 +10,7 @@ CDM, 1/2007
 import scipy as nx
 import scipy.fftpack as sfft
 from scipy.linalg import norm, get_blas_funcs
-from scipy.signal import hamming, fftconvolve
+from scipy.signal import get_window, fftconvolve
 from scipy import weave
 import tridiag
 
@@ -52,7 +52,7 @@ def stft(S, **kwargs):
 
     """
     nfft = int(kwargs.get('nfft', 320))
-    window = kwargs.get('window', hamming)
+    window = kwargs.get('window', 'hamming')
 
     if len(S) == 0:
         raise ValueError, "Empty input signal."
@@ -63,6 +63,8 @@ def stft(S, **kwargs):
     # generate the window
     if callable(window):
         window = window(nfft)
+    elif isinstance(window, str):
+        window = get_window(window, nfft)
     elif len(window) != nfft:
         window.resize(nfft, refcheck=True)
 
@@ -368,7 +370,7 @@ def dpss(npoints, mtm_p):
             E[:,j] = -E[:,j]
             
     # calculate eigenvalues
-    s = nx.concatenate(([2*W], 4*W*sinc(2*W*nx.arange(1,npoints,dtype='d'))))
+    s = nx.concatenate(([2*W], 4*W*nx.sinc(2*W*nx.arange(1,npoints,dtype='d'))))
     # filter each taper with its flipped version
     fwd = sfft.fft(E,npoints*2,axis=0)
     rev = sfft.fft(nx.flipud(E),npoints*2,axis=0)
@@ -382,5 +384,75 @@ def dpss(npoints, mtm_p):
 
     return (V,E)
 
-def sinc(v):
-    return nx.sin(v * nx.pi)/(v * nx.pi)
+_sinc_res = 1025
+## _asinc = []
+
+def sincresample(S, npoints, shift=0):
+    """
+    Resamples a signal S using sinc resampling and optional timeshifting.
+    S is the input signal, which can be a vector or a 2D array of columns
+    npoints is the number of points required in each column after resampling.
+
+    shift is either a scalar or a vector equal in length to the number
+    of columns in S, which indicates how much each channel should be timeshifted.
+    This can be useful in compensating for sub-sampling rate skew in
+    data acquisition. Shift values must be between -1 and 1.
+
+    returns the resampled data, with the same number of columns and npoints rows
+
+    Adapted from MATLAB code by Malcolm Lidierth, 07/06
+    """
+    
+    x = nx.atleast_2d(S)
+    x = nx.concatenate([nx.fliplr(x), x, nx.fliplr(x)], axis=0)
+    np = npoints*3
+    nt = x.shape[0]
+    t  = nx.arange(nt)
+    t.shape = (nt,1)
+
+    ts = nx.arange(0, np/(1.*np/nt), (t.max()+1.)/np)
+    ts.shape = (np,1)
+    ts = nx.kron(nx.ones(nt),ts) - nx.kron(nx.ones(np),t).transpose()
+
+    # hamming window
+    th = ts+nt-1
+    w  = 0.54 - 0.46*nx.cos((2*nx.pi*th/th.max()))
+
+    # shift in multiples of sampling interval
+    ts += shift
+
+    # sinc functions
+    h = nx.sinc(ts) * w
+
+    # convolution by matrix mult
+    gemm,= get_blas_funcs(('gemm',),(h, x))
+    y = gemm(1., h, x)
+
+    return y[npoints:npoints*2,:]
+
+
+def sinc_table(factors, window_len, precision=nx.float32):
+    """
+    Generates a sinc kernel table for fast sinc interpolation
+    """
+    window_len = window_len*2+1
+    PI = nx.pi
+    asinc = nx.zeros((factors,window_len), dtype=precision)
+    code = """
+        #line 423 "signalproc.py"
+	double DSINC = 1.0/(factors-1);
+	asinc(0,window_len/2-1) = 1.0f;
+	asinc(factors-1,window_len/2) = 1.0f;
+	for (int isinc=1; isinc<factors-1; ++isinc) {
+		double x = -window_len/2+1-DSINC*isinc;
+		for (int i=0; i<window_len; ++i,x+=1.0) {
+			asinc(isinc,i) = sin(PI*x)/(PI*x) *
+                                         (0.54 - 0.46 * cos(PI * (2*x + window_len)/window_len));
+		}
+	}
+        """
+
+    weave.inline(code,['asinc','PI','factors','window_len'],
+                 type_converters=weave.converters.blitz)
+
+    return asinc
