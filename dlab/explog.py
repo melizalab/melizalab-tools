@@ -7,7 +7,7 @@ time offsets for triggers and stimulus presentation
 """
 
 import tables as t
-import re, sys, os, shutil
+import re, sys, os
     
 
 class explog(object):
@@ -102,7 +102,8 @@ class explog(object):
     @property
     def nchannels(self):
         return len(self._channels)
-        
+
+
     
 _reg_create = re.compile(r"'(?P<file>(?P<base>\w+)_\w+.pcm_seq2)' (?P<action>created|closed)")
 _reg_triggeron = re.compile(r"TRIG_ON, (?P<chan>\w+):entry (?P<entry>\d*) \((?P<onset>\d*)\)")
@@ -128,6 +129,7 @@ class Entries(t.IsDescription):
 class Stimuli(t.IsDescription):
     abstime  = t.UInt64Col(pos=0)
     name     = t.StringCol(128, pos=1)
+    entrytime= t.UInt64Col(pos=2)
 
 class Channels(t.IsDescription):
     name     = t.StringCol(64)
@@ -290,17 +292,64 @@ def readexplog(logfile, outfile, site_sort=False):
                 print "parse error: Unparseable QQQQ line: %s" % line
 
     # done parsing file
+    fp.close()
 
     for c in channels:
         row = chantable.row
         row['name'] = c
         row.append()
-        
-    fp.close()
+
+    # sync entries
     h5.flush()
+    assignstimuli(h5)
+
+
     return h5
 
 # end readexplog()
+
+def assignstimuli(h5, cull_unrecorded=True):
+    """
+    Sets the stimulus entrytime values to match the corresponding
+    entries in the entry table.
+
+    If cull_unrecorded is true, the stimulus records that don't
+    correspond to any recorded entry are removed from the database
+    """
+    entries = h5.root.entries
+
+    coords = [r.nrow for r in entries.where(entries.cols.channel==0)]
+    start_times = entries.col('abstime')[coords]
+    stop_times = entries.col('duration')[coords] + start_times      
+
+    i = 0
+    stimuli = h5.root.stimuli
+    for stimulus in stimuli:
+        atime = stimulus['abstime']
+        while i < len(stop_times):
+            if atime < start_times[i]:
+                stimulus['entrytime'] = 0L
+                stimulus.update()
+                break
+            elif atime < stop_times[i]:
+                stimulus['entrytime'] = long(start_times[i])
+                stimulus.update()
+                break
+            else:
+                i += 1
+
+    stimuli.flush()
+    
+    if cull_unrecorded:
+        # easiest just to copy the valid rows to a new table
+        valid = stimuli.getWhereList(stimuli.cols.entrytime!=0)
+        stimuli.rename('oldstimuli')
+        newstimuli = _maketable(h5, '/', 'stimuli', Stimuli)
+        newstimuli.append(stimuli[:][valid])
+        newstimuli.flush()
+        stimuli.remove()
+
+    h5.flush()
 
 def _maketable(file, base, name, descr):
     tbl = file.createTable(base, name, descr)
@@ -312,5 +361,6 @@ def _maketable(file, base, name, descr):
 if __name__=="__main__":
 
     test_file = '../data/test.explog'
-
+    if os.path.exists(test_file + ".h5"):
+        os.remove(test_file + ".h5")
     z = explog(test_file)
