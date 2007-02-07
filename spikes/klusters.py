@@ -6,7 +6,9 @@ Processes pcm_seq2 data for use by klusters
 
 from extractor import *
 import tables as t
-from dlab import explog
+from dlab import explog, toelis
+import scipy as nx
+import os
 
 class filecache(dict):
     """
@@ -61,7 +63,7 @@ class site(explog.explog):
     def getentrytimes(self):
         return explog.explog.getentrytimes(self, self.site)
 
-    def extractgroups(self, base, channelgroups, **kwargs):
+    def extractgroups(self, base, channelgroups, thresholds=None, start_group=1, **kwargs):
         """
         Extracts groups of spikes for analysis with klusters. This
         is the best entry point for analysis. <channelgroups> is
@@ -108,11 +110,12 @@ class site(explog.explog):
             xmlfp.write("</channels>\n")
 
             spikes, events = self.extractspikes(channels, **kwargs)
-            nsamp = spikes[1].shape[1]
+            print "%d events" % sum([len(e) for e in events.values()])
+            nsamp = spikes.shape[1]
             writespikes("%s.spk.%d" % (base, group), spikes)
             
             xmlfp.write("<nSamples>%d</nSamples>\n" % nsamp)
-            xmlfp.write("<peakSampleIndex>%d</peakSampleIndex>\n" % nsamp)
+            xmlfp.write("<peakSampleIndex>%d</peakSampleIndex>\n" % (nsamp/2))
             print "Wrote spikes to %s.spk.%d" % (base, group)
 
             feats = extractfeatures(spikes, events, self.entrytimes)
@@ -161,7 +164,9 @@ class site(explog.explog):
                 thresh = [s['dcoff'] + abs_thresh for s in stats]
             else:
                 thresh = [s['dcoff'] + rms_fac * s['rms'] for s in stats]
-            # get signal
+            # threshold spikes. We have no guarantee that the entries
+            # have the same number of samples, although the channels
+            # should, so we iterate through the entries
             pfp = [self._filecache[f] for f in pcmfiles]
             S = combine_channels(pfp, entries)
             thresh = nx.asarray(thresh, dtype=S.dtype)
@@ -169,7 +174,11 @@ class site(explog.explog):
             spikes[siteentry] = extract_spikes(S, ev, **kwargs)
             events[siteentry] = ev
 
-        return spikes, events
+        allspikes = nx.concatenate(spikes.values(), axis=0)
+        if kwargs.get('align_spikes',True):
+            allspikes = realign(allspikes, downsamp=False)
+            
+        return allspikes, events
 
     def writedat(self, outfile, entry, dtype='h'):
         """
@@ -183,6 +192,83 @@ class site(explog.explog):
         fp = open(outfile, 'wb')
         io.fwrite(fp, signal.size, signal)
         fp.close()
+
+    def groupchannels(self, events, samplerate=20000):
+        """
+        Groups events from different channels by entry.  Entries
+        are uniquely identified by abstime, which can be used
+        to later look up stimulus or anything else.
+
+        Returns a dictionary of toelis objects indexed by abstime
+        """
+
+        entries = self.elog.root.entries
+        _dtype = events[0].dtype
+        nunits = len(events)
+        msr = samplerate/1000
+
+        coords = [r.nrow for r in entries.where(entries.cols.channel==0) if
+                  (r['pen'],r['site'])==self.site]
+        #siteentries = entries.col('siteentry')[coords]
+        start_times = entries.col('abstime')[coords]
+        stop_times = entries.col('duration')[coords] + start_times
+
+        i = 0
+        def sort_event(event, _events):
+            # returns true if i needs to be advanced and sort_event recalled
+            if event < start_times[i]:
+                return False
+            elif event < stop_times[i]:
+                _events[i].append(float(event - start_times[i])/msr)
+                return False
+            else:
+                return True
+
+        unit_events = []
+        for unit in range(nunits):
+            _events = [[] for r in range(len(start_times))]
+            for event in events[unit]:
+                while sort_event(event, _events):
+                    i += 1
+            i = 0
+            unit_events.append(_events)
+
+        # refactor into toelis objects
+        tl = {}
+        for entry in range(len(start_times)):
+            x = toelis.toelis([unit_events[unit][entry] for unit in range(nunits)],
+                              nunits=nunits)
+            tl[start_times[entry]] = x
+
+        return tl
+
+    def groupstimuli(self, munit_events, samplerate=20000):
+        """
+        Groups event lists by stimulus. munit_events is a dictionary
+        of toelis objects indexed by the abstime of the relevant entry.
+        These entries are used to look up the associated stimulus,
+        and the toelis objects for each stimulus are grouped as multiple
+        repeats.
+        """
+
+        table = self.elog.root.stimuli
+        tls = {}
+        msr = samplerate/1000        
+
+        stimuli = nx.unique(table.col('name'))
+        for stimulus in stimuli:
+            atimes = [(r['entrytime'],r['abstime']) for r in table.where(table.cols.name==stimulus)]
+            for atime,stime in atimes:
+                if not munit_events.has_key(atime):
+                    continue
+                tl = munit_events[atime]
+                tl.offset((atime-stime)/ msr)
+                if tls.has_key(stimulus):
+                    tls[stimulus].extend(tl)
+                else:
+                    tls[stimulus] = tl
+
+        return tls
     
     def _get_site(self):
         return self._site
@@ -207,10 +293,9 @@ def extractfeatures(spikes, *args, **kwargs):
     events - list of lists with event times
     entrytimes - used to create a last column with timestamps
     """
-    allspikes = nx.concatenate(spikes.values(), axis=0)
-    pcs = get_pcs(allspikes, **kwargs)
+    pcs = get_pcs(spikes, **kwargs)
     n,ndims,nchans = pcs.shape
-    proj = get_projections(allspikes, pcs)
+    proj = get_projections(spikes, pcs)
     proj.shape = (proj.shape[0], ndims*nchans)
 
     if len(args)==0:
@@ -232,9 +317,8 @@ def writespikes(outfile, spikes):
     """
     Writes spikes to kluster's .spk.n files
     """
-    allspikes = nx.concatenate(spikes.values(), axis=0)
     fp = open(outfile,'wb')
-    io.fwrite(fp, allspikes.size, allspikes.squeeze())
+    io.fwrite(fp, spikes.size, spikes.squeeze())
     fp.close()
 
 def writefeats(outfile, feats, **kwargs):
@@ -255,10 +339,75 @@ def writefeats(outfile, feats, **kwargs):
         for j in range(feats.shape[0]+1):
             fp.write("1\n")
         fp.close()
-     
+
+def klu2events(basename, exclude_groups=None):
+    """
+    Reads in a collection of <base>.fet.n and <base>.clu.n files,
+    grouping event times by unit.  Only clusters greater than 1 are
+    included, or, if only one cluster is defined, a single unit is
+    returned.
+
+    @returns (events, sources)
+
+             events - N arrays of long integers, where N is
+             the total number of units defined for all groups
+
+             sources - list of tuples giving the electrode group
+             and unit that were the source for each unit in events
+    """
+
+    events = []
+    sources = []
+    group = 1
+    while 1:
+        if exclude_groups and group in exclude_groups:
+            continue
+        fname = "%s.fet.%d" % (basename, group)
+        cname = "%s.clu.%d" % (basename, group)
+        if not os.path.exists(fname) or not os.path.exists(cname):
+            return events,sources
+
+        ffp = open(fname,'rt')
+        cfp = open(cname,'rt')
+        nfet = int(ffp.readline())
+        cfp.readline()
+        
+        times = nx.io.read_array(ffp,atype='l')[:,-1]
+        clusters = nx.io.read_array(cfp,atype='i')
+        ffp.close()
+        cfp.close()
+
+        clust_id = nx.unique(clusters)
+        if len(clust_id)==1:
+            events.append(times)
+            sources.append((group,clust_id[0]))
+        elif len(clust_id)==2:
+            events.append(times[clusters==clust_id[-1]])
+            sources.append((group,clust_id[-1]))
+        else:
+            for c in clust_id[2:]:
+                events.append(times[clusters==c])
+                sources.append((group,c))
+
+        group += 1
+
         
 if __name__=="__main__":
 
-    testexplog = '../data/test.explog'
+    testexplog = 'st229_20070119.explog.h5'
+    pen = 1
+    nsite = 1
+    print "Opening %s to pen %d, site %d" % (testexplog, pen, nsite)
+    k = site(testexplog,pen,nsite)
 
-    k = site(testexplog,0,0)
+    sitename = "site_%d_%d" % k.site
+    print "Loading events from %s" % sitename
+    events,groups = klu2events('site_1_1')
+
+    print groups
+
+    print "Grouping event lists by episode"
+    eevents = k.groupchannels(events)
+
+    print "Grouping event lists by stimulus"
+    sevents = k.groupstimuli(eevents)

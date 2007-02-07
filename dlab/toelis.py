@@ -88,7 +88,7 @@ class toelis(object):
         """
         Adds a fixed offset to all the time values in the object.
         """
-        if not isinstance(offset,(int, float)):
+        if not n.isscalar(offset):
             raise TypeError, " can only add scalars to toelis events"
         for i in range(len(self.events)):
             self.events[i] = n.asarray(self.events[i]) + offset
