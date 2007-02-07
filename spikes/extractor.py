@@ -8,6 +8,7 @@ from dlab import dataio
 import scipy as nx
 from scipy import weave, io
 from scipy.linalg import svd, get_blas_funcs
+from dlab.signalproc import sincresample
 import pdb
 
 _dtype = nx.int16
@@ -70,6 +71,7 @@ def find_spikes(fp, **kwargs):
         spikes.append(extract_spikes(signal, ev, **kwargs))
         events.append(ev)
 
+    spikes = nx.concatenate(spikes, axis=0)
     return (spikes, events)
 
 
@@ -185,6 +187,60 @@ def thresh_spikes(S, thresh, **kwargs):
     #return nx.asarray(events)
     return events
 
+
+def realign(spikes, **kwargs):
+    """
+    Realigns spike waveforms based on peak time. The peak of a linearly
+    interpolated sample can be off by at least one sample, which
+    has severe negative effects on later compression with PCA. This
+    function uses a sinc interpolator to upsample spike waveforms, which
+    are then realigned to peak time.
+
+    If the spikes are from more than one electrode, the mean across electrode
+    is used to determine spike peak
+
+    axis        = the axis to perform the analysis on (default 1)
+    resamp_rate = integer indicating the upsampling factor (default 3)
+    max_shift   = maximum amount peaks can be shifted (in samples, default 4)
+    downsamp    = if true, the data are downsampled back to the original
+                  sampling rate after peak realignment
+    """
+    ax = kwargs.get('axis',1)
+    resamp_rate = kwargs.get('resamp_rate',3)
+    max_shift = kwargs.get('max_shift',4) * resamp_rate
+
+    np = spikes.shape[1] * resamp_rate
+    upsamp = nx.zeros((spikes.shape[0], np, spikes.shape[2]))
+    for c in range(spikes.shape[2]):
+        upsamp[:,:,c] = sincresample(spikes[:,:,c].transpose(), np).transpose()
+
+    # now find peaks
+    if upsamp.ndim>2:
+        peaks = upsamp.mean(2).argmax(axis=ax)
+    else:
+        peaks  = upsamp.argmax(axis=ax)
+    shift  = (peaks - nx.median(peaks)).astype('i')
+    shift[nx.absolute(shift)>(max_shift)] = 0
+    shape = list(upsamp.shape)
+    start = -shift.min()
+    stop  = upsamp.shape[1]-shift.max()
+    shape[ax] = stop - start
+
+    shifted = nx.zeros(shape, dtype=spikes.dtype)
+    for i in range(upsamp.shape[0]):
+        d = upsamp[i,start+shift[i]:stop+shift[i]]
+        shifted[i] = d
+
+    if kwargs.get('downsamp',False):
+        npoints = (stop - start) / resamp_rate
+        dnsamp = nx.zeros((shifted.shape[0], npoints, shifted.shape[2]))
+        for c in range(shifted.shape[2]):
+            dnsamp[:,:,c] = sincresample(shifted[:,:,c].transpose(), npoints).transpose()
+        return dnsamp.astype(spikes.dtype)
+    else:
+        return shifted.astype(spikes.dtype)
+    
+
 def signalstats(pcmfile):
     """
     Computes the dc offset and rms of the signal; used for dynamic thresholds
@@ -216,11 +272,11 @@ def combine_channels(fp, entry):
     """
     if isinstance(entry,int):
         entry = [entry] * len(fp)
-    
+
+    [fp[chan].seek(entry[chan]) for chan in range(len(fp))]
     nsamples = fp[0].nsamples()
     signal = nx.zeros((nsamples, len(fp)), _dtype)
     for chan in range(len(fp)):
-        fp[chan].seek(entry[chan])
         signal[:,chan] = fp[chan].read()
         
     return signal
@@ -228,11 +284,11 @@ def combine_channels(fp, entry):
 
 if __name__=="__main__":
 
-    basedir = '/giga1/users/dmeliza/acute_data/'
-    pattern = "st298_%d_20070119a.pcm_seq2"
+    basedir = '/z1/users/dmeliza/acute_data/st229/20070119/site_1_1/'
+    pattern = "st229_%d_20070119a.pcm_seq2"
     
     #pcmfiles = [basedir + pattern % d for d in range(1,17)]
-    pcmfiles = [basedir + pattern % d for d in range(2,3)]
+    pcmfiles = [basedir + pattern % d for d in range(5,6)]
 
     # open files
     print "---> Open test files"
@@ -244,8 +300,11 @@ if __name__=="__main__":
     print "---> Finding spikes..."
     spikes,events = find_spikes(pfp)
     
+    print "---> Aligning spikes..."
+    rspikes = realign(spikes, downsamp=False)
+    
     print "---> Computing features..."
-    pcs = get_pcs(allspikes, ndims=3)
+    pcs = get_pcs(rspikes, ndims=3)
     
     print "---> Calculating projections..."
-    proj = get_projections(allspikes, pcs)
+    proj = get_projections(rspikes, pcs)
