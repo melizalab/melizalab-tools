@@ -384,9 +384,6 @@ def dpss(npoints, mtm_p):
 
     return (V,E)
 
-_sinc_res = 1025
-## _asinc = []
-
 def sincresample(S, npoints, shift=0):
     """
     Resamples a signal S using sinc resampling and optional timeshifting.
@@ -410,7 +407,7 @@ def sincresample(S, npoints, shift=0):
     t  = nx.arange(nt)
     t.shape = (nt,1)
 
-    ts = nx.arange(0, np/(1.*np/nt), (t.max()+1.)/np)
+    ts = nx.linspace(0, nt, np)
     ts.shape = (np,1)
     ts = nx.kron(nx.ones(nt),ts) - nx.kron(nx.ones(np),t).transpose()
 
