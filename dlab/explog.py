@@ -343,11 +343,14 @@ def assignstimuli(h5, cull_unrecorded=True):
     if cull_unrecorded:
         # easiest just to copy the valid rows to a new table
         valid = stimuli.getWhereList(stimuli.cols.entrytime!=0)
-        stimuli.rename('oldstimuli')
-        newstimuli = _maketable(h5, '/', 'stimuli', Stimuli)
-        newstimuli.append(stimuli[:][valid])
-        newstimuli.flush()
-        stimuli.remove()
+        if len(valid)==0:
+            print "Warning: no stimuli match the current site, keeping old list"
+        else:        
+            stimuli.rename('oldstimuli')
+            newstimuli = _maketable(h5, '/', 'stimuli', Stimuli)
+            newstimuli.append(stimuli[:][valid])
+            newstimuli.flush()
+            stimuli.remove()
 
     h5.flush()
 

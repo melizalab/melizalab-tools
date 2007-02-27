@@ -8,4 +8,4 @@ from db import *
 import schema
 
 
-__all__ = ['motifdb', 'schema']
+__all__ = ['db', 'schema','importer','combiner']

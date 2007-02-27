@@ -33,7 +33,7 @@ class toelis(object):
 
         if data:
             for item in data:
-                if not isinstance(item, (list, tuple)):
+                if n.isscalar(item):
                     raise ValueError, "Input data must be a list"
 
             nitems = len(data)

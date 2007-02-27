@@ -63,7 +63,7 @@ class site(explog.explog):
     def getentrytimes(self):
         return explog.explog.getentrytimes(self, self.site)
 
-    def extractgroups(self, base, channelgroups, thresholds=None, start_group=1, **kwargs):
+    def extractgroups(self, base, channelgroups, **kwargs):
         """
         Extracts groups of spikes for analysis with klusters. This
         is the best entry point for analysis. <channelgroups> is
@@ -78,6 +78,10 @@ class site(explog.explog):
         <base>.spk.<g> - the spike file
         <base>.fet.<g> - the feature file
         <base>.clu.<g> - the cluster file (all spikes assigned to one cluster)
+
+        Optional arguments:
+        kkwik - if true, runs KlustaKwik on the .clu and .fet files
+        
         """
 
         xmlhdr = """<parameters creator="pyklusters" version="1.0" >
@@ -99,16 +103,28 @@ class site(explog.explog):
         group = 1
         xmlfp = open(base + ".xml",'wt')
         xmlfp.write(xmlhdr)
+        
+        if kwargs.has_key('rms_thresh'):
+            thresh = kwargs.pop('rms_thresh')
+            thresh_mode = 'rms_thresh'
+        if kwargs.has_key('abs_thresh'):
+            thresh = kwargs.pop('abs_thresh')
+            thresh_mode = 'abs_thresh'
+
+        cnum = 0
         for channels in channelgroups:
             if isinstance(channels, int):
                 channels = [channels]
             print "Channel group %d: %s" % (group, channels)
 
             xmlfp.write("<group><channels>\n")
-            for c in channels:
-                xmlfp.write("<channel>%d</channel>\n" % c)
+            for i in range(len(channels)):
+                xmlfp.write("<channel>%d</channel>\n" % channels[i])
+                xmlfp.write("<thresh>%3.2f</thresh>\n" % thresh[cnum+i])
             xmlfp.write("</channels>\n")
 
+            group_threshs = thresh[cnum:cnum+len(channels)]
+            kwargs[thresh_mode] = group_threshs
             spikes, events = self.extractspikes(channels, **kwargs)
             print "%d events" % sum([len(e) for e in events.values()])
             nsamp = spikes.shape[1]
@@ -121,10 +137,15 @@ class site(explog.explog):
             feats = extractfeatures(spikes, events, self.entrytimes)
             writefeats("%s.fet.%d" % (base, group), feats,
                           cfile="%s.clu.%d" % (base, group))
-            xmlfp.write("<nFeatures>%d</nFeatures>\n" % ((feats.shape[1] - 1) / len(channels)))
+            nfeats = (feats.shape[1] - 1) / len(channels)
+            xmlfp.write("<nFeatures>%d</nFeatures>\n" % nfeats)
             xmlfp.write("</group>\n")
             print "Wrote features to %s.fet.%d" % (base, group)
 
+            if kwargs.get('kkwik',False):
+                cmd = "KlustaKwik %s %d -UseFeatures %s" % \
+                      (base, group, "".join(['1']*nfeats)+'0')
+                os.system(cmd)
             group += 1
 
         xmlfp.write("</channelGroups></spikeDetection></parameters>\n")
@@ -140,10 +161,10 @@ class site(explog.explog):
         """
         if kwargs.has_key('abs_thresh'):
             fac = False;
-            abs_thresh = kwargs['abs_thresh']
+            abs_thresh = nx.asarray(kwargs['abs_thresh'])
         else:
             fac = True;
-            rms_fac = kwargs.get('rms_thresh',4.5)
+            rms_fac = nx.asarray(kwargs.get('rms_thresh',4.5))
         
         table = self.elog.root.entries
         pen,site = self.site
@@ -152,33 +173,49 @@ class site(explog.explog):
 
 
         # it doesn't really matter what order we go through the entries
-        spikes = {}
-        events = {}
+        spikes = []
+        events = []
+        events_entry = []
         for siteentry in siteentries:
             records = self.getsiteentry(siteentry, channels)
             pcmfiles = records['filebase']
             entries  = records['entry']
             # get thresholds
             stats = [self._statscache[f] for f in pcmfiles]
+            dcoff = nx.asarray([s['dcoff'] for s in stats])
             if not fac:
-                thresh = [s['dcoff'] + abs_thresh for s in stats]
+                thresh = dcoff + abs_thresh
+                #thresh = [s['dcoff'] + abs_thresh for s in stats]
             else:
-                thresh = [s['dcoff'] + rms_fac * s['rms'] for s in stats]
+                thresh = dcoff + rms_fac * nx.asarray([s['rms'] for s in stats])
+                #thresh = [s['dcoff'] + rms_fac * s['rms'] for s in stats]
             # threshold spikes. We have no guarantee that the entries
             # have the same number of samples, although the channels
             # should, so we iterate through the entries
             pfp = [self._filecache[f] for f in pcmfiles]
             S = combine_channels(pfp, entries)
-            thresh = nx.asarray(thresh, dtype=S.dtype)
+            thresh = thresh.astype(S.dtype)
             ev = thresh_spikes(S, thresh, **kwargs)
-            spikes[siteentry] = extract_spikes(S, ev, **kwargs)
-            events[siteentry] = ev
+            spikes.append(extract_spikes(S, ev, **kwargs))
+            events.extend(ev)
+            events_entry.extend([siteentry] * len(ev))
 
-        allspikes = nx.concatenate(spikes.values(), axis=0)
+        allspikes = nx.concatenate(spikes, axis=0)
+        events = nx.asarray(events)
+        events_entry = nx.asarray(events_entry)
+        
         if kwargs.get('align_spikes',True):
-            allspikes = realign(allspikes, downsamp=False)
-            
-        return allspikes, events
+            allspikes,kept_events = realign(allspikes, downsamp=False)
+            if kept_events != None:
+                events = events[kept_events]
+                events_entry = events_entry[kept_events]
+
+        # turn events/entries into a dict
+        event_dict = {}
+        for siteentry in siteentries:
+            event_dict[siteentry] = events[events_entry==siteentry]
+                
+        return allspikes, event_dict
 
     def writedat(self, outfile, entry, dtype='h'):
         """
@@ -378,6 +415,7 @@ def klu2events(basename, exclude_groups=None):
         cfp.close()
 
         clust_id = nx.unique(clusters)
+        print "Group %d: %s" % (group, clust_id)
         if len(clust_id)==1:
             events.append(times)
             sources.append((group,clust_id[0]))
@@ -385,7 +423,7 @@ def klu2events(basename, exclude_groups=None):
             events.append(times[clusters==clust_id[-1]])
             sources.append((group,clust_id[-1]))
         else:
-            for c in clust_id[2:]:
+            for c in clust_id[clust_id>1]:
                 events.append(times[clusters==c])
                 sources.append((group,c))
 

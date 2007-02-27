@@ -220,7 +220,19 @@ def realign(spikes, **kwargs):
     else:
         peaks  = upsamp.argmax(axis=ax)
     shift  = (peaks - nx.median(peaks)).astype('i')
-    shift[nx.absolute(shift)>(max_shift)] = 0
+    
+    goodpeaks = nx.absolute(shift)<=(max_shift)
+    nbadpeaks = shift.size - goodpeaks.sum()
+    # this line will leave artefacts alone
+    # shift[nx.absolute(shift)>(max_shift)] = 0
+    # and this will remove spikes that can't be shifted
+    if nbadpeaks > 0:
+        print "Dropping %d unalignable trials" % nbadpeaks
+        shift = shift[goodpeaks]
+        upsamp = upsamp[goodpeaks,:,:]
+    else:
+        goodpeaks = None
+    
     shape = list(upsamp.shape)
     start = -shift.min()
     stop  = upsamp.shape[1]-shift.max()
@@ -236,9 +248,9 @@ def realign(spikes, **kwargs):
         dnsamp = nx.zeros((shifted.shape[0], npoints, shifted.shape[2]))
         for c in range(shifted.shape[2]):
             dnsamp[:,:,c] = sincresample(shifted[:,:,c].transpose(), npoints).transpose()
-        return dnsamp.astype(spikes.dtype)
+        return dnsamp.astype(spikes.dtype),goodpeaks
     else:
-        return shifted.astype(spikes.dtype)
+        return shifted.astype(spikes.dtype),goodpeaks
     
 
 def signalstats(pcmfile):

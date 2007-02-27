@@ -22,7 +22,7 @@ CDM, 1/2007
 
 
 from pylab import *
-from motifdb import db
+from motifdb import db, importer
 from dlab import toelis, plotutils, pcmio, signalproc
 from scipy.ndimage import center_of_mass
 import numpy as nx
@@ -30,13 +30,15 @@ import os
 import pdb
 
 
-def plotresps(basename, motifname, motif_db=None, dir='.', motif_pos=None, padding=(-100, 200)):
+def plotresps(basename, motifname, motif_db,
+              dir='.', motif_pos=None, padding=(-100, 200),
+              do_sort=False):
     """
     Aggregates responses by motif; plots the motif, the feature labels,
     and the responses.
     """
 
-    m = db.motifdb(motif_db)
+    m = motif_db
     tls = aggregate(m, motifname, basename, dir, motif_pos)
 
     nplots = len(tls) + 1
@@ -59,10 +61,13 @@ def plotresps(basename, motifname, motif_db=None, dir='.', motif_pos=None, paddi
     ax.append(fig.add_axes(axpos, **axprops))
     try:
         I = m.get_featmap_data(motifname)
+        if do_sort:
+            I,K,L = importer.sortfeatures(I)
         plot_motif(m.get_data(motifname), I)
     except:
         plot_motif(m.get_data(motifname))
 
+    title("%s - %s" % (basename, motifname))
     # pad out the display
     xlim = getp(ax[0], 'xlim')
     setp(ax[0], 'xlim', (xlim[0] + padding[0], xlim[1] + padding[1]))
@@ -107,11 +112,9 @@ def aggregate(db, motifname, basename, dir='.', motif_pos=None):
                 to an integer to restrict to particular sequence positions
     """
 
-    _sep = '_'
     _gap = 100
-
     def mlist_ext(f):
-        return f[len(basename)+1:-8].split(_sep)
+        return splitmotifs(f[len(basename)+1:-8])
 
     # build the toe_lis list
     files = []
@@ -159,6 +162,45 @@ def aggregate(db, motifname, basename, dir='.', motif_pos=None):
 
 
     return tls
+
+def splitmotifs(mlist):
+    """
+    Parses stimulus file names to get back the motifs. This is kind
+    of tricky because of something stupid I did in defining the delimiters.
+    The same delimiter _ is used to separate motifs and to indicate
+    that the motif has been modified
+    """
+    _sep = '_'
+    atoms = mlist.split(_sep)
+    iatom = 0
+    out = []
+    while iatom < len(atoms):
+        mname = atoms[iatom]
+        if iatom == len(atoms)-1:
+            out.append(mname)
+        else:
+            next = atoms[iatom+1]
+            if next[0].isdigit():
+                # these are of the form B6_0(blahblah)
+                # we drop the shifted features because otherwise the figure is unmanageable
+                if next.find('t')==-1:
+                    out.append(_sep.join((mname,next)))
+                    iatom += 1
+            elif next=='feature':
+                # this handles things like A3_feature_000
+                fnum = int(atoms[iatom+2])
+                out.append("%s.%d" % (mname, fnum))
+            elif next=='residue':
+                fnum = int(atoms[iatom+2])
+                out.append("%s-%d" % (mname, fnum))
+            elif next=='REC':
+                out.append("%sR" % mname)
+            else:
+                out.append(mname)
+        iatom += 1
+
+    return out
+        
 
 
 def plot_motif(pcmfile, features=None, nfft=320, shift=10):
@@ -220,4 +262,5 @@ if __name__=="__main__":
         elif k=='-d':
             motif_db = v
 
-    plotresps(args[1], args[0], motif_pos=motif_pos, motif_db=motif_db)
+    m = db.motifdb(motif_db)
+    plotresps(args[1], args[0], m, motif_pos=motif_pos)

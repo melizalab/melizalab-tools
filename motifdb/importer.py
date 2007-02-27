@@ -51,38 +51,41 @@ def importlibrary(h5file, mapfile, stimsetname, featuredir=None):
 
             print "%s:" % fields[1]
 
-            # first import the motif, setting the length properly
-            s = sndfile(fields[1])
-            mname = os.path.basename(fields[1])
-            motif = schema.Motif(mname)
-            motif['length'] = s.length * 1000.
-            motif['Fs'] = s.framerate
-            motif['loc'] = basedir
-            s.close()
-            
-            m.add_motif(motif)
-            print "---> Added motif %s" % motif['name']
-
-            # now add the mapping
             symbol = fields[0]
-            m.set_motif_key(symbol, motif['name'])
-            print "---> Symbol %s" % symbol
-
-            # then the feature map, if it exists
-            if featuredir != None:
-                idxfile = os.path.join(featuredir, symbol, "%s_feats.bin" % symbol)
-                if not os.path.exists(idxfile):
-                    print "---> Feature map %s does not exist, skipping " % idxfile
-                else:
-                    importfeaturemap(m, symbol, idxfile)
-                
-            else:
-                print "---> No feature map defined"
+            importmotif(m, symbol, fields[1], featuredir)
 
     # end line loop
     print "Done importing file %s" % mapfile
     del(m)
 
+
+def importmotif(m, symbol, pcmfile, featuredir=None):
+    # first import the motif, setting the length properly
+    s = sndfile(pcmfile)
+    mname = os.path.basename(pcmfile)
+    motif = schema.Motif(mname)
+    motif['length'] = s.length * 1000.
+    motif['Fs'] = s.framerate
+    motif['loc'] = os.path.dirname(pcmfile)
+    s.close()
+
+    m.add_motif(motif)
+    print "---> Added motif %s" % motif['name']
+
+    # now add the mapping
+    m.set_motif_key(symbol, motif['name'])
+    print "---> Symbol %s" % symbol
+
+    # then the feature map, if it exists
+    if featuredir != None:
+        idxfile = os.path.join(featuredir, symbol, "%s_feats.bin" % symbol)
+        if not os.path.exists(idxfile):
+            print "---> Feature map %s does not exist, skipping " % idxfile
+        else:
+            importfeaturemap(m, symbol, idxfile)
+
+    else:
+        print "---> No feature map defined"
 
 
 def importfeaturemap(m, symbol, idxfile):
@@ -162,15 +165,15 @@ def importfeaturemap(m, symbol, idxfile):
 
 
 def sortfeatures(fmap):
-    out = fmap.copy()
     indices = nx.unique(fmap[fmap>-1])
     start = nx.asarray([(fmap==i).nonzero()[1].min() for i in indices],
                        dtype=indices.dtype)
     I = start.argsort()
     J = nx.zeros_like(I)
-    for i in indices:
+    out = nx.ones_like(fmap) * -1
+    for i in range(len(I)):
         j = I[i]
-        out[fmap==I[j]] = i
+        out[(fmap==j).nonzero()] = i
         J[j] = i
 
     return (out,I,J)
