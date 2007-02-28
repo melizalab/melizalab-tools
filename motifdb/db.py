@@ -128,7 +128,8 @@ class motifdb(object):
         """
         Closes the h5 file when reference count goes to zero.
         """
-        self.h5.close()
+        if hasattr(self,'h5'):
+            self.h5.close()
 
     # these functions are for adding and removing entries from the database
 
