@@ -46,7 +46,32 @@ def tuples(S,k):
             ans.append(y)
     return ans
 
-    
+
+def seqshuffle(S):
+    """
+    Generates shuffled sequences based on a simple positional
+    grammar. S is a numpy 2D character array, with each row in S
+    giving a list of the possible items that can be present in the
+    sequence at that position.
+
+    Returns an array in which each column is a shuffled sequence.
+    Returns all possible sequences (nchoice^nposition)
+    """
+    npos, nchoice = S.shape
+
+    x = range(npos)
+    y = range(nchoice)
+    coords = tuples(y, npos)
+    nout = len(coords)
+
+    out = nx.empty((npos, nout), dtype=S.dtype)
+    i = 0
+    for seq in coords:
+        out[:,i] = S[(x, seq)]
+        i += 1
+
+    return out
+
 
 def bimatrix(filename, read_type='i', **kwargs):
     """
