@@ -22,17 +22,16 @@ CDM, 1/2007
 
 
 from pylab import *
+import scipy as nx
 from motifdb import db, importer
 from dlab import toelis, plotutils, pcmio, signalproc
-from scipy.ndimage import center_of_mass
-import numpy as nx
+from scipy.ndimage import center_of_mass, gaussian_filter1d
 import os
-import pdb
 
 
 def plotresps(basename, motifname, motif_db,
               dir='.', motif_pos=None, padding=(-100, 200),
-              do_sort=False):
+              sort_featmap=False):
     """
     Aggregates responses by motif; plots the motif, the feature labels,
     and the responses.
@@ -61,7 +60,7 @@ def plotresps(basename, motifname, motif_db,
     ax.append(fig.add_axes(axpos, **axprops))
     try:
         I = m.get_featmap_data(motifname)
-        if do_sort:
+        if sort_featmap:
             I,K,L = importer.sortfeatures(I)
         plot_motif(m.get_data(motifname), I)
     except:
@@ -94,6 +93,37 @@ def plotresps(basename, motifname, motif_db,
     
     if retio:  ion()
 
+def plotoverlay(basename, motifname, motif_db, dir='.',
+                motif_pos=None, padding=(-200, 300), bandwidth=5):
+    """
+    Like plotresps, but plots only the response to the full
+    motif, and as a smoothed response kernel overlaid on the
+    spectrogram
+    """
+    m = motif_db
+    # aggregate allows us to collect responses from pairs, etc
+    tls = aggregate(m, motifname, basename, dir, motif_pos)
+
+    fig = figure()
+    plot_motif(m.get_data(motifname))
+    ylabel('Frequency (Hz)')
+    xlim = getp(gca(), 'xlim')
+
+    ax2 = twinx()
+    b,v = tls[motifname].histogram(binsize=1.,normalize=1)
+    smooth_v = gaussian_filter1d(v.astype('f'), bandwidth)
+    plot(b, smooth_v, linewidth=3)
+    ylabel('Firing rate')
+    ax2.yaxis.tick_right()
+
+    # pad out the display
+
+    setp(gca(), 'xlim', (xlim[0] + padding[0], xlim[1] + padding[1]))
+
+    xlabel("Time (ms)")
+    title("%s - %s" % (basename, motifname))                
+    show()
+    
 
 def aggregate(db, motifname, basename, dir='.', motif_pos=None):
     """
@@ -220,8 +250,6 @@ def plot_motif(pcmfile, features=None, nfft=320, shift=10):
     if features != None:
         hold(True)
         # convert to masked array
-        #Im = nx.ma.array(I, mask=I==-1)
-        #imshow(Im, cmap=cm.jet, extent=extent, alpha=0.5)
         if len(T) > features.shape[1]: T.resize(features.shape[1])
         if len(F) > features.shape[0]: F.resize(F.shape[0])
         plotutils.dcontour(features, T, F)  # this will barf if the feature file has the wrong resolution
@@ -231,7 +259,6 @@ def plot_motif(pcmfile, features=None, nfft=320, shift=10):
         if retio: ioff()
         for fnum in nx.unique(features[features>-1]):
             y,x = center_of_mass(features==fnum)
-##            text(T[int(x)], F[int(y)], "%d" % fnum, color=plotutils.colorcycle(fnum), fontsize=20)
             text(T[int(x)], F[int(y)], "%d" % fnum, color='w', fontsize=20)            
 
         draw()
