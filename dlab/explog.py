@@ -363,7 +363,36 @@ def _maketable(file, base, name, descr):
 
 if __name__=="__main__":
 
-    test_file = '../data/test.explog'
-    if os.path.exists(test_file + ".h5"):
-        os.remove(test_file + ".h5")
-    z = explog(test_file)
+    import getopt
+
+    if len(sys.argv) < 2:
+        print """
+        explog.py [-s] [-o <outfile>] <explog>
+        
+        Run this script to parse a text explog into an h5 file. Optionally
+        (with -s) sort pcm_seq2 files into directories by pen/site. By default
+        the output .h5 file is <explog>.explog.h5; use the -o flag to specify
+        something else.
+        
+        """
+        sys.exit(-1)
+
+    opts,args = getopt.getopt(sys.argv[1:],"so:")
+
+    site_sort = False
+    if len(args)== 0:
+        print "Must supply an explog file for input"
+        sys.exit(-1)
+    infile = args[0]
+    outfile = infile + ".h5"
+
+    for o,a in opts:
+        if o=='-s':
+            site_sort = True
+        if o=="-o":
+            outfile = a
+
+    if os.path.exists(outfile):
+        os.remove(outfile)
+        
+    z = readexplog(infile, outfile, site_sort)
