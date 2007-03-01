@@ -11,7 +11,7 @@ from datautils import *
 import scipy as nx
 import signalproc, pcmio, imgutils
 
-def plot_raster(x, y=None, cv=None):
+def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     """
     Draws a raster plot of a set of point sequences. These can be defined
     as a set of x,y pairs, or as a list of lists of x values; in the latter
@@ -20,39 +20,50 @@ def plot_raster(x, y=None, cv=None):
 
     X - either an array or a list of arrays
     Y - the y offsets of the points in X, if X is an array
-    cv - the color values of the points. This must be an Nx3 array, with
-         N equal to the number of items in X, or else a single 3-element
-         array giving the color of all the ticks
+    start - only plot events after this value
+    stop - only plot events before this value
+    **kwargs - additional arguments to plot
 
     With huge numbers of repeats the line length gets extremely small.
     """
-    retio = isinteractive()
-    hold(True)
-    if retio: ioff()
-    
-    h = []
-    if y!=None:
-        if len(x) != len(y):
-            raise IndexError, "X and Y arrays must be the same length"
-        for i in range(len(x)):
-            h.extend(plot( (x[i],x[i]), (y[i]-0.5, y[i]+0.5), 'k'))
-        axis((min(x), max(x), min(y) - 0.5, max(y) + 0.5))
 
+    if y == None:
+        # if y is none, x needs to be a sequence of arrays
+        y = nx.concatenate([nx.ones(x[z].shape) * z for z in range(len(x))])
+        x = nx.concatenate(x)
+
+    # filter events
+    if start != None:
+        y = y[x>=start]
+        x = x[x>=start]
+        minx = start
     else:
-        if not isnested(x):
-            x = [x]
-        y = 0
-        for i in range(len(x)):
-            for j in x[i]:
-                h.extend(plot( (j,j), (y-0.5, y+0.5), 'k'))
-            y += 1
-        (xmin, xmax, ymin, ymax) = axis()
-        axis((xmin, xmax, -0.5, y+0.5))
+        minx = x.min()
+        
+    if stop != None:
+        y = y[x<=stop]
+        x = x[x<=stop]
+        maxx = stop
+    else:
+        maxx = x.max()
+    
 
-    hold(False)
-    draw()
-    if retio: ion()
-    return h
+    if len(x) != len(y):
+        raise IndexError, "X and Y arrays must be the same length"
+
+    miny = y.min()
+    maxy = y.max()
+
+    # some voodoo for figuring out how big to make the markers
+    # is it possible to make this dynamic?
+    p = plot(x,y,'|',**kwargs)
+    a = gca()
+    ht = a.get_window_extent().height()
+    setp(p,'markersize',ht/((maxy-miny)*1.3))
+    
+    axis((minx, maxx, min(y) - 0.5, max(y) + 0.5))
+
+    return p
 
 def dcontour(*args, **kwargs):
     """
