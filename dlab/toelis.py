@@ -209,26 +209,43 @@ class toelis(object):
         return (x,y)
 
 
-    def histogram(self, unit=0, binsize=20., normalize=False):
+    def histogram(self, onset=None, offset=None,
+                  unit=0, binsize=20., normalize=False):
         """
         Converts the response data to a frequency histogram, i.e.
         the number of events in a time bin. Returns a tuple
         with the time bins and the frequencies
+
+        Optional arguments:
+        <onset> - only events after <onset> are included
+        <offset> - only events before <offset> are included
+        <unit> - the unit to compute the histogram of (default 0)
+        <binsize> - the size of the bins (default 20.)
+        <normalize> - if True, normalize by the number of repeats
         """
         d = n.concatenate([self.events[ri] for ri in self.index[:,unit]])
+        if onset!=None:
+            d = d[d>=onset]
+            min_t = onset
+        else:
+            min_t = d.min()
+            
+        if offset!=None:
+            d = d[d<=offset]
+            max_t = offset
+        else:
+            max_t = d.max()
+        
 
         binsize = float(binsize)
-        min_t = min(d)
-        max_t = max(d)
         bins = n.arange(min_t, max_t + 2*binsize, binsize)  
         N = n.searchsorted(n.sort(d), bins)
         N = n.concatenate([N, [len(d)]])
         freq = N[1:]-N[:-1]
         if normalize:
             freq = freq / float(self.nrepeats)
+            
         return (bins, freq)
-        
-        
 
 # end toelis
 
