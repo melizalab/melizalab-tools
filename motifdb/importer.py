@@ -20,6 +20,7 @@ _mtm_bw = 3.5
 _fbdw = 512
 _tbdw = 2
 _extractor = '/home/dmeliza/src/fog/fog_extract'
+_resort = True
 
 def importlibrary(h5file, mapfile, stimsetname, featuredir=None):
     """
@@ -32,7 +33,7 @@ def importlibrary(h5file, mapfile, stimsetname, featuredir=None):
     contain a fully-qualified pathname, which is used to point the importer
     at a directory which is used in resolving relative paths for wavefiles.
     """
-    m = db.motifdb(h5file, stimset=stimsetname)
+    m = db.motifdb(h5file, stimset=stimsetname, read_only=False)
     
     basedir = os.path.dirname(mapfile)
     fp = open(mapfile, 'rt')
@@ -101,7 +102,11 @@ def importfeaturemap(m, symbol, idxfile):
     fmap_dat = bimatrix(idxfile)
 
     # first sort the feature map
-    fmap_srt,old_srt,new_srt = sortfeatures(fmap_dat)
+    if _resort:
+        fmap_srt,old_srt,new_srt = sortfeatures(fmap_dat)
+    else:
+        fmap_srt = fmap_dat
+
     # check for something that's byte-identical in the db
     defined_fmaps = m.get_featmaps(symbol)
     for f in defined_fmaps:
@@ -146,8 +151,10 @@ def importfeaturemap(m, symbol, idxfile):
          if len(line) > 0 and line[0].isdigit():
              fields = line.split()
              featnum = int(fields[0])
+             if _resort:
+                 featnum = new_srt[featnum]
              feat = schema.Feature({
-                 'id' : new_srt[featnum],
+                 'id' : featnum,
                  'offset' : (float(fields[1]), float(fields[2])),
                  'dim' : (float(fields[3]), float(fields[4])),
                  'bdw' : (_fbdw, _tbdw),

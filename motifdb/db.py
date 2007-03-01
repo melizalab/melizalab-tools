@@ -39,7 +39,7 @@ class motifdb(object):
 
         If the database does not exist, it is created.
         """
-        self.ro = kwargs.get('read_only', False)
+        self.ro = kwargs.get('read_only', True)
 
         if len(args)>0 and args[0]:
             motifpath = args[0]
@@ -61,6 +61,7 @@ class motifdb(object):
             stimset = kwargs.get('stimset')
 
         # now open the file
+        motifpath = os.path.expanduser(motifpath)
         if os.path.exists(motifpath):
             if self.ro:
                 self.h5 = openFile(motifpath, mode='r')
