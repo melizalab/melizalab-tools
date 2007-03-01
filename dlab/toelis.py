@@ -309,6 +309,9 @@ def readfile(filename):
             out[(current_repeat, current_unit)].append(float(line))
 
     fp.close()
+    # make all the event lists arrays
+    for i in range(len(out)):
+        out[i] = n.asarray(out[i])
     return out
 # end readfile
 
