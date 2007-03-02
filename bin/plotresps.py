@@ -123,7 +123,79 @@ def plotoverlay(basename, motifname, motif_db, dir='.',
     xlabel("Time (ms)")
     title("%s - %s" % (basename, motifname))                
     show()
+
+def plotselectivity(basename, motif_db, dir='.',
+                    motif_pos=None, padding=(-200,300),
+                    rasters=False, bandwidth=5):
+    """
+    Estimates firing rate for all the motifs.
+    """
+    m = motif_db
+    motifs = m.get_motifs()
+    pdata = []
+
+    # see what data we have
+    for motif in motifs:
+        try:
+            tls = aggregate(m, motif, basename, dir, motif_pos)
+        except ValueError:
+            # no files for this motif, skip
+            continue
+        pdata.append((motif,tls[motif]))
+                     
+    # set up the plot
+    nplots = len(pdata)
+    ny = nx.ceil(nplots / 3.)
+    plotnum = 0
+    # makes the columns plot first
+    pnums = (nx.arange(ny*3)+1).reshape(ny,3).T.ravel()
     
+    retio = isinteractive()
+    if retio: ioff()
+    ax = []
+    f = figure()
+
+    maxrate = 0
+    maxdur = 0
+    mdurs = []
+        
+    for motif,tl in pdata:
+        a = subplot(ny, 3, pnums[plotnum])
+        mdur = m.get_motif(motif)['length']
+        maxdur = max(maxdur, mdur)
+
+        if rasters:
+            plotutils.plot_raster(tl,mec='k')
+            plot([0,0],[0,tl.nrepeats],'b',[mdur,mdur],[0,tl.nrepeats],'b', hold=True)
+        else:
+            b,v = tl.histogram(binsize=1.,normalize=1)
+            smooth_v = gaussian_filter1d(v.astype('f'), bandwidth)
+            maxrate = max(maxrate, smooth_v.max())
+            mdurs.append(mdur)
+            plot_motif(m.get_data(motif))
+            plot(b,smooth_v,'b', hold=True)
+        
+        setp(a.get_yticklabels(), visible=False)
+        ylabel(motif.tostring())
+        plotnum += 1
+        ax.append(a)
+
+    # now adjust the axes once we know the limits
+    for i in range(len(ax)):
+        a = ax[i]
+        if not rasters:
+            mdur = mdurs[i]
+            axes(a)
+            plot([0,0],[0,maxrate],'k:',[mdur,mdur],[0,maxrate],'k:',hold=True)
+        
+        setp(a,'xlim', (padding[0], maxdur+padding[1]))
+
+    setp(a.get_yticklabels(), visible=True)
+    a.get_yaxis().tick_right()
+    f.subplots_adjust(hspace=0.)
+    if retio: ion()
+    show()
+                
 
 def aggregate(db, motifname, basename, dir='.', motif_pos=None):
     """
@@ -163,7 +235,7 @@ def aggregate(db, motifname, basename, dir='.', motif_pos=None):
                     break
 
     if len(files)==0:
-        raise Exception, "No toe_lis files matched %s and %s in %s." % (basename, motifname, dir)
+        raise ValueError, "No toe_lis files matched %s and %s in %s" % (basename, motifname, dir)
 
     # now aggregate toelises
     tls = {}
@@ -213,7 +285,7 @@ def splitmotifs(mlist):
             if next[0].isdigit():
                 # these are of the form B6_0(blahblah)
                 # we drop the shifted features because otherwise the figure is unmanageable
-                if next.find('t')==-1:
+                if next.find('t') ==-1:
                     out.append(_sep.join((mname,next)))
                     iatom += 1
             elif next=='feature':
