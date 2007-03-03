@@ -9,17 +9,11 @@ CDM, 1/2007
 
 import scipy as nx
 import scipy.fftpack as sfft
-from scipy.linalg import norm, get_blas_funcs
+from scipy.linalg import norm
 from scipy.signal import get_window, fftconvolve
 from scipy import weave
+from linalg import outer,gemm
 import tridiag
-
-# reference some fast BLAS functions
-# matrix vector multiplication:
-gemv,= get_blas_funcs(('gemv',),(nx.array([1.,2.],'d'),))
-# outer product
-ger, = get_blas_funcs(('ger',),(nx.array([1.,2.],'d'),))
-
 
 
 def stft(S, **kwargs):
@@ -241,7 +235,7 @@ def mtmspec(signal, **kwargs):
     
     for i in range(nfft):
         val = S_tmp[grid+i-1]
-        workspace[i,:,:] = ger(1.,val,e[i,0:ntapers])
+        workspace[i,:,:] = outer(val,e[i,0:ntapers])
         sigpow += nx.power(val,2)  # dot product of the signal is used in mtm_adapt
 
     # calculate the windowed FFTs
@@ -251,7 +245,7 @@ def mtmspec(signal, **kwargs):
         S = mtm_adapt(C, v, sigpow / nfft)
     else:
         C.shape = (nfft * ncols, ntapers)
-        S = gemv(1./ntapers,C,v)
+        S = gemm(C,v,alpha=1./ntapers)
         S.shape = (nfft, ncols)
 
     # for real signals the spectrogram is one-sided
@@ -377,7 +371,7 @@ def dpss(npoints, mtm_p):
     q = (sfft.ifft(fwd * rev,axis=0)).real[0:npoints,:]
     #q = nx.asmatrix(q)
 
-    V = gemv(1.,q.transpose(),nx.flipud(s))
+    V = gemm(q.transpose(),nx.flipud(s))
     V = nx.minimum(V,1)
     V = nx.maximum(V,0)
     V.shape = (ntapers,)
@@ -422,8 +416,7 @@ def sincresample(S, npoints, shift=0):
     h = nx.sinc(ts) * w
 
     # convolution by matrix mult
-    gemm,= get_blas_funcs(('gemm',),(h, x))
-    y = gemm(1., h, x)
+    y = gemm(h, x)
 
     return y[npoints:npoints*2,:]
 
