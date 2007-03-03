@@ -4,15 +4,29 @@
 extracts spikes from a series of associated pcm_seq2 files
 """
 
-from dlab import dataio
 import scipy as nx
+
+from dlab import dataio, linalg
 from scipy import weave, io
 from scipy.linalg import svd, get_blas_funcs
 from dlab.signalproc import sincresample
-import pdb
 
 _dtype = nx.int16
 
+def get_nentries(fps):
+    """
+    Returns the number of entries in the pcmfiles.
+    Raises a ValueError if all the pcmfile objects don't have the same # of entries
+    """
+    nentries = 0
+    for f in fps:
+        if not nentries:
+            nentries = f.nentries()
+        else:
+            if nentries != f.nentries():
+                raise ValueError, "All files must have the same number of entries"                
+
+    return nentries
 
 def find_spikes(fp, **kwargs):
     """
@@ -48,24 +62,18 @@ def find_spikes(fp, **kwargs):
     nchan = len(fp)
 
     # some sanity checks
-    nentries = nx.asarray([f.nentries() for f in fp],_dtype)
-    if not (nentries==nentries[0]).all():
-        raise ValueError, "All files must have the same number of entries"
-    nentries = nentries[0]
+    nentries = get_nentries(fp)
     
-    # need to collect stats for all files
-    thresh = nx.zeros(nchan,_dtype);
-    for i in range(nchan):
-        stats = signalstats(fp[i])
-        if not fac:
-            thresh[i] = stats['dcoff'] + abs_thresh
-        else:
-            thresh[i] = stats['dcoff'] + rms_fac * stats['rms']
-
     spikes = []
     events = []
     for i in range(1,nentries+1):
         signal = combine_channels(fp, i)
+        dcoff = signal.mean(0)
+        if not fac:
+            thresh = dcoff + abs_thresh
+        else:
+            rms = nx.sqrt(signal.var(0))
+            thresh = dcoff + rms_fac * rms
 
         ev = thresh_spikes(signal, thresh, **kwargs)
         spikes.append(extract_spikes(signal, ev, **kwargs))
@@ -114,10 +122,10 @@ def get_pcs(spikes, **kwargs):
 
     for i in range(nchans):
         if observations >= nevents:
-            cm = nx.cov(spikes[:,:,i], rowvar=0)
+            cm = linalg.cov(spikes[:,:,i], rowvar=0)
         else:
             ind = nx.random.random_integers(0,nevents-1,size=observations)
-            cm = nx.cov(spikes[ind,:,i], rowvar=0)
+            cm = linalg.cov(spikes[ind,:,i], rowvar=0)
 
         u,s,v = svd(cm)
 
@@ -131,7 +139,6 @@ def get_projections(spikes, features, **kwargs):
     Calculates the projections of the spikes onto the features
     Returns a 3D array, (events, dims, chans)
     """
-    gemm, = get_blas_funcs(('gemm',),(spikes,))
     nsamp,ndims,nchans = features.shape
     nevents,nsamp1,nchans1 = spikes.shape
 
@@ -140,7 +147,7 @@ def get_projections(spikes, features, **kwargs):
 
     proj = nx.zeros((nevents,nchans,ndims),'d')
     for i in range(nchans):
-        proj[:,i,:] = gemm(1., spikes[:,:,i], features[:,:,i])
+        proj[:,i,:] = linalg.gemm(spikes[:,:,i], features[:,:,i])
 
     return proj
 
@@ -151,16 +158,38 @@ def thresh_spikes(S, thresh, **kwargs):
     any one of the channels crosses its threshold, the peak of
     that signal is detected, and the time of the event is recorded.
     Returns the times of the events.
+
+    <S> - the signal. Can be a vector or, for multiple channels,
+          a matrix in which each column is a channel
+    <thresh> - the crossing point(s) for the discriminator. Needs
+               to be a 
+    
+    Optional arguments:
+    <window> - the number of points to search ahead for the peak (in samples)
+    <refrac> - the minimum distance between spikes (in samples)
     """
 
-    nsamp, nchan = S.shape
     window = kwargs.get('window',16)
     refrac = kwargs.get('refrac',20)
+
+    if not isinstance(S, nx.ndarray):
+        raise TypeError, "Input must be an ndarray"
+    if S.ndim==1:
+        S.shape = (S.size,1)
+        
+    nsamp, nchan = S.shape
+
+    if nx.isscalar(thresh):
+        thresh = nx.array([thresh] * nchan)
+    elif not isinstance(thresh, nx.ndarray):
+        raise TypeError, "Threshold must be a scalar or an array of values"
+    elif thresh.ndim > 1 or thresh.size != nchan:
+        raise ValueError, "Threshold array length must equal number of channels"
+
     events = []
 
     code = """
-          #line 86 "extractor.py"
-          //std::vector<int> events;
+          #line 193 "extractor.py"
     
           for (int samp = 0; samp < nsamp; samp++) {
                for (int chan = 0; chan < nchan; chan++) {
@@ -184,8 +213,7 @@ def thresh_spikes(S, thresh, **kwargs):
     weave.inline(code,['S','thresh','window','refrac','nchan','nsamp','events'],
                  type_converters=weave.converters.blitz)
 
-    #return nx.asarray(events)
-    return events
+    return nx.asarray(events)
 
 
 def realign(spikes, **kwargs):
@@ -253,25 +281,35 @@ def realign(spikes, **kwargs):
         return shifted.astype(spikes.dtype),goodpeaks
     
 
-def signalstats(pcmfile):
+def signalstats(pcmfiles):
     """
-    Computes the dc offset and rms of the signal; used for dynamic thresholds
-    """
-    dcoff = 0.
-    rms = 0
-    samp = 0
-    # choose 10 entries from the file
-    # nentries = min(pcmfile.nentries(), 10)
-    # for i in nx.random.random_integers(pcmfile.nentries(),size=nentries):
-    for i in range(1,pcmfile.nentries()+1):
-        pcmfile.seek(i)
-        s = pcmfile.read()
-        dcoff += s.sum()
-        rms += s.var() * s.size
-        samp += s.size    
+    Computes the dc offset and covariance of the signal in each entry. Accepts
+    multiple pcmfiles, but they have to have the same number of entries.
 
-    return {'dcoff': dcoff / samp,
-            'rms' : nx.sqrt(rms / samp)}
+    Returns a dictionary of statistics (in case we want to add some more)
+    """
+    if isinstance(pcmfiles, dataio.pcmfile):
+        pcmfiles = [pcmfiles]
+        
+    nentries = get_nentries(pcmfiles)
+    nchans = len(pcmfiles)
+
+    dcoff = nx.zeros((nentries, nchans))
+    A = nx.zeros((nentries,nchans,nchans))
+    for i in range(nentries):
+        nsamp = pcmfiles[0].nsamples()
+        S = nx.empty((nsamp,nchans),_dtype)
+        for j in range(nchans):
+            pcmfiles[j].seek(i+1)
+            s = pcmfiles[j].read()            
+            S[:,j] = pcmfiles[j].read()
+            dcoff[i,j] = s.mean()
+
+        A[i,:,:] = linalg.cov(S,rowvar=0)
+
+    return {'dcoff': dcoff.squeeze(),
+            'cov' : A.squeeze()}
+
 
 def combine_channels(fp, entry):
     """
@@ -296,7 +334,7 @@ def combine_channels(fp, entry):
 
 if __name__=="__main__":
 
-    basedir = '/z1/users/dmeliza/acute_data/st229/20070119/site_1_1/'
+    basedir = '/giga1/users/dmeliza/acute_data/site_1_1/'
     pattern = "st229_%d_20070119a.pcm_seq2"
     
     #pcmfiles = [basedir + pattern % d for d in range(1,17)]
@@ -306,6 +344,9 @@ if __name__=="__main__":
     print "---> Open test files"
     pfp = [dataio.pcmfile(fname) for fname in pcmfiles]
 
+    print "---> Get signal statistics"
+    stats = signalstats(pfp)
+
     print "---> Extract raw data from files"
     signal = combine_channels(pfp, 2)
 
@@ -313,7 +354,7 @@ if __name__=="__main__":
     spikes,events = find_spikes(pfp)
     
     print "---> Aligning spikes..."
-    rspikes = realign(spikes, downsamp=False)
+    rspikes,kept_events = realign(spikes, downsamp=False)
     
     print "---> Computing features..."
     pcs = get_pcs(rspikes, ndims=3)
