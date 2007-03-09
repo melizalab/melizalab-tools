@@ -2,19 +2,54 @@
 # -*- coding: iso-8859-1 -*-
 """
 modules in this package are for extracting and sorting spike data.
-Two main tasks:
 
-1. Convert raw waveform data into event times. Spikes
-are located with a threshold discriminator; the data points around
-each peak are extracted. PCA is used to compress the information
-in these raw waveforms, and the feature data can be exported for
-analysis in a clustering program, like Klusters or GGobi.
+saber generates pcm_seq2 files with raw data and an explog file that
+tells what went on during each episode of the acquisition. For multi-
+channel acquisition there is a pcm_seq2 file for each channel. In
+each episode (i.e. rtrig event in saber, generally one per stimulus)
+the data from each channel is stored in a separate entry in the
+associated pcm_seq2 file.
 
-2. Sort spike events by which stimulus was being played at the time.
-This stage takes .clu and .fet files from klusters and generates
-toe_lis files for each stimulus
+What we want to get to are toe_lis files with spike times for each
+presentation of the stimulus. Files should be grouped by recording site
+(pen/site commands in saber) and by unit. This is a multi-stage process.
 
-Both functions rely heavily on dlab.explog for metadata about stimuli
+Many of the commands have been made available on the command line
+with the program mspikes.py
+
+1. Parse the explog file into a better format, and sort pcm_seq2 files
+   according to site. Run:
+   mspikes.py --sort <explog>
+
+2. Eliminate unusable episodes. For instance, the animal might
+   have moved.  Single events can usually be sorted out; prolonged wiggling
+   generates big clusters of noise that can dramatically increase the
+   RMS of the signal.  Calculate the RMS of each entry and plot it
+   as a time series.  The bad episodes should pop out, even if the amount
+   of cellular activity varies greatly.  Label the episodes in the explog
+   file as bad.
+   mspikes.py --stats -p <pen> -s <site> <explog.h5>
+   mspikes.py --cull -p <pen> -s <site> -t <max_rms> <explog.h5>
+
+3. Extract spike times and waveforms. This is done with a threshold discriminator.
+   It usually makes sense to set the threshold in terms of RMS units above
+   the mean, since the DC offset and RMS noise level can shift over the course
+   of acquisition.  Setting the threshold is kind of tricky. For single
+   units this should be as high as possible; if trying to sort out multiple
+   units a lower value is more appropriate
+
+4. Compute principal components of waveforms. Waveforms need to be upsampled
+   and realigned before doing this.  Then calculate the projections of the
+   waveforms on the top N principal components.
+   mspikes.py --extract ...
+
+5. Sort spikes. There's good software to do this, so I export to the file
+   formats used by Klusters
+
+6. Aggregate events into episodes (based on the start/stop times of episodes)
+   and combine episodes based on the stimulus.  Output toe_lis files for each
+   stimulus and each unit.
+   groupevents.py ... <explog.h5>
 
 """
 

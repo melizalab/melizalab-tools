@@ -30,14 +30,6 @@ class filecache(dict):
     def __setitem__(self, key, value):
         raise NotImplementedError, "Use getter methods to add items to the cache"
 
-class statscache(filecache):
-
-    def _handler(self, filename):
-        return signalstats(self._filecache[filename])
-
-    def __init__(self, filecache):
-        self._filecache = filecache
-
 
 class site(explog.explog):
     """
@@ -46,22 +38,44 @@ class site(explog.explog):
     will be entries for each episode of recording.
     """
 
-    def __init__(self, logfile, pen, site):
+    def __init__(self, logfile, pen, site, mode='r+'):
         """
         Initialize the object using an explog and specifying
         a recording site.
         """
-        explog.explog.__init__(self, logfile)
+        explog.explog.__init__(self, logfile, mode)
 
         self.site = (pen,site)
         self._filecache = filecache()
-        self._statscache = statscache(self._filecache)
 
-    def getsiteentry(self, entry, channels=None):
-        return explog.explog.getsiteentry(self, self.site, entry, channels)
+    def _get_site(self):
+        return self._site
 
-    def getentrytimes(self):
-        return explog.explog.getentrytimes(self, self.site)
+    def _set_site(self, site):
+        self._site = (int(site[0]), int(site[1]))
+
+    def __iter__(self):
+        """
+        Iterates through all the entries in the current site, including
+        invalid ones.
+        """
+        table = self.elog.root.entries        
+        pen,site = self.site
+        for r in table.where(table.cols.site==site):
+            if r['pen']==pen:
+                yield r
+
+        
+    site = property(_get_site, _set_site, None, "The current recording site")        
+
+    def getentrytimes(self, checkvalid=True):
+        """
+        Returns all the (valid) entry times associated with the current site
+        """
+        table = self.elog.root.entries
+        rnums = [r.nrow for r in self if r['valid']]
+        return table.col('abstime')[rnums]
+            
 
     def extractgroups(self, base, channelgroups, **kwargs):
         """
@@ -134,7 +148,7 @@ class site(explog.explog):
             xmlfp.write("<peakSampleIndex>%d</peakSampleIndex>\n" % (nsamp/2))
             print "Wrote spikes to %s.spk.%d" % (base, group)
 
-            feats = extractfeatures(spikes, events, self.entrytimes)
+            feats = extractfeatures(spikes, events)
             writefeats("%s.fet.%d" % (base, group), feats,
                           cfile="%s.clu.%d" % (base, group))
             nfeats = (feats.shape[1] - 1) / len(channels)
@@ -165,45 +179,44 @@ class site(explog.explog):
         else:
             fac = True;
             rms_fac = nx.asarray(kwargs.get('rms_thresh',4.5))
+
+        # make some functions that used cached statistics if they're available
+        if self.has_statscache('rms'):
+            def frms(x,y): return self.getstats(x,statname='rms')[channels]
+        else:
+            def frms(x,y): nx.sqrt(y.var(0))
         
-        table = self.elog.root.entries
-        pen,site = self.site
-        siteentries = set([r['siteentry'] for r in table.where(table.cols.site==site) \
-                           if r['pen']==pen])
+        if self.has_statscache('mu'):
+            def fdcoff(x,y): return self.getstats(x,statname='mu')[channels]
+        else:
+            def fdcoff(x,y): return y.mean(0)
 
-
+        
         # it doesn't really matter what order we go through the entries
         spikes = []
         events = []
         events_entry = []
-        for siteentry in siteentries:
-            records = self.getsiteentry(siteentry, channels)
-            pcmfiles = records['filebase']
-            entries  = records['entry']
-            # get thresholds
-            stats = [self._statscache[f] for f in pcmfiles]
-            dcoff = nx.asarray([s['dcoff'] for s in stats])
+        atimes = self.getentrytimes()
+        for i in range(len(atimes)):
+            atime = atimes[i]
+            S = self.getdata(atime=atime,channels=channels)
+
+            dcoff = fdcoff(i, S)
             if not fac:
                 thresh = dcoff + abs_thresh
-                #thresh = [s['dcoff'] + abs_thresh for s in stats]
             else:
-                thresh = dcoff + rms_fac * nx.asarray([s['rms'] for s in stats])
-                #thresh = [s['dcoff'] + rms_fac * s['rms'] for s in stats]
-            # threshold spikes. We have no guarantee that the entries
-            # have the same number of samples, although the channels
-            # should, so we iterate through the entries
-            pfp = [self._filecache[f] for f in pcmfiles]
-            S = combine_channels(pfp, entries)
-            thresh = thresh.astype(S.dtype)
+                rms = frms(i, S)
+                thresh = dcoff + rms_fac * rms
+                
             ev = thresh_spikes(S, thresh, **kwargs)
             spikes.append(extract_spikes(S, ev, **kwargs))
-            events.extend(ev)
-            events_entry.extend([siteentry] * len(ev))
+            events.append(ev)
+            events_entry.append([atime] * len(ev))
 
         allspikes = nx.concatenate(spikes, axis=0)
-        events = nx.asarray(events)
-        events_entry = nx.asarray(events_entry)
-        
+        events = nx.concatenate(events)
+        events_entry = nx.concatenate(events_entry)
+
         if kwargs.get('align_spikes',True):
             allspikes,kept_events = realign(allspikes, downsamp=False)
             if kept_events != None:
@@ -212,25 +225,185 @@ class site(explog.explog):
 
         # turn events/entries into a dict
         event_dict = {}
-        for siteentry in siteentries:
-            event_dict[siteentry] = events[events_entry==siteentry]
+        for atime in atimes:
+            event_dict[atime] = events[events_entry==atime]
                 
         return allspikes, event_dict
 
-    def writedat(self, outfile, entry, dtype='h'):
+    @property
+    def statnames(self):
+        return ['mu','rms']
+
+    def __calcstats(self):
         """
-        Exports raw data from an entry to a .dat file.
+        Compute statistics on all the entries in the current site.
+        This can take a monstrously long time if there's a lot of
+        data.
         """
-        records = self.getsiteentry(entry)
+        mu = []
+        rms = []
+        # compute stats on all entries, including invalid ones
+        for atime in self.getentrytimes(checkvalid=False):
+            records = self.getfiles(atime)
+            pcmfiles = records['filebase']
+            entries  = records['entry']
+            pfp = [self._filecache[f] for f in pcmfiles]            
+            S = combine_channels(pfp, entries)
+            mu.append(S.mean(axis=0))
+            rms.append(nx.sqrt(S.var(axis=0)))
+        return {'mu': nx.column_stack(mu),
+                'rms' : nx.column_stack(rms)}
+
+    def __updatecache(self, group, statname, data):
+        _dtype = data.dtype.name.capitalize()
+        _ashape = [1] * data.ndim
+        atom = t.Atom(dtype=_dtype, shape=_ashape, flavor='numpy')
+        try:
+            oldtbl = self.elog.getNode(group, statname)
+            oldtbl.remove()
+        except t.NoSuchNodeError:
+            pass
+
+        tbl = self.elog.createCArray(group, statname, data.shape,
+                                     atom, createparents=True)
+        tbl[:] = data
+        return tbl
+
+    def has_statscache(self, statname='rms'):
+        """
+        Returns true if the statistic is cached, and if it's
+        got the correct number of values to match the number
+        of entries in the entry table.
+        """
+        group_name = '/site_%d_%d' % self.site
+        try:
+            tbl = self.elog.getNode(group_name, statname)
+            return True
+        except t.NoSuchNodeError:
+            return False
+
+    def getstats(self, *args, **kwargs):
+        """
+        Returns entry statistics for all the entries in the site.
+        The class maintains a cache in the h5 file, which is used
+        if it's available; otherwise we generate the statistics (and
+        cache them).  This can take a VERY long time, so if
+        this should be avoided (i.e. if the files are being
+        accessed anyway), use has_statscache()
+
+        getstats() - retrieves all entries
+        getstats(entry) - retrieve stats for a specific entry
+        
+        Optional arguments:
+        statname - default 'rms' (see statnames property for available stats)
+        onlyvalid - if True, only return stats for valid entries
+        """
+        statname = kwargs.get('statname','rms')
+        if not statname in self.statnames:
+            raise ValueError, "Unknown statistic %s" % statname
+        onlyvalid = kwargs.get('onlyvalid',True)
+        
+        group_name = '/site_%d_%d' % self.site
+        if not self.has_statscache(statname):
+            # cache does not exist, create
+            print "[Calculating entry statistics]"
+            stats = self.__calcstats()
+            for key, data in stats.items():
+                self.__updatecache(group_name, key, data)
+            self.elog.flush()
+
+        if onlyvalid:
+            valid = nx.asarray([r.nrow for r in self if r['valid']])
+
+        tbl = self.elog.getNode(group_name, statname)
+        if len(args) > 0:
+            # retrieve specific entry
+            if onlyvalid:
+                ind = valid[args[0]]
+            else:
+                ind = args[0]
+                
+            return tbl[:,ind]
+        else:
+            values = tbl.read()
+            if onlyvalid:
+                return values[:,valid]
+            else:
+                return values
+##         nchan,nentry = tbl.shape
+##         if onlyvalid:
+##             ind = nx.asarray([r.nrow for r in self if r['valid']])
+##         else:
+##             ind = nx.arange(nentry)
+
+##         if len(args) > 0:
+##             ind = ind[args[0]]
+
+##         return tbl[:,ind]
+##         try:
+##             tbl = self.elog.getNode(group_name, statname)
+##             values = tbl.read()
+##         except t.NoSuchNodeError:
+
+        
+##         # only return values for valid entries
+##         if onlyvalid:
+##             rnums = [r.nrow for r in self]
+##             valid = self.elog.root.entries.col('valid')[rnums]
+##             return values[:,valid]
+##         else:
+##             return values
+
+    def setvalid(self, S):
+        """
+        Sets the validity of the entries. The argument should be a vector
+        of booleans with the same number of elements as returned by getentrytimes().
+        Note that this process only works in one direction.  If you want to revalidate
+        entries, you'll have to regenerate the stats cache.
+        """
+        i = 0
+        for record in self:
+            record['valid'] = record['valid'] & S[i]
+            record.update()
+            i += 1
+        self.elog.flush()
+        
+
+    def getdata(self, *args, **kwargs):
+        """
+        Extracts data from all channels for a particular entry.
+        Refer to entry by number, or by abstime
+        getdata(<entry>)
+        getdata(atime=<abstime>)
+
+        optional arguments:
+        <channels> - list or scalar restricting which channels to return
+        """
+        if len(args)==0 and len(kwargs)==0:
+            raise TypeError, "getdata() takes at least 1 argument (0 given)"
+        
+        if len(args)>0:
+            atimes = self.getentrytimes()
+            atime = atimes[args[0]]
+        else:
+            atime = kwargs['atime']
+
+        records = self.getfiles(atime)
+        if kwargs.has_key('channels'):
+            c = kwargs['channels']
+            if c==None:
+                pass
+            elif nx.isscalar(c):
+                records = records[[c]]
+            else:
+                records = records[c]
+                
         pcmfiles = records['filebase']
         entries  = records['entry']
         pfp = [self._filecache[f] for f in pcmfiles]        
-        signal = combine_channels(pfp, entries)
-        fp = open(outfile, 'wb')
-        io.fwrite(fp, signal.size, signal)
-        fp.close()
+        return combine_channels(pfp, entries)
 
-    def groupchannels(self, events, samplerate=20000):
+    def groupchannels(self, events):
         """
         Groups events from different channels by entry.  Entries
         are uniquely identified by abstime, which can be used
@@ -242,7 +415,7 @@ class site(explog.explog):
         entries = self.elog.root.entries
         _dtype = events[0].dtype
         nunits = len(events)
-        msr = samplerate/1000
+        msr = self.samplerate
 
         coords = [r.nrow for r in entries.where(entries.cols.channel==0) if
                   (r['pen'],r['site'])==self.site]
@@ -322,30 +495,32 @@ class site(explog.explog):
     
 
     
-def extractfeatures(spikes, *args, **kwargs):
+def extractfeatures(spikes, events=None, **kwargs):
     """
     Calculates principal components of the spike set.
 
-    Provide these two arguments to add a last column with timestamps
-    events - list of lists with event times
-    entrytimes - used to create a last column with timestamps
+    Provide this argument to add a last column with timestamps
+    events - dictionary of event times (relative to episode start), indexed
+             by the starting time of the episode
     """
     pcs = get_pcs(spikes, **kwargs)
     n,ndims,nchans = pcs.shape
     proj = get_projections(spikes, pcs)
     proj.shape = (proj.shape[0], ndims*nchans)
 
-    if len(args)==0:
+    if events==None:
         return proj
-
-    events, entrytimes = args
+    
     # need to calculate time stamps
     timestamps = nx.zeros((proj.shape[0],1),'l')
+    atimes = nx.asarray(events.keys())
+    atimes.sort()
+    
     offset = 0
-    for siteentry, eventlist in events.items():
-        nevents = len(eventlist)
-        timestamps[offset:offset+nevents,0] = eventlist
-        timestamps[offset:offset+nevents,0] += entrytimes[siteentry]
+    for atime in atimes:
+        eventlist = events[atime]
+        nevents = eventlist.size
+        timestamps[offset:offset+nevents,0] = eventlist + atime
         offset += nevents
 
     return nx.concatenate([proj, timestamps], axis=1)   

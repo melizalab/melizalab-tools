@@ -3,119 +3,246 @@
 """
 mspikes - extracts spikes from raw pcm_seq2 data
 
-mspikes -p <pen> -s <site> [--chan=<chans>]
-        [-r <rms_thresh> | -a <abs_thresh>] [-f 3] [--kkwik] <explog>
+mspikes --sort [-l] [-o <outfile>] <explog>
 
-If the program is invoked with an explog as input, the seq2 files associated
-with a particular pen/spike are grouped together.  If multiple channels
-were recorded, these can be specified and grouped using the --chan flag.
-For example, --chan='1,5,7' will extract spikes from channels 1,5, and 7.
-If recording from tetrodes, grouping can be done with parentheses: e.g.
- --chan='(1,2,3,4),(5,6,7,8)'
+         parses <explog> to an .h5 file and moves pcm_seq2
+         files to directories for each pen/site
+         [-l] - leave files in the current directory
+         [-o <outfile>] - specify an alternative outfile
 
-Set dynamic or absolute thresholds with the -r and -a flags. Either
-one value for all channels, or a quoted, comma delimited list, like
-'6.5,6.5,5'
+Once the files are sorted and the explog parsed, use the .h5 file
+instead of the raw .explog file
 
-mspikes computes the principal components of the spike waveforms; use
--f to set the number of components to calculate (default 3)
+mspikes --stats -p <pen> -s <site>  <explog.h5>
 
-Note that the explog file gets parsed into an hd5 (.h5) file; this can be
-used in the future instead of the raw explog file.
+        plots statistics for each entry. With no options, plots the RMS power
+        of the signal.  For multi-channel acquisitions, plots the mean across all channels.
 
-Outputs a number of files that can be used with Klusters or KlustaKwik.
-With an explog, the files are:
-    <base>.spk.<g> - the spike file
-    <base>.fet.<g> - the feature file
-    <base>.clu.<g> - the cluster file (all spikes assigned to one cluster)
-    <base>.xml - the control file used by Klusters
+mspikes --cull -p <pen> -s <site> -t <max_rms> <explog.h5>:
 
-where <base> is site_<pen>_<site>
-and <g> is the spike group
+        mark unusable episodes in the explog.h5 file. Specify a maximum
+        RMS power; all episodes with more than that value are marked as bad
+        in the explog.h5 file
 
-If --kkwik is set, KlustaKwik will be run on each group after it's extracted.
+mspikes --inspect -p <pen> -s <site> [--chan=""] <explog.h5>
+
+        view the raw waveform of the signal, plotted in units relative
+        to the RMS power of the signal. Useful in determining what threshold
+        value(s) to set in extraction
+
+mspikes --extract -p <pen> -s <site> [--chan=""] [-r <rms_thresh> | -a <abs_thresh>]
+         [-f 3] [--kkwik] <explog.h5>
+
+        Extract spikes from raw waveforms and output in a format usable
+        by klusters and klustakwik. If multiple channels
+        were recorded, these can be specified and grouped using the --chan flag.
+        For example, --chan='1,5,7' will extract spikes from channels 1,5, and 7.
+        If recording from tetrodes, grouping can be done with parentheses: e.g.
+        --chan='(1,2,3,4),(5,6,7,8)' Set dynamic or absolute thresholds with the
+        -r and -a flags. Either one value for all channels, or a quoted, comma
+        delimited list, like '6.5,6.5,5'
+
+        The -f flag controls how many principal components and their projections
+        to calculate (default 3 per channel)
+
+        Outputs a number of files that can be used with Klusters or KlustaKwik.
+        With an explog, the files are:
+           <base>.spk.<g> - the spike file
+           <base>.fet.<g> - the feature file
+           <base>.clu.<g> - the cluster file (all spikes assigned to one cluster)
+           <base>.xml - the control file used by Klusters
+
+        where <base> is site_<pen>_<site>
+        and <g> is the spike group
+
+        If --kkwik is set, KlustaKwik will be run on each group after it's extracted.
 
 """
 
-import sys, getopt
-from spikes import klusters, extractor
+import os, sys, getopt
 
 
 options = {
     'rms_thresh' : [4.5],
     'nfeats' : 3,
     'channels' : [0],
-    'kkwik': False
+    'kkwik': False,
+    'sort_raw' : True
     }
 
+###
 if __name__=="__main__":
 
     if len(sys.argv)<2:
         print __doc__
         sys.exit(-1)
 
-    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:h",
-                               ["chan=","help","kkwik"])
-    if len(args) < 1:
-        print "Error: you must specify an explog or pcm_seq2 file"
-        sys.exit(-1)
 
-    for o,a in opts:
-        if o in ('-h','--help'):
+    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:hl",
+                               ["sort","stats","cull","inspect","extract",
+                                "chan=","help","kkwik"])
+
+    opts = dict(opts)
+    if opts.has_key('-h') or opts.has_key('--help'):
             print __doc__
             sys.exit(-1)
-        elif o == '-p':
-            options['pen'] = int(a)
-        elif o == '-s':
-            options['site'] = int(a)
-        elif o == '-r':
-            exec "thresh = [%s]" % a
-            options['rms_thresh'] = thresh
-        elif o == '-a':
-            exec "thresh = [%s]" % a            
-            options['abs_thresh'] = thresh
-        elif o == '-f':
-            options['nfeats'] = int(a)
-        elif o == '--kkwik':
-            options['kkwik'] = True
-        elif o == '--chan':
-            exec "chans = [%s]" % a
-##             chans = []
-##             l = [x.strip() for x in a.split(',')]
-##             for item in l:
-##                 if item[0].isdigit():
-##                     val = int(item)
-##                 elif item[0] in ('(','['):
-##                     inner_list = item[1:-1]
-##                     val = [int(v) for v in inner_list.split(',')]
-##                 else:
-##                     raise ValueError, "Unable to parse channel list %s" % a
-##                 chans.append(val)
-            options['channels'] = chans
+###
+# wait to load the heavyweight modules
+from spikes import klusters, extractor
+from dlab import explog
+import scipy as nx
+import pylab as P
 
-    if options.has_key('rms_thresh') and len(options['rms_thresh'])==1:
-        options['rms_thresh'] *= len(options['channels'])
-    if options.has_key('abs_thresh') and len(options['abs_thresh'])==1:
-        options['abs_thresh'] *= len(options['channels'])
 
-    print options
+def plotall(t,S,ax=None):
+    nplots = S.shape[1]
+    if ax==None or len(ax) != nplots:
+        P.clf()
+        ax = []
+        for i in range(nplots):
+            ax.append(P.subplot(nplots,1,i+1))
+    
+    for i in range(nplots):
+        ax[i].plot(t,S[:,i],'k')
 
-    explogmode = args[0].endswith('.explog') or args[0].endswith('.explog.h5')
+    for i in range(nplots-1):
+        P.setp(ax[i].get_xticklabels(),visible=False)
+        
+    return ax
 
-    if explogmode:
-        explog = args[0]
-        changroups = options.pop('channels')
-        ksite = klusters.site(explog, options['pen'], options['site'])
-        ksite.extractgroups('site_%(pen)d_%(site)d' % options,
-                            changroups,
-                            **options)
+def plotentry(k, entry, channels=None, ax=None):
+    s = k.getdata(entry, channels=channels)
+    r = k.getstats(entry)
+    if channels!=None: r = r[channels]
+    sc = s / r
+    t = nx.linspace(0,sc.shape[0]/k.samplerate,sc.shape[0])
+    P.ioff()
+    ax = plotall(t,sc,ax)
+    P.xlabel('Time (ms)')
+    ax[0].set_title('site_%d_%d - entry %d' % (k.site + (entry,)))
+    P.draw()
+    return ax
+
+
+
+####
+if __name__=="__main__":
+
+
+    k = None    # the explog/site object
+
+    if opts.has_key('--sort'):
+        # sort mode parses the explog file
+        assert len(args) > 0
+        infile = args[0]
+        outfile = infile + '.h5'
+        for o,a in opts.items():
+            if o=='-l':
+                options['sort_raw'] = False
+            elif o=='-o':
+                outfile = a
+
+        if os.path.exists(outfile):
+            os.remove(outfile)
+        k = explog.readexplog(infile, outfile, options['sort_raw'])
+        print "Parsed explog: %d episodes, %d stimuli, and %d channels" % \
+              (k.nentries, len(k.elog.root.stimuli), k.nchannels)
+        
+
     else:
-        raise NotImplementedError, "Pcm_seq2 mode not implemented yet"
-        pcmfile = args[0]
-        pfp = extractor.dataio.pcmfile(pcmfile)
-        spikes, events = find_spikes(pfp)
-        rspikes = realign(spikes, downsamp=False)
-        pcs = get_pcs(rspikes, ndims=options['nfeats'])
-        proj = get_projections(rspikes, pcs)
+        # all other modes require pen and site
+        if opts.has_key('-p'):
+            pen = int(opts['-p'])
+        else:
+            print "Error: must specify pen/site"
+            sys.exit(-1)
+        if opts.has_key('-s'):
+            site = int(opts['-s'])
+        else:
+            print "Error: must specify pen/site"
+            sys.exit(-1)       
+
+        infile = args[0]
+        if not infile.endswith('.h5'):
+            print "Error: must use parsed explog (.h5) for this option"
+            sys.exit(-1)
+
+        # open the kluster.site object
+        k = klusters.site(infile,pen,site)
+        
+        # now check for the other modes
+        if opts.has_key('--stats'):
+            # stats mode computes statistics for the site
+            rms = k.getstats(statname='rms')
+            if rms.ndim > 1:
+                rms = rms.mean(0)
+            # plot them
+            P.plot(rms,'o')
+            P.xlabel('Entry')
+            P.ylabel('RMS')
+            P.show()
             
+        elif opts.has_key('--cull'):
+            thresh = float(opts.get('-t',-1))
+            if thresh < 0:
+                print "Error: must supply a positive maximum rms power for threshhold"
+                sys.exit(-1)
+            rms = k.getstats('rms', onlyvalid=False)
+            if rms.ndim > 1:
+                rms = rms.mean(0)
+            keep = rms<thresh
+            k.setvalid(keep)
+            print "Marked %d entries as invalid: %s" % (keep.size - keep.sum(),
+                                                        (keep==False).nonzero()[0])
+
+        elif opts.has_key('--inspect'):
+            # this is faster in aplot, but the results are scaled by rms here
+            P.ioff()
+            if opts.has_key('--chan'):
+                exec "chans = [%s]" % opts['--chan']
+            else:
+                chans = None
+
+            def keypress(event):
+                if event.key in ('+', '='):
+                    keypress.currententry += 1
+                    plotentry(k, keypress.currententry, chans, ax)
+                elif event.key in ('-', '_'):
+                    keypress.currententry -= 1
+                    plotentry(k, keypress.currententry, chans, ax)
+                
+            keypress.currententry = 0
+            ax = plotentry(k, 0, chans)
+            P.gcf().subplots_adjust(hspace=0.)
+            P.connect('key_press_event',keypress)
+            P.show()
+
+        elif opts.has_key('--extract'):
+
+            for o,a in opts.items():
+                if o == '-r':
+                    exec "thresh = [%s]" % a
+                    options['rms_thresh'] = thresh
+                elif o == '-a':
+                    exec "thresh = [%s]" % a            
+                    options['abs_thresh'] = thresh
+                elif o == '-f':
+                    options['nfeats'] = int(a)
+                elif o == '--kkwik':
+                    options['kkwik'] = True
+                elif o == '--chan':
+                    exec "chans = [%s]" % a
+                    options['channels'] = chans                
+
+            if options.has_key('rms_thresh') and len(options['rms_thresh'])==1:
+                options['rms_thresh'] *= len(options['channels'])
+            if options.has_key('abs_thresh') and len(options['abs_thresh'])==1:
+                options['abs_thresh'] *= len(options['channels'])
+
+            changroups = options.pop('channels')
+            k.extractgroups('site_%d_%d' % k.site, changroups, **options)
             
+
+    # cleanup removes an annoying message
+    del(k)
+

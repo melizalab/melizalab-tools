@@ -4,7 +4,7 @@
 groupevents.py - Groups event times into toe_lis files by stimulus and unit
 
 Usage: groupevents.py [--units=\"...\"] [--stimulus=\"...\"] -c
-                       <basename> <explog>
+                       <basename> <explog.h5>
         
          --stimulus specifies which stimuli to include in the grouping
          (otherwise all stimuli are processed)
@@ -20,7 +20,7 @@ Usage: groupevents.py [--units=\"...\"] [--stimulus=\"...\"] -c
          <basename> specifies the basename of the fet and clu files that
          contain the event time and cluster information
 
-         <explog> refers to either the raw explog or a parsed explog.h5 file,
+         <explog.h5> refers to either the parsed explog.h5 file,
          which is used to assign event times to particular episodes.
 
 """
