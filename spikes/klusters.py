@@ -53,6 +53,9 @@ class site(explog.explog):
 
     def _set_site(self, site):
         self._site = (int(site[0]), int(site[1]))
+        self._eventcache = None
+
+    site = property(_get_site, _set_site, None, "The current recording site")        
 
     def __iter__(self):
         """
@@ -65,17 +68,37 @@ class site(explog.explog):
             if r['pen']==pen:
                 yield r
 
-        
-    site = property(_get_site, _set_site, None, "The current recording site")        
-
-    def getentrytimes(self, checkvalid=True):
+    def getentrytimes(self, entry=None, checkvalid=True):
         """
-        Returns all the (valid) entry times associated with the current site
+        Returns all the (valid) entry times associated with the current site,
+        or a single (or slice) of entries.
         """
         table = self.elog.root.entries
         rnums = [r.nrow for r in self if r['valid']]
+        if entry!=None:
+            rnums = rnums[entry]
         return table.col('abstime')[rnums]
-            
+
+
+    def getevents(self, entry):
+        """
+        Retrieves the event times for each unit associated with an entry.
+        Expects the site_<pen>_<site>.XX files to be there; if they're
+        not, returns None
+
+        Caches the event list for the whole site the first time it's run
+        """
+        if self._eventcache == None:
+            basename = "site_%d_%d" % self.site
+            self._eventcache,sources = klu2events(basename)
+
+        if len(self._eventcache)==0:
+            return None
+        
+        atime = self.getentrytimes(entry)
+        end = atime + self.getentry(atime)['duration'][0]
+        return [evlist[(evlist>=atime) & (evlist<=end)] - atime for evlist in self._eventcache]
+
 
     def extractgroups(self, base, channelgroups, **kwargs):
         """
@@ -330,29 +353,6 @@ class site(explog.explog):
                 return values[:,valid]
             else:
                 return values
-##         nchan,nentry = tbl.shape
-##         if onlyvalid:
-##             ind = nx.asarray([r.nrow for r in self if r['valid']])
-##         else:
-##             ind = nx.arange(nentry)
-
-##         if len(args) > 0:
-##             ind = ind[args[0]]
-
-##         return tbl[:,ind]
-##         try:
-##             tbl = self.elog.getNode(group_name, statname)
-##             values = tbl.read()
-##         except t.NoSuchNodeError:
-
-        
-##         # only return values for valid entries
-##         if onlyvalid:
-##             rnums = [r.nrow for r in self]
-##             valid = self.elog.root.entries.col('valid')[rnums]
-##             return values[:,valid]
-##         else:
-##             return values
 
     def setvalid(self, S):
         """
@@ -479,20 +479,8 @@ class site(explog.explog):
                     tls[stimulus] = tl
 
         return tls
-    
-    def _get_site(self):
-        return self._site
 
-    def _set_site(self, site):
-        self._site = (int(site[0]), int(site[1]))
-        self._timestamps = self.getentrytimes()        
-
-    site = property(_get_site, _set_site, None, "The current recording site")
-
-    @property
-    def entrytimes(self):
-        return self._timestamps
-    
+# end class site
 
     
 def extractfeatures(spikes, events=None, **kwargs):
@@ -594,9 +582,6 @@ def klu2events(basename, exclude_groups=None):
         if len(clust_id)==1:
             events.append(times)
             sources.append((group,clust_id[0]))
-        elif len(clust_id)==2:
-            events.append(times[clusters==clust_id[-1]])
-            sources.append((group,clust_id[-1]))
         else:
             for c in clust_id[clust_id>1]:
                 events.append(times[clusters==c])
