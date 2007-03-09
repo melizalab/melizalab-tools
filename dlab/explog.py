@@ -81,6 +81,14 @@ class explog(object):
         atimes = table.col('abstime')
         return atimes
 
+    def getstimulus(self, abstime):
+        """
+        Returns the stimulus or stimuli played in a particular episode
+        """
+        table = self.elog.root.stimuli
+        rnum = table.getWhereList(table.cols.entrytime==int(abstime))
+        return table.readCoordinates(rnum)
+
     @property
     def channels(self):
         """
