@@ -24,11 +24,14 @@ mspikes --cull -p <pen> -s <site> -t <max_rms> <explog.h5>:
         RMS power; all episodes with more than that value are marked as bad
         in the explog.h5 file
 
-mspikes --inspect -p <pen> -s <site> [--chan=""] <explog.h5>
+mspikes --inspect -p <pen> -s <site> [--chan=""] [-u [--unit=""]] <explog.h5>
 
         view the raw waveform of the signal, plotted in units relative
         to the RMS power of the signal. Useful in determining what threshold
-        value(s) to set in extraction
+        value(s) to set in extraction. Restrict the set of channels plotted
+        (default all) with --chan.  If spike times have already been
+        extracted, and the --unit(s) argument is given, plots the unit
+        events as dots overlaid on the waveforms.
 
 mspikes --extract -p <pen> -s <site> [--chan=""] [-r <rms_thresh> | -a <abs_thresh>]
          [-f 3] [--kkwik] <explog.h5>
@@ -78,9 +81,9 @@ if __name__=="__main__":
         sys.exit(-1)
 
 
-    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:hl",
+    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:hlu",
                                ["sort","stats","cull","inspect","extract",
-                                "chan=","help","kkwik"])
+                                "chan=","unit=","help","kkwik"])
 
     opts = dict(opts)
     if opts.has_key('-h') or opts.has_key('--help'):
@@ -104,26 +107,42 @@ def plotall(t,S,ax=None):
     
     for i in range(nplots):
         ax[i].plot(t,S[:,i],'k')
-
-    for i in range(nplots-1):
-        P.setp(ax[i].get_xticklabels(),visible=False)
         
     return ax
 
-def plotentry(k, entry, channels=None, ax=None):
+def plotentry(k, entry, channels=None, units=False, ax=None):
     s = k.getdata(entry, channels=channels)
     r = k.getstats(entry)
+    atime = k.getentrytimes(entry)
+    stim = k.getstimulus(atime)
+    if len(stim): stim = stim['name']
+
     if channels!=None: r = r[channels]
     sc = s / r
     t = nx.linspace(0,sc.shape[0]/k.samplerate,sc.shape[0])
     P.ioff()
+    # plot the pcm data
     ax = plotall(t,sc,ax)
-    P.xlabel('Time (ms)')
-    ax[0].set_title('site_%d_%d - entry %d' % (k.site + (entry,)))
+    # plot the units on all the axes
+    if units!=False:
+        events = k.getevents(entry)
+        if units!=None:
+            events = events[units]
+        if events!=None:
+            P.hold(1)
+            for i in range(len(ax)):
+                for e in events:
+                    ax[i].plot(t[e],sc[e,i],'o')
+            P.hold(0) 
+
+    # fiddle with the plots a little to make them pretty
+    for i in range(len(ax)-1):
+        P.setp(ax[i].get_xticklabels(),visible=False)
+    ax[0].set_title('site_%d_%d (%d) %s' % (k.site + (entry,stim)))
+    ax[-1].set_xlabel('Time (ms)')
     P.draw()
     return ax
-
-
+    
 
 ####
 if __name__=="__main__":
@@ -202,17 +221,25 @@ if __name__=="__main__":
                 exec "chans = [%s]" % opts['--chan']
             else:
                 chans = None
+                
+            if opts.has_key('-u'):
+                if opts.has_key('--unit'):
+                    exec "units = [%s]" % opts['--unit']
+                else:
+                    units = None
+            else:
+                units = False
 
             def keypress(event):
                 if event.key in ('+', '='):
                     keypress.currententry += 1
-                    plotentry(k, keypress.currententry, chans, ax)
+                    plotentry(k, keypress.currententry, channels=chans, units=units, ax=ax)
                 elif event.key in ('-', '_'):
                     keypress.currententry -= 1
-                    plotentry(k, keypress.currententry, chans, ax)
+                    plotentry(k, keypress.currententry, channels=chans, units=units, ax=ax)
                 
             keypress.currententry = 0
-            ax = plotentry(k, 0, chans)
+            ax = plotentry(k, 0, channels=chans, units=units)
             P.gcf().subplots_adjust(hspace=0.)
             P.connect('key_press_event',keypress)
             P.show()
