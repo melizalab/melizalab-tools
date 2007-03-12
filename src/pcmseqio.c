@@ -9,7 +9,7 @@
 #include <Python.h>
 
 #include "numpy/arrayobject.h"
-#include <pcmio.h>
+#include "pcmio.h"
 
 typedef struct {
 	PyObject_HEAD

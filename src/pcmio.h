@@ -17,9 +17,6 @@
 #ifndef PCMIOHEADER
 #define PCMIOHEADER
 
-extern int pcm_errno;
-extern int sys_nerr;
-
 #ifdef linux
 #ifdef MADV_SEQUENTIAL
 #undef MADV_SEQUENTIAL

@@ -1,7 +1,11 @@
 from distutils.core import setup, Extension
+from distutils.sysconfig import get_python_lib
+import os
+
+nxdir = os.path.join(get_python_lib(plat_specific=1), 'numpy/core/include')
 
 _pcmseqio = Extension('_pcmseqio',
-                    include_dirs = ['/usr/lib/python2.4/site-packages/numpy/core/include'],
+                    include_dirs = [nxdir],
                     sources = ['pcmseqio.c','pcmio.c']
                     )
 	
