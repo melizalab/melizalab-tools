@@ -1,8 +1,8 @@
 /*
- * dataio.c
+ * pcmseqio.c
  *
- * A python wrapper for Amish Dave's libdataio; provides IO for a variety
- * of data formats. Data are stored in numpy arrays
+ * A python extension module that provides IO for the pcm_seq2 file format.
+ * Data are stored in numpy arrays.
  *
  */
 
@@ -152,7 +152,7 @@ static PyMethodDef pcmfile_methods[]= {
 static PyTypeObject PcmfileType = {
 	PyObject_HEAD_INIT(NULL)
 	0,                             /*ob_size*/
-	"dataio.pcmfile",              /*tp_name*/
+	"_pcmseqio.pcmfile",              /*tp_name*/
 	sizeof(PcmfileObject), /*tp_basicsize*/
 	0,                             /*tp_itemsize*/
 	(destructor)pcmfile_dealloc,                         /*tp_dealloc*/
@@ -191,22 +191,7 @@ static PyTypeObject PcmfileType = {
 	0,                 /* tp_new */
 };
 
-static PyObject*
-zeros(PyObject* self)
-{
-	npy_intp shape[1];
-	shape[0] = 100;
-	
-	fprintf(stderr, "pre-alloc\n");
-	PyArrayObject *pcmdata  = (PyArrayObject*) PyArray_SimpleNew(1,shape,NPY_DOUBLE);
-	fprintf(stderr, "post-alloc\n");
-	PyArray_FILLWBYTE(pcmdata, 0);
-
-	return Py_BuildValue("N", pcmdata);
-}
-
-static PyMethodDef dataio_methods[] = {
-	{"zeros", (PyCFunction)zeros, METH_NOARGS, "test function"},
+static PyMethodDef _pcmseqio_methods[] = {
 	{NULL}  /* Sentinel */
 };
 
@@ -214,7 +199,7 @@ static PyMethodDef dataio_methods[] = {
 #define PyMODINIT_FUNC void
 #endif
 PyMODINIT_FUNC
-initdataio(void)
+init_pcmseqio(void)
 {
 	import_array();
 	PyObject* m;
@@ -223,8 +208,8 @@ initdataio(void)
 	if (PyType_Ready(&PcmfileType) < 0)
 		return;
 	
-	m = Py_InitModule3("dataio", dataio_methods,
-                       "Wrapper module for libdataio");
+	m = Py_InitModule3("_pcmseqio", _pcmseqio_methods,
+                       "Handles pcmseq2 files");
 	
 	Py_INCREF(&PcmfileType);
 	PyModule_AddObject(m, "pcmfile", (PyObject *)&PcmfileType);

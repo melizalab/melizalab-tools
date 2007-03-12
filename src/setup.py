@@ -1,16 +1,14 @@
 from distutils.core import setup, Extension
 
-dataio = Extension('dataio',
+_pcmseqio = Extension('_pcmseqio',
                     include_dirs = ['/usr/lib/python2.4/site-packages/numpy/core/include'],
-                    libraries = ['dataio'],
-                    library_dirs = ['libdataio'],
-                    sources = ['dataio.c']
+                    sources = ['pcmseqio.c','pcmio.c']
                     )
 	
-setup(name = "datio",
+setup(name = "_pcmseqio",
       version = "1.0",
-      description = "Wrapper for libdataio",
+      description = "Wrapper for pcm_seq2 read/write functions",
       maintainer = "CD Meliza",
       maintainer_email = "dmeliza@uchicago.edu",
-      ext_modules = [ dataio ]
+      ext_modules = [ _pcmseqio ]
       )
