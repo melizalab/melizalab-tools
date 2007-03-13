@@ -6,7 +6,7 @@ extracts spikes from a series of associated pcm_seq2 files
 
 import scipy as nx
 
-from dlab import dataio, linalg
+from dlab import _pcmseqio, linalg
 from scipy import weave, io
 from scipy.linalg import svd, get_blas_funcs
 from dlab.signalproc import sincresample
@@ -288,7 +288,7 @@ def signalstats(pcmfiles):
 
     Returns a dictionary of statistics (in case we want to add some more)
     """
-    if isinstance(pcmfiles, dataio.pcmfile):
+    if isinstance(pcmfiles, _pcmseqio.pcmfile):
         pcmfiles = [pcmfiles]
         
     nentries = get_nentries(pcmfiles)
@@ -297,7 +297,7 @@ def signalstats(pcmfiles):
     dcoff = nx.zeros((nentries, nchans))
     A = nx.zeros((nentries,nchans,nchans))
     for i in range(nentries):
-        nsamp = pcmfiles[0].nsamples()
+        nsamp = pcmfiles[0].nframes()
         S = nx.empty((nsamp,nchans),_dtype)
         for j in range(nchans):
             pcmfiles[j].seek(i+1)
@@ -324,7 +324,7 @@ def combine_channels(fp, entry):
         entry = [entry] * len(fp)
 
     [fp[chan].seek(entry[chan]) for chan in range(len(fp))]
-    nsamples = fp[0].nsamples()
+    nsamples = fp[0].nframes()
     signal = nx.zeros((nsamples, len(fp)), _dtype)
     for chan in range(len(fp)):
         signal[:,chan] = fp[chan].read()
@@ -342,7 +342,7 @@ if __name__=="__main__":
 
     # open files
     print "---> Open test files"
-    pfp = [dataio.pcmfile(fname) for fname in pcmfiles]
+    pfp = [_pcmseqio.pcmfile(fname) for fname in pcmfiles]
 
     print "---> Get signal statistics"
     stats = signalstats(pfp)

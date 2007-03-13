@@ -49,13 +49,13 @@ pcmfile_init(PcmfileObject* self, PyObject* args)
 /* methods */
 
 static PyObject*
-pcmfile_nentries(PcmfileObject* self)
+pcmfile_nentries(PcmfileObject* self, void *closure)
 {
 	return Py_BuildValue("i", self->pfp->nentries);
 }
 
 static PyObject*
-pcmfile_samplerate(PcmfileObject* self)
+pcmfile_samplerate(PcmfileObject* self, void *closure)
 {
 	struct pcmstat s;
 	pcm_stat(self->pfp, &s);
@@ -63,7 +63,7 @@ pcmfile_samplerate(PcmfileObject* self)
 }
 
 static PyObject*
-pcmfile_nsamples(PcmfileObject* self)
+pcmfile_nsamples(PcmfileObject* self, void *closure)
 {
 	struct pcmstat s;
 	pcm_stat(self->pfp, &s);
@@ -71,7 +71,7 @@ pcmfile_nsamples(PcmfileObject* self)
 }
 
 static PyObject*
-pcmfile_entry(PcmfileObject* self)
+pcmfile_entry(PcmfileObject* self, void *closure)
 {
 	return Py_BuildValue("i", self->pfp->entry);
 }
@@ -129,17 +129,23 @@ pcmfile_write(PcmfileObject* self, PyObject* args)
 	Py_XDECREF(data);
 	return Py_BuildValue("");
 }	
-	
+static PyGetSetDetf pcmfile_getseters[]={
+	{"nentries", (getter)pcmfile_nentries, 0, "The number of entries in the file", 0},
+	{"framerate", (getter)pcmfile_samplerate, 0, "The sample rate of the current entry", 0},
+	{"nframes", (getter)pcmfile_nsamples, 0, "The number of samples in the current entry",0},
+	{"entry", (getter)pcmfile_entry, 0, "The current entry",0},
+	{NULL}
+};
 
 static PyMethodDef pcmfile_methods[]= {
-	{"nentries", (PyCFunction)pcmfile_nentries, METH_NOARGS,
-	 "Returns the number of entries in the file"},
-	{"samplerate", (PyCFunction)pcmfile_samplerate, METH_NOARGS,
-	 "Returns the sample rate of the current entry"},
-	{"nsamples", (PyCFunction)pcmfile_nsamples, METH_NOARGS,
-	 "Returns the number of samples in the current entry"},
-	{"entry", (PyCFunction)pcmfile_entry, METH_NOARGS,
-	 "Returns the current entry"},
+/* 	{"nentries", (PyCFunction)pcmfile_nentries, METH_NOARGS, */
+/* 	 "Returns the number of entries in the file"}, */
+/* 	{"framerate", (PyCFunction)pcmfile_samplerate, METH_NOARGS, */
+/* 	 "Returns the sample rate of the current entry"}, */
+/* 	{"nframes", (PyCFunction)pcmfile_nsamples, METH_NOARGS, */
+/* 	 "Returns the number of samples in the current entry"}, */
+/* 	{"entry", (PyCFunction)pcmfile_entry, METH_NOARGS, */
+/* 	 "Returns the current entry"}, */
 	{"seek", (PyCFunction)pcmfile_seek, METH_VARARGS,
 	 "Seek to a specific entry in the file"},
 	{"read", (PyCFunction)pcmfile_read, METH_NOARGS,
@@ -180,7 +186,7 @@ static PyTypeObject PcmfileType = {
 	0,		               /* tp_iternext */
 	pcmfile_methods,             /* tp_methods */
 	0,             /* tp_members */
-	0,                         /* tp_getset */
+	pcmfile_getseters,                         /* tp_getset */
 	0,                         /* tp_base */
 	0,                         /* tp_dict */
 	0,                         /* tp_descr_get */

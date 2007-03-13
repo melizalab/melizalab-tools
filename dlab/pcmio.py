@@ -8,6 +8,7 @@ including wav, pcm, and pcm_seq2
 from scipy.io import fread,fwrite
 from scipy import dtype, fromstring
 from os.path import splitext, exists
+import _pcmseqio
 import wave
 
 class _sndfile(object):
@@ -145,7 +146,10 @@ class _sndfilemetaclass(object):
     def __init__(self, name, bases, attributes):
         # assume no subclasses of _sndfile
         self._cls_dict = {'.wav' : _wavfile,
-                          '.pcm' : _pcmfile}
+                          '.pcm' : _pcmfile,
+                          '.pcm_seq2' : _pcmseqio.pcmfile,
+                          '.pcm_seq' : _pcmseqio.pcmfile,
+                          '.pcmseq2' : _pcmseqio.pcmfile}
 
     def __call__(self, filename, *args, **kwargs):
         ext = splitext(filename)[1].lower()

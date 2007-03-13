@@ -6,7 +6,7 @@ Processes pcm_seq2 data for use by klusters
 
 from extractor import *
 import tables as t
-from dlab import explog, toelis
+from dlab import explog, toelis, _pcmseqio
 import scipy as nx
 import os
 
@@ -17,7 +17,7 @@ class filecache(dict):
     class tries to open the file
     """
 
-    _handler = dataio.pcmfile
+    _handler = _pcmseqio.pcmfile
 
     def __getitem__(self, key):
         if self.__contains__(key):
@@ -74,7 +74,11 @@ class site(explog.explog):
         or a single (or slice) of entries.
         """
         table = self.elog.root.entries
-        rnums = [r.nrow for r in self if r['valid']]
+        if checkvalid:
+            rnums = [r.nrow for r in self if r['valid']]
+        else:
+            rnums = [r.nrow for r in self]
+            
         if entry!=None:
             rnums = rnums[entry]
         return table.col('abstime')[rnums]
@@ -161,6 +165,7 @@ class site(explog.explog):
             xmlfp.write("</channels>\n")
 
             group_threshs = thresh[cnum:cnum+len(channels)]
+            cnum += len(channels)
             kwargs[thresh_mode] = group_threshs
             spikes, events = self.extractspikes(channels, **kwargs)
             print "%d events" % sum([len(e) for e in events.values()])
@@ -336,7 +341,7 @@ class site(explog.explog):
             self.elog.flush()
 
         if onlyvalid:
-            valid = nx.asarray([r.nrow for r in self if r['valid']])
+            valid = nx.asarray([r['valid'] for r in self]).nonzero()[0]
 
         tbl = self.elog.getNode(group_name, statname)
         if len(args) > 0:
@@ -354,16 +359,19 @@ class site(explog.explog):
             else:
                 return values
 
-    def setvalid(self, S):
+    def setvalid(self, S, keepcurrent=False):
         """
         Sets the validity of the entries. The argument should be a vector
         of booleans with the same number of elements as returned by getentrytimes().
-        Note that this process only works in one direction.  If you want to revalidate
-        entries, you'll have to regenerate the stats cache.
+        If keep is True, the validity is set to the current value AND the value
+        in S
         """
         i = 0
         for record in self:
-            record['valid'] = record['valid'] & S[i]
+            if keepcurrent:
+                record['valid'] = record['valid'] & S[i]
+            else:
+                record['valid'] = bool(S[i])
             record.update()
             i += 1
         self.elog.flush()
