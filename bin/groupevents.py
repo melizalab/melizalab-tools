@@ -65,7 +65,7 @@ if __name__=="__main__":
         unit_list = range(len(events))
     print "Analyzing units %s" % unit_list
     for i in unit_list:
-        filebase = "cell_%s_%s_%d" % (pen, site, i)
+        filebase = "cell_%s_%s_%d" % (pen, site, i+1)
         if make_dirs:
             os.mkdir(filebase)
             filebase = os.path.join(filebase, filebase)

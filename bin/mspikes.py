@@ -18,7 +18,7 @@ mspikes --stats -p <pen> -s <site>  <explog.h5>
         plots statistics for each entry. With no options, plots the RMS power
         of the signal.  For multi-channel acquisitions, plots the mean across all channels.
 
-mspikes --cull -p <pen> -s <site> -t <max_rms> <explog.h5>:
+mspikes --cull -p <pen> -s <site> [-t <max_rms>] [-e <max_entry>] <explog.h5>:
 
         mark unusable episodes in the explog.h5 file. Specify a maximum
         RMS power; all episodes with more than that value are marked as bad
@@ -81,7 +81,7 @@ if __name__=="__main__":
         sys.exit(-1)
 
 
-    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:hlu",
+    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:e:hlu",
                                ["sort","stats","cull","inspect","extract",
                                 "chan=","unit=","help","kkwik"])
 
@@ -97,7 +97,7 @@ import scipy as nx
 import pylab as P
 
 
-def plotall(t,S,ax=None):
+def plotall(t,S,ax=None,lbl=None):
     nplots = S.shape[1]
     if ax==None or len(ax) != nplots:
         P.clf()
@@ -107,37 +107,48 @@ def plotall(t,S,ax=None):
     
     for i in range(nplots):
         ax[i].plot(t,S[:,i],'k')
+        if lbl!=None:
+            ax[i].set_ylabel("%d" % lbl[i])
         
     return ax
 
 def plotentry(k, entry, channels=None, units=False, ax=None):
     s = k.getdata(entry, channels=channels)
+    m = k.getstats(entry,statname='mu')
     r = k.getstats(entry)
     atime = k.getentrytimes(entry)
     stim = k.getstimulus(atime)
     if len(stim): stim = stim['name']
 
-    if channels!=None: r = r[channels]
-    sc = s / r
+    if channels!=None:
+        r = r[channels]
+        m = m[channels]
+    else:
+        channels = range(s.shape[0])
+        
+    sc = (s - m) / r
     t = nx.linspace(0,sc.shape[0]/k.samplerate,sc.shape[0])
     P.ioff()
     # plot the pcm data
-    ax = plotall(t,sc,ax)
+    ax = plotall(t,sc,ax,lbl=channels)
+
     # plot the units on all the axes
     if units!=False:
         events = k.getevents(entry)
         if units!=None:
             events = events[units]
         if events!=None:
-            P.hold(1)
             for i in range(len(ax)):
+                P.axes(ax[i])
+                P.hold(1)
                 for e in events:
                     ax[i].plot(t[e],sc[e,i],'o')
-            P.hold(0) 
+                P.hold(0) 
 
     # fiddle with the plots a little to make them pretty
     for i in range(len(ax)-1):
         P.setp(ax[i].get_xticklabels(),visible=False)
+
     ax[0].set_title('site_%d_%d (%d) %s' % (k.site + (entry,stim)))
     ax[-1].set_xlabel('Time (ms)')
     P.draw()
@@ -206,7 +217,7 @@ if __name__=="__main__":
             if thresh < 0:
                 print "Error: must supply a positive maximum rms power for threshhold"
                 sys.exit(-1)
-            rms = k.getstats('rms', onlyvalid=False)
+            rms = k.getstats(statname='rms', onlyvalid=False)
             if rms.ndim > 1:
                 rms = rms.mean(0)
             keep = rms<thresh
@@ -238,8 +249,8 @@ if __name__=="__main__":
                     keypress.currententry -= 1
                     plotentry(k, keypress.currententry, channels=chans, units=units, ax=ax)
                 
-            keypress.currententry = 0
-            ax = plotentry(k, 0, channels=chans, units=units)
+            keypress.currententry = int(opts.get('-e','0'))
+            ax = plotentry(k, keypress.currententry, channels=chans, units=units)
             P.gcf().subplots_adjust(hspace=0.)
             P.connect('key_press_event',keypress)
             P.show()
