@@ -25,6 +25,7 @@ from pylab import *
 import scipy as nx
 from motifdb import db, importer
 from dlab import toelis, plotutils, pcmio, signalproc
+from spikes import tsstat
 from scipy.ndimage import center_of_mass, gaussian_filter1d
 import os
 
@@ -195,7 +196,20 @@ def plotselectivity(basename, motif_db, dir='.',
     f.subplots_adjust(hspace=0.)
     if retio: ion()
     show()
-                
+
+def plotrs(basename, motif_db):
+    """
+    Computes response strength (using toestat) for all motifs, and plots
+    them
+    """
+    width = 0.5
+    motifs, resps = tsstat.toestat_allrs(basename, motif_db)
+    x = nx.arange(len(motifs))+width
+    bar(x, resps)
+    xticks(x+width/2, motifs)
+    xlabel("Motif Name")
+    ylabel("Response Strength")
+    
 
 def aggregate(db, motifname, basename, dir='.', motif_pos=None):
     """
@@ -363,3 +377,4 @@ if __name__=="__main__":
 
     m = db.motifdb(motif_db)
     plotresps(args[1], args[0], m, motif_pos=motif_pos)
+    del(m)
