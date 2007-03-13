@@ -21,9 +21,9 @@ def get_nentries(fps):
     nentries = 0
     for f in fps:
         if not nentries:
-            nentries = f.nentries()
+            nentries = f.nentries
         else:
-            if nentries != f.nentries():
+            if nentries != f.nentries:
                 raise ValueError, "All files must have the same number of entries"                
 
     return nentries
@@ -34,8 +34,8 @@ def find_spikes(fp, **kwargs):
     the signal crosses a threshold.  This threshold can be defined
     in absolute terms, or relative to the RMS of the signal.
 
-    fp - list of pcmfile objects. Needs to support nentries(), seek(int)
-         and read()
+    fp - list of pcmfile objects. Needs to support nentries property,
+         seek(int), and read()
 
     Optional arguments:
     rms_thres  = 4.5  - factor by which the signal must exceed the
@@ -297,7 +297,7 @@ def signalstats(pcmfiles):
     dcoff = nx.zeros((nentries, nchans))
     A = nx.zeros((nentries,nchans,nchans))
     for i in range(nentries):
-        nsamp = pcmfiles[0].nframes()
+        nsamp = pcmfiles[0].nframes
         S = nx.empty((nsamp,nchans),_dtype)
         for j in range(nchans):
             pcmfiles[j].seek(i+1)
@@ -324,7 +324,7 @@ def combine_channels(fp, entry):
         entry = [entry] * len(fp)
 
     [fp[chan].seek(entry[chan]) for chan in range(len(fp))]
-    nsamples = fp[0].nframes()
+    nsamples = fp[0].nframes
     signal = nx.zeros((nsamples, len(fp)), _dtype)
     for chan in range(len(fp)):
         signal[:,chan] = fp[chan].read()

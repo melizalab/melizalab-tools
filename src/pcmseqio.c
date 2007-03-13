@@ -128,8 +128,9 @@ pcmfile_write(PcmfileObject* self, PyObject* args)
 	pcm_write(self->pfp, (short *)PyArray_DATA(data), PyArray_DIM(data, 0));
 	Py_XDECREF(data);
 	return Py_BuildValue("");
-}	
-static PyGetSetDetf pcmfile_getseters[]={
+}
+	
+static PyGetSetDef pcmfile_getseters[]={
 	{"nentries", (getter)pcmfile_nentries, 0, "The number of entries in the file", 0},
 	{"framerate", (getter)pcmfile_samplerate, 0, "The sample rate of the current entry", 0},
 	{"nframes", (getter)pcmfile_nsamples, 0, "The number of samples in the current entry",0},
