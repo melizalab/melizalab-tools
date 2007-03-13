@@ -84,22 +84,33 @@ class site(explog.explog):
         return table.col('abstime')[rnums]
 
 
-    def getevents(self, entry):
+    def getevents(self, *args, **kwargs):
         """
         Retrieves the event times for each unit associated with an entry.
         Expects the site_<pen>_<site>.XX files to be there; if they're
         not, returns None
 
+        getevents(entry) - get event times by entry
+        getevents(atime=abstime) - get event times by abstime
+
         Caches the event list for the whole site the first time it's run
         """
+        if len(args)==0 and len(kwargs)==0:
+            raise TypeError, "getevents() takes at least 1 argument (0 given)"
+
+
         if self._eventcache == None:
             basename = "site_%d_%d" % self.site
             self._eventcache,sources = klu2events(basename)
 
         if len(self._eventcache)==0:
             return None
-        
-        atime = self.getentrytimes(entry)
+
+        if len(args)>0:
+            atime = self.getentrytimes(args[0])
+        else:
+            atime = kwargs['atime']
+            
         end = atime + self.getentry(atime)['duration'][0]
         return [evlist[(evlist>=atime) & (evlist<=end)] - atime for evlist in self._eventcache]
 
@@ -411,56 +422,17 @@ class site(explog.explog):
         pfp = [self._filecache[f] for f in pcmfiles]        
         return combine_channels(pfp, entries)
 
-    def groupchannels(self, events):
+    def getentry_bystimulus(self, stimulus):
         """
-        Groups events from different channels by entry.  Entries
-        are uniquely identified by abstime, which can be used
-        to later look up stimulus or anything else.
-
-        Returns a dictionary of toelis objects indexed by abstime
+        Returns all the entry abstimes for a particular stimulus, or an
+        empty array if there are no stimuli by that name
         """
+        tbl = self.elog.root.stimuli
+        stimuli = tbl.col('name')
+        atimes = tbl.col('entrytime')[stimuli==stimulus]
+        return nx.intersect1d(atimes, self.getentrytimes())
 
-        entries = self.elog.root.entries
-        _dtype = events[0].dtype
-        nunits = len(events)
-        msr = self.samplerate
-
-        coords = [r.nrow for r in entries.where(entries.cols.channel==0) if
-                  (r['pen'],r['site'])==self.site]
-        #siteentries = entries.col('siteentry')[coords]
-        start_times = entries.col('abstime')[coords]
-        stop_times = entries.col('duration')[coords] + start_times
-
-        i = 0
-        def sort_event(event, _events):
-            # returns true if i needs to be advanced and sort_event recalled
-            if event < start_times[i]:
-                return False
-            elif event < stop_times[i]:
-                _events[i].append(float(event - start_times[i])/msr)
-                return False
-            else:
-                return True
-
-        unit_events = []
-        for unit in range(nunits):
-            _events = [[] for r in range(len(start_times))]
-            for event in events[unit]:
-                while sort_event(event, _events):
-                    i += 1
-            i = 0
-            unit_events.append(_events)
-
-        # refactor into toelis objects
-        tl = {}
-        for entry in range(len(start_times)):
-            x = toelis.toelis([unit_events[unit][entry] for unit in range(nunits)],
-                              nunits=nunits)
-            tl[start_times[entry]] = x
-
-        return tl
-
-    def groupstimuli(self, munit_events, samplerate=20000):
+    def groupstimuli(self):
         """
         Groups event lists by stimulus. munit_events is a dictionary
         of toelis objects indexed by the abstime of the relevant entry.
@@ -470,21 +442,21 @@ class site(explog.explog):
         """
 
         table = self.elog.root.stimuli
+        msr = float(self.samplerate)
         tls = {}
-        msr = samplerate/1000        
 
         stimuli = nx.unique(table.col('name'))
         for stimulus in stimuli:
-            atimes = [(r['entrytime'],r['abstime']) for r in table.where(table.cols.name==stimulus)]
-            for atime,stime in atimes:
-                if not munit_events.has_key(atime):
-                    continue
-                tl = munit_events[atime]
-                tl.offset((atime-stime)/ msr)
+            atimes = self.getentry_bystimulus(stimulus)
+            for atime in atimes:
+                stime = self.getstimulus(atime)['abstime'][0]
+                events = [x  / msr for x in self.getevents(atime=atime)]
+                tl = toelis.toelis(events, nunits=len(events))
+                tl.offset((int(atime) - stime) / msr)
                 if tls.has_key(stimulus):
                     tls[stimulus].extend(tl)
                 else:
-                    tls[stimulus] = tl
+                    tls[stimulus] = tl                
 
         return tls
 

@@ -59,19 +59,22 @@ if __name__=="__main__":
     
     k = klusters.site(args[1], int(pen), int(site))
     
-    print "Loading events from %s" % sitename
-    events, groups = klusters.klu2events(sitename)
+    print "Grouping events from %s" % sitename    
+    tls = k.groupstimuli()
+
+
     if unit_list == None:
-        unit_list = range(len(events))
+        key1 = tls.keys()[0]
+        unit_list = range(tls[key1].nunits)
     print "Analyzing units %s" % unit_list
     for i in unit_list:
         filebase = "cell_%s_%s_%d" % (pen, site, i+1)
         if make_dirs:
-            os.mkdir(filebase)
+            if not os.path.exists(filebase): os.mkdir(filebase)
             filebase = os.path.join(filebase, filebase)
-            
-        eevents = k.groupchannels([events[i]])
-        sevents = k.groupstimuli(eevents)
-        for stim,tl in sevents.items():
+
+        for stim,tl in tls.items():
             tlname = "%s_%s.toe_lis" % (filebase, stim)
-            tl.writefile(tlname)
+            tl.unit(i).writefile(tlname)
+
+    del(k)
