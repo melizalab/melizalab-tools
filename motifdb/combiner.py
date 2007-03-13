@@ -8,8 +8,9 @@ CDM, 1/2007
 """
 
 import re
+import scipy as nx
 from dlab import datautils, pcmio
-from numpy import recarray, record
+from numpy import recarray, record, arange
 
 class seqparser(object):
     """
@@ -91,9 +92,12 @@ class motifseq(seqparser):
 
         return out
                 
-    def getsignal(self, symstr):
+    def getsignal(self, symstr, ramp_transients=2):
         """
         Generates the pcm signal associated with the symbolic string.
+
+        <ramp_transients> - if > 0, multiplies that many ms of the signal
+        by a linear ramp to eliminate onset transients
         """
         motifs = self.parse(symstr)
         # figure out the Fs
@@ -110,7 +114,13 @@ class motifseq(seqparser):
             else:
                 wavfile = self.db.get_motif_data(motif['name'])
                 s = pcmio.sndfile(wavfile)
-                S = s.read()
+                S = s.read(mem_type='f')
+
+            if ramp_transients > 0:
+                nsamp = int(ramp_transients * Fs / 1000)
+                r = arange(nsamp,dtype=S.dtype) / nsamp
+                S[0:nsamp] *= r
+                S[-nsamp:] *= r[::-1]
                 
             data.append(S)
             offset += len(S) + prepend
@@ -330,7 +340,7 @@ class oldfeatmerge(featmerge):
     
 
 
-class featureset(recarray):
+class featureset(nx.recarray):
     """
     Container to hold a bunch of features and some metadata. There are
     two kinds of features: 'natural' features, which are present in the

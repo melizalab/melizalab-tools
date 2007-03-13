@@ -86,3 +86,5 @@ if __name__=="__main__":
         sequencebatch(sequencer, batch)
     else:
         sequence(sequencer, args)
+
+    del(mdb)

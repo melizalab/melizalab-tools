@@ -89,15 +89,20 @@ class _wavfile(_sndfile):
         self._framerate = self.fp.getframerate()
 
 
-    def read(self, length=None):
+    def read(self, length=None, mem_type=None):
     
         if length:
             length = min(length, self.fp.getnframes())
         else:
             length = self.fp.getnframes()
 
+            
         self.fp.rewind()
-        return fromstring(self.fp.readframes(length), dtype=self._dtype)
+        S = fromstring(self.fp.readframes(length), dtype=self._dtype)
+        if mem_type!=None:
+            return S.astype(mem_type)
+        else:
+            return S
 
 
 class _pcmfile(_sndfile):
