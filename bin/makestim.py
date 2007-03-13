@@ -56,8 +56,6 @@ def makefeatureset(parser, motif, fmap, tdir):
         signal = db.reconstruct(parser.parse(feat_name))
         
         pcmio.sndfile(os.path.join(tdir, feat_name + _fext), 'w').write(signal)
-##         pcmio.sndfile(os.path.join(tdir, resid_name + _fext),
-##                       'w').write(motif_signal - nx.resize(signal, motif_signal.shape))
         
         signal = db.reconstruct(parser.parse(resid_name))
         pcmio.sndfile(os.path.join(tdir, resid_name + _fext), 'w').write(signal)
@@ -168,7 +166,6 @@ if __name__=="__main__":
 
     parser = combiner.featmerge(mdb)
 
-    motif   = args[0]
     for motif in args[2:]:
         tdir = tempfile.mkdtemp()
     
@@ -183,4 +180,4 @@ if __name__=="__main__":
 
         shutil.rmtree(tdir)
     
-    
+    del(mdb)
