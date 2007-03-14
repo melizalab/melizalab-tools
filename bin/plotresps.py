@@ -25,7 +25,7 @@ from pylab import *
 import scipy as nx
 from motifdb import db, importer
 from dlab import toelis, plotutils, pcmio, signalproc
-from spikes import tsstat
+from spikes import stat
 from scipy.ndimage import center_of_mass, gaussian_filter1d
 import os
 
@@ -39,7 +39,7 @@ def plotresps(basename, motifname, motif_db,
     """
 
     m = motif_db
-    tls = aggregate(m, motifname, basename, dir, motif_pos)
+    tls = stat.aggregate(m, motifname, basename, dir, motif_pos)
 
     nplots = len(tls) + 1
 
@@ -103,7 +103,7 @@ def plotoverlay(basename, motifname, motif_db, dir='.',
     """
     m = motif_db
     # aggregate allows us to collect responses from pairs, etc
-    tls = aggregate(m, motifname, basename, dir, motif_pos)
+    tls = stat.aggregate(m, motifname, basename, dir, motif_pos)
 
     fig = figure()
     plot_motif(m.get_data(motifname))
@@ -127,7 +127,7 @@ def plotoverlay(basename, motifname, motif_db, dir='.',
 
 def plotselectivity(basename, motif_db, dir='.',
                     motif_pos=None, padding=(-200,300),
-                    rasters=False, bandwidth=5):
+                    rasters=True, bandwidth=5):
     """
     Estimates firing rate for all the motifs.
     """
@@ -138,7 +138,7 @@ def plotselectivity(basename, motif_db, dir='.',
     # see what data we have
     for motif in motifs:
         try:
-            tls = aggregate(m, motif, basename, dir, motif_pos)
+            tls = stat.aggregate(m, motif, basename, dir, motif_pos)
         except ValueError:
             # no files for this motif, skip
             continue
@@ -165,6 +165,8 @@ def plotselectivity(basename, motif_db, dir='.',
         mdur = m.get_motif(motif)['length']
         maxdur = max(maxdur, mdur)
 
+        if tl.nevents==0:
+            continue
         if rasters:
             plotutils.plot_raster(tl,mec='k')
             plot([0,0],[0,tl.nrepeats],'b',[mdur,mdur],[0,tl.nrepeats],'b', hold=True)
@@ -173,7 +175,6 @@ def plotselectivity(basename, motif_db, dir='.',
             smooth_v = gaussian_filter1d(v.astype('f'), bandwidth)
             maxrate = max(maxrate, smooth_v.max())
             mdurs.append(mdur)
-            plot_motif(m.get_data(motif))
             plot(b,smooth_v,'b', hold=True)
         
         setp(a.get_yticklabels(), visible=False)
@@ -197,127 +198,30 @@ def plotselectivity(basename, motif_db, dir='.',
     if retio: ion()
     show()
 
-def plotrs(basename, motif_db):
+def plotrs(basename, motif_db, dir='.', **kwargs):
     """
     Computes response strength (using toestat) for all motifs, and plots
     them
     """
+    fig = figure()
     width = 0.5
-    motifs, resps = tsstat.toestat_allrs(basename, motif_db)
-    x = nx.arange(len(motifs))+width
-    bar(x, resps)
-    xticks(x+width/2, motifs)
+##    motifs, resps = stat.toestat_allrs(basename, motif_db)
+    tls = stat.aggregate_base(basename, motif_db, dir=dir, motif_pos=0)
+    motifs, stats = stat.toestat_motifs(tls, motif_db, **kwargs)
+
+    # clean out bad values:
+    if (stats[:,4]==0.).any() or stats[:,3].mean() < 2:
+        print "Spike rate is low, using mean variance"
+        rs = stats[:,2] / stats[:,4].mean()
+    else:
+        rs = stats[:,2] / stats[:,4]
+
+    plotutils.barplot(motifs, rs, sort_labels=True)
     xlabel("Motif Name")
     ylabel("Response Strength")
-    
-
-def aggregate(db, motifname, basename, dir='.', motif_pos=None):
-    """
-    Uses a motifdb to aggregate toelis data in a directory
-    by motif name.  The motifdb provides access to the
-    length of each motif, which we need to synchronize the event
-    times to the start of the motif in question.
-
-    Scans all the toe_lis files in a directory associated with
-    a particular motif; collects the rasters, adjusts the event times
-    by the onset time of the stimulus, and returns
-    a dictionary of toelis objects keyed by motif name
-
-    motif_pos - by default, rasters are collected regardless of
-                when they occurred in the stimulus sequence; set this
-                to an integer to restrict to particular sequence positions
-    """
-
-    _gap = 100
-    def mlist_ext(f):
-        return splitmotifs(f[len(basename)+1:-8])
-
-    # build the toe_lis list
-    files = []
-    for f in os.listdir(dir):
-        if not f.startswith(basename): continue
-        if not f.endswith('.toe_lis'): continue
-
-        mlist = mlist_ext(f)
-        if motif_pos!=None:
-            if len(mlist) > motif_pos and mlist[motif_pos].startswith(motifname):
-                files.append(f)
-        else:
-            for m in mlist:
-                if m.startswith(motifname):
-                    files.append(f)
-                    break
-
-    if len(files)==0:
-        raise ValueError, "No toe_lis files matched %s and %s in %s" % (basename, motifname, dir)
-
-    # now aggregate toelises
-    tls = {}
-    for f in files:
-        # determine the stimulus start time from the filename
-        mlist = mlist_ext(f)
-        offset = 0
-        if len(mlist) > 1: offset = _gap
-
-        for m in mlist:
-            if m.startswith(motifname):
-                mname = m
-                break
-            else:
-                offset += db.get_motif(m)['length'] + _gap
-
-        # load the toelis
-        tl = toelis.readfile(os.path.join(dir,f))
-        tl.offset(-offset)
-
-        # store in the dictionary
-        if tls.has_key(mname):
-            tls[mname].extend(tl)
-        else:
-            tls[mname] = tl
-
-
-    return tls
-
-def splitmotifs(mlist):
-    """
-    Parses stimulus file names to get back the motifs. This is kind
-    of tricky because of something stupid I did in defining the delimiters.
-    The same delimiter _ is used to separate motifs and to indicate
-    that the motif has been modified
-    """
-    _sep = '_'
-    atoms = mlist.split(_sep)
-    iatom = 0
-    out = []
-    while iatom < len(atoms):
-        mname = atoms[iatom]
-        if iatom == len(atoms)-1:
-            out.append(mname)
-        else:
-            next = atoms[iatom+1]
-            if next[0].isdigit():
-                # these are of the form B6_0(blahblah)
-                # we drop the shifted features because otherwise the figure is unmanageable
-                if next.find('t') ==-1:
-                    out.append(_sep.join((mname,next)))
-                    iatom += 1
-            elif next=='feature':
-                # this handles things like A3_feature_000
-                fnum = int(atoms[iatom+2])
-                out.append("%s.%d" % (mname, fnum))
-            elif next=='residue':
-                fnum = int(atoms[iatom+2])
-                out.append("%s-%d" % (mname, fnum))
-            elif next=='REC':
-                out.append("%sR" % mname)
-            else:
-                out.append(mname)
-        iatom += 1
-
-    return out
+    gca().get_xaxis().tick_bottom()
+    show()
         
-
 
 def plot_motif(pcmfile, features=None, nfft=320, shift=10):
     """

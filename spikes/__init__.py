@@ -36,7 +36,9 @@ with the program mspikes.py
    the mean, since the DC offset and RMS noise level can shift over the course
    of acquisition.  Setting the threshold is kind of tricky. For single
    units this should be as high as possible; if trying to sort out multiple
-   units a lower value is more appropriate
+   units a lower value is more appropriate. Use the following command
+   to examine waveforms:
+   mspikes.py --inspect -p <pen> -s <site> <explog.h5>
 
 4. Compute principal components of waveforms. Waveforms need to be upsampled
    and realigned before doing this.  Then calculate the projections of the
@@ -53,4 +55,4 @@ with the program mspikes.py
 
 """
 
-__all__ = ['extractor','klusters']
+__all__ = ['extractor','klusters','stat']
