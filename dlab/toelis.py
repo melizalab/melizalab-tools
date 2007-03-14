@@ -94,8 +94,8 @@ class toelis(object):
             self.events[i] = n.asarray(self.events[i]) + offset
                 
 
-    def __str__(self):
-        return "toelis: (%d repeats, %d repeats)" % self.size
+    def __repr__(self):
+        return "<toelis %d reps, %d units, %d events>" % (self.nrepeats, self.nunits, self.nevents)
 
     def __len__(self):
         return len(self.events)
@@ -116,17 +116,22 @@ class toelis(object):
         return self.index.shape[0]
 
     @property
+    def nevents(self):
+        return sum([x.size for x in self])
+
+    @property
     def range(self):
         """
         The range of event times in the toelis.
         """
-        minx = []
-        maxx = []
+        minx = 0
+        maxx = 0
         for el in self:
-            minx.append(min(el))
-            maxx.append(max(el))
+            if el.size:
+                minx = min(minx, el.min())
+                maxx = max(maxx, el.max())
             
-        return (min(minx), max(maxx))
+        return minx, maxx
 
 
     def extend(self, newlis, dim=0):
@@ -220,8 +225,8 @@ class toelis(object):
         <onset> - only events after <onset> are included
         <offset> - only events before <offset> are included
         <unit> - the unit to compute the histogram of (default 0)
-        <binsize> - the size of the bins (default 20.)
-        <normalize> - if True, normalize by the number of repeats
+        <binsize> - the size of the bins in ms (default 20.)
+        <normalize> - if True, return spikes/sec, otherwise total spike counts
         """
         d = n.concatenate([self.events[ri] for ri in self.index[:,unit]])
         if onset!=None:
@@ -236,16 +241,15 @@ class toelis(object):
         else:
             max_t = d.max()
         
-
         binsize = float(binsize)
         bins = n.arange(min_t, max_t + 2*binsize, binsize)  
         N = n.searchsorted(n.sort(d), bins)
         N = n.concatenate([N, [len(d)]])
         freq = N[1:]-N[:-1]
         if normalize:
-            freq = freq / float(self.nrepeats)
+            freq =  freq.astype('d') / (self.nrepeats * binsize / 1000.)
             
-        return (bins, freq)
+        return bins[:-2], freq[:-2]
 
 # end toelis
 
