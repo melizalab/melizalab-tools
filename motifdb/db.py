@@ -286,6 +286,23 @@ class motifdb(object):
         id = self.__getmotifid(symbol)
         return getunique(self.h5.root.entities.motifs, 'name', id)
 
+    def get_basemotif(self, symbol):
+        """
+        Attempts to look up which motif is the base motif for a symbol.
+        If the synthetic motif is named with the first characters corresponding
+        to the name of the base motif, this will return that basename.
+        """
+        allmotifs = self.get_motifs()
+        allmotifs.sort()
+        ind = allmotifs.searchsorted(symbol)
+        if ind == allmotifs.size:
+            raise IndexError, "No motif matches the symbol %s" % symbol
+        elif symbol.startswith(allmotifs[ind]):
+            return allmotifs[ind].tostring()
+        else:
+            return allmotifs[ind-1].tostring()
+        
+
     def get_motif_data(self, symbol):
         m = self.get_motif(symbol)
         return os.path.join(m['loc'], "%(name)s.%(type)s" % m)
