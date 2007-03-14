@@ -27,6 +27,25 @@ Usage: groupevents.py [--units=\"...\"] [--stimulus=\"...\"] -c
 
 from spikes import klusters
 
+def groupevents(site, make_dirs=True, unit_list=None, stimulus_list=None):
+    print "Grouping events from %s" % sitename    
+    tls = k.groupstimuli()
+
+    if unit_list == None:
+        keyl = tls.keys()[0]
+        unit_list = range(tls[keyl].nunits)
+    print "Analyzing units %s" % unit_list
+    for i in unit_list:
+        filebase = "cell_%s_%s_%d" % (site.site + (i+1,))
+        if make_dirs:
+            if not os.path.exists(filebase): os.mkdir(filebase)
+            filebase = os.path.join(filebase, filebase)
+
+        for stim,tl in tls.items():
+            tlname = "%s_%s.toe_lis" % (filebase, stim)
+            tl.unit(i).writefile(tlname)
+
+
 if __name__=="__main__":
 
     import sys, getopt,os 
@@ -58,23 +77,6 @@ if __name__=="__main__":
     name,pen,site = sitename.split('_')
     
     k = klusters.site(args[1], int(pen), int(site))
-    
-    print "Grouping events from %s" % sitename    
-    tls = k.groupstimuli()
-
-
-    if unit_list == None:
-        key1 = tls.keys()[0]
-        unit_list = range(tls[key1].nunits)
-    print "Analyzing units %s" % unit_list
-    for i in unit_list:
-        filebase = "cell_%s_%s_%d" % (pen, site, i+1)
-        if make_dirs:
-            if not os.path.exists(filebase): os.mkdir(filebase)
-            filebase = os.path.join(filebase, filebase)
-
-        for stim,tl in tls.items():
-            tlname = "%s_%s.toe_lis" % (filebase, stim)
-            tl.unit(i).writefile(tlname)
+    groupevents(k, make_dirs, unit_list, stimulus_list)
 
     del(k)
