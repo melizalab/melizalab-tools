@@ -65,6 +65,25 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
 
     return p
 
+def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
+    """
+    Produces a bar plot with string labels on the x-axis
+
+    <kwargs> - passed to bar()
+    """
+    assert len(labels)==len(values)
+    if sort_labels:
+        lbl = nx.asarray(labels)
+        ind = lbl.argsort()
+        lbl.sort()
+        values = values[ind]
+    
+    x = nx.arange(lbl.size,dtype='f')+width
+    bar(x, values, **kwargs)
+    xticks(x+width/2, lbl.tolist())
+    
+    
+
 def dcontour(*args, **kwargs):
     """
     Discrete contour function. Given a matrix I with a discrete number
