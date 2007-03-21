@@ -10,26 +10,6 @@ from dlab import explog, toelis, _pcmseqio
 import scipy as nx
 import os
 
-class filecache(dict):
-    """
-    Provides a cache of open file handles, indexed by name. If
-    an attempt is made to access a file that's not open, the
-    class tries to open the file
-    """
-
-    _handler = _pcmseqio.pcmfile
-
-    def __getitem__(self, key):
-        if self.__contains__(key):
-            return dict.__getitem__(self, key)
-        else:
-            val = self._handler(key)
-            dict.__setitem__(self, key, val)
-            return val
-
-    def __setitem__(self, key, value):
-        raise NotImplementedError, "Use getter methods to add items to the cache"
-
 
 class site(explog.explog):
     """
@@ -43,10 +23,14 @@ class site(explog.explog):
         Initialize the object using an explog and specifying
         a recording site.
         """
+        from dlab.datautils import filecache
+#        filecache._handler = _pcmseqio.pcmfile
+        
         explog.explog.__init__(self, logfile, mode)
 
         self.site = (pen,site)
         self._filecache = filecache()
+        self._filecache.handler = _pcmseqio.pcmfile
 
     def _get_site(self):
         return self._site

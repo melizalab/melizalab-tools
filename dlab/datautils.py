@@ -154,5 +154,29 @@ def offset_add(offsets, data, length=None):
 
     return out
     
+class filecache(dict):
+    """
+    Provides a cache of open file handles, indexed by name. If
+    an attempt is made to access a file that's not open, the
+    class tries to open the file
+    """
 
-    
+    _handler = open
+
+    def __gethandler(self):
+        return self._handler
+    def __sethandler(self, handler):
+        self._handler = handler
+
+    handler = property(__gethandler, __sethandler)
+
+    def __getitem__(self, key):
+        if self.__contains__(key):
+            return dict.__getitem__(self, key)
+        else:
+            val = self._handler(key)
+            dict.__setitem__(self, key, val)
+            return val
+
+    def __setitem__(self, key, value):
+        raise NotImplementedError, "Use getter methods to add items to the cache"    
