@@ -62,6 +62,24 @@ pcmfile_samplerate(PcmfileObject* self, void *closure)
 	return Py_BuildValue("i", s.samplerate);
 }
 
+static int
+pcmfile_setsamplerate(PcmfileObject* self, PyObject *value, void *closure)
+{
+	int srate;
+	if (value == NULL) {
+		PyErr_SetString(PyExc_TypeError, "Cannot delete the first attribute");
+		return -1;
+	}
+
+	srate = (int)PyInt_AsLong(value);
+	if (srate <= 0) {
+		PyErr_SetString(PyExc_TypeError, "Sample rate must be a positive integer");
+		return -1;
+	}
+
+	return pcm_ctl(self->pfp, PCMIOSETSR, (int*)&srate);
+}
+
 static PyObject*
 pcmfile_nsamples(PcmfileObject* self, void *closure)
 {
@@ -132,7 +150,8 @@ pcmfile_write(PcmfileObject* self, PyObject* args)
 	
 static PyGetSetDef pcmfile_getseters[]={
 	{"nentries", (getter)pcmfile_nentries, 0, "The number of entries in the file", 0},
-	{"framerate", (getter)pcmfile_samplerate, 0, "The sample rate of the current entry", 0},
+	{"framerate", (getter)pcmfile_samplerate, (setter)pcmfile_setsamplerate, 
+	 "The sample rate of the current entry", 0},
 	{"nframes", (getter)pcmfile_nsamples, 0, "The number of samples in the current entry",0},
 	{"entry", (getter)pcmfile_entry, 0, "The current entry",0},
 	{NULL}
