@@ -56,33 +56,25 @@ class toelis(object):
 
     def __getitem__(self, index):
         """
-        Retrieves an event list by a 2-ple (irepeat, iunit). If
-        only a single integer is given, the event lists are
-        returned in the order stored.
+        Retrieve an event list by index. If only a single index is
+        given (integer or slice), the index refers to the internal
+        list of events; if a pair of indices are supplied, retrieves
+        event lists by repeat,unit
         """
-        if isinstance(index, int):
-            return self.events[index]
-        else:
+        if n.iterable(index):
             id = self.index[index]
-            if id > -1:
+            if n.iterable(id):
+                return [self.events[i] for i in id]
+            else:
                 return self.events[id]
-            else:
-                return []
-
-    def __setitem__(self, index, value):
-        """
-        Sets the value of an event list. Index a single elist if indexed
-        by (irepeat, iunit); if indexed by a single integer, accesses
-        the event list storage.
-        """
-        if isinstance(index, int):
-            if index > len(self):
-                raise IndexError, "Index out of range."
-            else:
-                self.events[index] = value
         else:
-            id = self.index[index]
-            self.events[id] = value
+            return self.events[index]
+
+    def __iter__(self):
+        i = 0
+        while i < len(self.events):
+            yield self.events[i]
+            i+=1
 
     def offset(self, offset):
         """
@@ -103,9 +95,9 @@ class toelis(object):
     @property
     def size(self):
         """
-        Returns the size of the object (repeats, units)
+        Returns the size of the object (nrepeats * nunits)
         """
-        return self.index.shape
+        return n.prod(self.index.shape)
 
     @property
     def nunits(self):
@@ -117,7 +109,7 @@ class toelis(object):
 
     @property
     def nevents(self):
-        return sum([x.size for x in self])
+        return sum([len(x) for x in self])
 
     @property
     def range(self):
@@ -133,6 +125,12 @@ class toelis(object):
             
         return minx, maxx
 
+    def tondarray(self):
+        """
+        Ensures that all the event lists are ndarray objects
+        """
+        for i in range(self.size):
+            self.events[i] = n.asarray(self[i])
 
     def extend(self, newlis, dim=0):
         """
@@ -140,7 +138,7 @@ class toelis(object):
         toelis is treated as more repeats, but set <dim> to 1 to treat them as additional
         units.
         """
-        if not self.size[(1 - dim)]==newlis.size[(1 - dim)]:
+        if not self.index.shape[(1 - dim)]==newlis.index.shape[(1 - dim)]:
             raise ValueError, "Dimensions do not match for merging along dim %d " % dim
 
         offset = len(self)
@@ -308,14 +306,13 @@ def readfile(filename):
             # now set the current_repeat index and read in a float
             current_repeat = p_repeats.index(linenum)
             #print "Start unit %d, repeat %d data at line %d" % (current_unit, current_repeat, linenum)
-            out[(current_repeat, current_unit)].append(float(line))
+            out[current_repeat, current_unit].append(float(line))
         else:
-            out[(current_repeat, current_unit)].append(float(line))
+            out[current_repeat, current_unit].append(float(line))
 
     fp.close()
     # make all the event lists arrays
-    for i in range(len(out)):
-        out[i] = n.asarray(out[i])
+    out.tondarray()
     return out
 # end readfile
 
