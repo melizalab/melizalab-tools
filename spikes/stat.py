@@ -50,7 +50,7 @@ def toestat_allrs(basename, motif_db):
 
     return mnames,resps
 
-def toestat(tl, rrange, srange, binsize=10.):
+def toestat(tl, rrange, srange, binsize=10., maxrep=None):
     """
     Computes first and second moments of the response histogram in two
     regimes, one driven by stimulus, and one spontaneous.
@@ -58,10 +58,13 @@ def toestat(tl, rrange, srange, binsize=10.):
     <rrange> - range of time values encompassing the response period
     <srange> - range of times encompassing the spontaneous period
     <binsize> - the binsize for generating the histogram
+    <maxrep> - restrict analysis to the first N (or fewer) repeats
 
     returns a tuple with the following values
     <nreps> <rmean> <rvar> <smean> <svar>
     """
+    if maxrep:
+        tl = toelis.toelis(tl[0:min(maxrep,tl.nrepeats)])
 
     rb,rf = tl.histogram(onset=rrange[0], offset=rrange[1], binsize=binsize, normalize=True)
     sb,sf = tl.histogram(onset=srange[0], offset=srange[1], binsize=binsize, normalize=True)
