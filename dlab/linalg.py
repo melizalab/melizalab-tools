@@ -41,7 +41,7 @@ def outer(a,b,alpha=1.,**kwargs):
 
     set overwrite_a to use A's memory for output
     """
-    _ger, = get_blas_functions(('ger',),(a,b))
+    _ger, = get_blas_funcs(('ger',),(a,b))
     return _ger(alpha, a, b, **kwargs)
     
 
