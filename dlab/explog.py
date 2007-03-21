@@ -51,6 +51,14 @@ class explog(object):
         if hasattr(self, 'elog'):
             self.elog.close()
 
+    def __iter__(self):
+        """
+        Iterates through all the entries in the log.
+        """
+        table = self.elog.root.entries
+        for r in table:
+            yield r        
+
     def getentry(self, abstime):
         """
         Looks up the record associated with a particular episode. If
@@ -70,7 +78,7 @@ class explog(object):
         rnums = table.getWhereList(table.cols.abstime==int(abstime))
         return table.readCoordinates(rnums)
        
-    def getentrytimes(self):
+    def getentrytimes(self, entry=None):
         """
         Every entry has an abstime associated with it (the start of the
         episode).  All the records (for each channel) associated with
@@ -79,7 +87,10 @@ class explog(object):
         """
         table = self.elog.root.entries
         atimes = table.col('abstime')
-        return atimes
+        if entry==None:
+            return atimes
+        else:
+            return atimes[entry]
 
     def getstimulus(self, abstime):
         """
@@ -108,8 +119,8 @@ class explog(object):
 
     
 _reg_create = re.compile(r"'(?P<file>(?P<base>\w+)_\w+.pcm_seq2)' (?P<action>created|closed)")
-_reg_triggeron = re.compile(r"TRIG_ON, (?P<chan>\w+):entry (?P<entry>\d*) \((?P<onset>\d*)\)")
-_reg_triggeroff = re.compile(r"TRIG_OFF, (?P<chan>\w+):entry (?P<entry>\d*), wrote (?P<samples>\d*)")
+_reg_triggeron = re.compile(r"_ON, (?P<chan>\w+):entry (?P<entry>\d*) \((?P<onset>\d*)\)")
+_reg_triggeroff = re.compile(r"_OFF, (?P<chan>\w+):entry (?P<entry>\d*), wrote (?P<samples>\d*)")
 _reg_stimulus = re.compile(r"stimulus: REL:(?P<rel>[\d\.]*) ABS:(?P<abs>\d*) NAME:'(?P<stim>\S*)'")
 _reg_site = re.compile(r"site (?P<site>\d*)")
 _reg_pen  = re.compile(r"pen (?P<pen>\d*)")
