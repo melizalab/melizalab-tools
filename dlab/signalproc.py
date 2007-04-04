@@ -9,12 +9,8 @@ CDM, 1/2007
 
 import scipy as nx
 import scipy.fftpack as sfft
-from scipy.linalg import norm
-from scipy.signal import get_window, fftconvolve
 from scipy import weave
 from linalg import outer,gemm
-import tridiag
-
 
 def stft(S, **kwargs):
     """
@@ -45,6 +41,8 @@ def stft(S, **kwargs):
     and (len(S)/shift) columns
 
     """
+    from scipy.signal import get_window
+    
     nfft = int(kwargs.get('nfft', 320))
     window = kwargs.get('window', 'hamming')
 
@@ -149,11 +147,13 @@ def spectro(S, fun=stft, **kwargs):
     fun - the function that computes the time-frequency density
           from the signal S.  If the result of this function is
           complex, the spectrogram is symmetric, and only the unique
-          rows of the output are returned.  If the result of S
+          rows of the output are returned.  If the result of <fun>
           is real, the power spectrum is assumed to have been already
           cut in half and converted to power.
           
     Fs - the sampling rate of the signal, in Hz (default 20 kHz)
+    nfft - the number of frequency bins to use
+    shift - temporal resolution of the spectrogram, in # of samples
 
     Returns a tuple (PSD, T, F), where T and F are the bins
     for time and frequency
@@ -280,7 +280,7 @@ def mtm_adapt(Sk,V,sigpow):
     S = (Sk[:,:,0] + Sk[:,:,1])/2
 
     code = """
-        # line 193 "signalproc.py"
+        # line 283 "signalproc.py"
 	int i,j,k;
 	double est, num, den, w;
         double sig2, tol, err;
@@ -327,6 +327,8 @@ def dpss(npoints, mtm_p):
     v - 2D array of eigenvalues, length n = (mtm_p * 2 - 1)
     e - 2D array of eigenvectors, shape (npoints, n)
     """
+    from scipy.linalg import norm
+    from tridiag import dgtsv, dstegr
 
     if mtm_p >= npoints * 2:
         raise ValueError, "mtm_p may only be as large as npoints/2"
@@ -339,7 +341,7 @@ def dpss(npoints, mtm_p):
     d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
     ee = nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2
 
-    v = tridiag.dstegr(d, nx.concatenate((ee, [0])), npoints-ntapers+1, npoints)[1]
+    v = dstegr(d, nx.concatenate((ee, [0])), npoints-ntapers+1, npoints)[1]
     v = nx.flipud(v[0:ntapers])
 
     # compute the eigenvectors
@@ -348,9 +350,9 @@ def dpss(npoints, mtm_p):
 
     for j in range(ntapers):
         e = nx.sin((j+1.)*t)
-        e = tridiag.dgtsv(ee,d-v[j],ee,e)[0]
-        e = tridiag.dgtsv(ee,d-v[j],ee,e/norm(e))[0]
-        e = tridiag.dgtsv(ee,d-v[j],ee,e/norm(e))[0]
+        e = dgtsv(ee,d-v[j],ee,e)[0]
+        e = dgtsv(ee,d-v[j],ee,e/norm(e))[0]
+        e = dgtsv(ee,d-v[j],ee,e/norm(e))[0]
         E[:,j] = e/norm(e)
 
     d = E.mean(0)
@@ -420,3 +422,106 @@ def sincresample(S, npoints, shift=0):
 
     return y[npoints:npoints*2,:]
 
+def fband(S, **kwargs):
+    """
+    Fband computes a spectrographic representation of the
+    time-frequency distribution of a signal using overlapping Gaussian
+    windowed frequency bands.  This is the method used by Theunissen
+    et al (2000) to compute invertible STRFs
+
+    S - real-valued signal, any precision
+
+    optional arguments:
+    Fs - sampling rate of signal (default 20 kHz)
+    sil_window - number of ms to zero pad the signal with (default 0)
+    f_low - the frequency of the lowest filter (default 250.)
+    f_high - the frequency of the highest filter (default 8000.)
+    f_width - the bandwidth of the overlapping filters (default 250.)
+
+    Outputs a 2D array of doubles. The temporal resolution is 1 kHz
+
+    The algorithm is pretty fast for short signals but requires way too
+    much memory for long signals.  Need to replace with a an overlap-and-add
+    fftfilt algo a la matlab.
+
+    """
+
+    Fs = kwargs.get('Fs',20000.)
+    sil_window = kwargs.get('sil_window',0)
+    f_low = kwargs.get('f_low',250.)
+    f_high = kwargs.get('f_high',8000.)
+    f_width = kwargs.get('f_width',250.)
+
+    assert S.ndim == 1
+
+    nframes = S.size
+    nbands = int((f_high - f_low) / f_width)
+    tstep = 1000. / Fs
+    ntemps = int(nx.ceil(nframes * tstep))  # len in FET's code
+
+    if tstep > 1.:
+        raise ValueError, "Sampling rate of signal is too low"
+
+    nwindow = int(nx.ceil(sil_window/tstep))
+    c_n = int( nx.power(2., nx.floor(nx.log2(nframes+2.*nwindow+0.5)))+0.1)
+    if c_n < nframes+2*nwindow: c_n *= 2
+    #c_n = int((nframes+2.*nwindow) * 1.1)
+    fres = 1. * Fs / c_n
+    istart = (c_n - nframes)/2
+    print "c_n = %d istart = %d nframes = %d nwindow=%d" %  (c_n, istart, nframes, nwindow)
+
+    fres = 1. * Fs / c_n
+    fstep = (f_high - f_low) / nbands
+    f_width = fstep
+    f2 = fstep * fstep
+    print "New frequency step: low = %g high = %g step=%g" % (f_low, f_high, f_width)
+
+    # perform filtering operation in the complex domain
+    c_song = nx.zeros(c_n, 'd')
+    c_song[istart:(istart+nframes)] = S
+
+    # fft needs to be at least 2x the length of the signal
+    c_song = sfft.fft(c_song, c_n*2, overwrite_x=1)
+    #c_song = sfft.rfft(c_song, c_n*2, overwrite_x=1)    
+    c_filt = nx.zeros((nbands, c_n*2), dtype=c_song.dtype)
+    f = nx.arange(c_n*2.) * fres / 2
+    #f = nx.repeat(nx.arange(1. * c_n) * fres, 2)
+
+    for nb in range(nbands):
+        fmean = f_low + (nb+0.5)*fstep
+        df = f - fmean
+        c_filt[nb,:] = nx.exp(-0.5 * df * df / f2)
+        
+    c_song.shape = (1,c_n*2)
+    # filter and back to real domain
+    c_song = sfft.ifft((c_song * c_filt), axis=1, overwrite_x=1)[:,0:c_n]
+    #c_song = sfft.irfft((c_song * c_filt), axis=1, overwrite_x=1)[:,0:c_n]
+
+    # amplitude envelope
+    c_song = nx.absolute(c_song)
+    # lowpass filter amplitude if fstep > 250 (implement later)
+
+    # copy to the output array with nearest-neighbor interpolation
+    j = nx.arange(ntemps + 2 * sil_window)
+    i_val = (j - sil_window ) / tstep
+    i_low = nx.floor(i_val).astype('i') + istart
+    i_high = nx.ceil(i_val).astype('i') + istart
+    a_low = c_song[:,i_low]
+    if nx.any(a_low < 0.):
+        print "Warning: amplitude values < 0.0 @ %s" % (a_low < 0).nonzero()[0]
+        a_low[a_low<0.] = 0.
+    a_val = (1. + i_low - i_val) * a_low
+    
+    if nx.any(i_low != i_high):
+        a_high = c_song[:,i_high]
+        a_high[a_high < 0.] = 0.
+        a_val += (1. + i_val - i_high) * a_high
+    
+    return nx.sqrt(a_val)
+
+
+if __name__=="__main__":
+
+    from dlab import pcmio
+    S = pcmio.sndfile('/home/dmeliza/src/python/data/B0.pcm').read()
+    
