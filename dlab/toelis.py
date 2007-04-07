@@ -87,10 +87,7 @@ class toelis(object):
                 
 
     def __repr__(self):
-        if self.nrepeats < 100:
-            return "<toelis %d reps, %d units, %d events>" % (self.nrepeats, self.nunits, self.nevents)
-        else:
-            return "<toelis %d reps, %d units>" % (self.nrepeats, self.nunits)
+        return "<toelis %d reps, %d units, %d events>" % (self.nrepeats, self.nunits, self.nevents)
 
     def __len__(self):
         return len(self.events)
