@@ -59,7 +59,7 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     p = plot(x,y,'|',**kwargs)
     a = gca()
     ht = a.get_window_extent().height()
-    setp(p,'markersize',ht/((maxy-miny)*1.3))
+    #setp(p,'markersize',ht/((maxy-miny)*1.3))
     
     axis((minx, maxx, min(y) - 0.5, max(y) + 0.5))
 

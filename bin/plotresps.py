@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-plotresps [-d <motifdb>:<stimset>] [-p #] <motifname> <basename>
+plotresps [-d <motifdb>:<stimset>] [-p #] <basename> <motifname>
+plotresps [-d <motifdb>:<stimset>] [-p #] <basename>
 
 Aggregates the responses to a particular motif and its feature
 decompositions; plots the motif and the rasters
@@ -12,16 +13,17 @@ decompositions; plots the motif and the rasters
      -p #     Restrict aggregation to episodes where the motif was played in
               position #
               
-     <motifname>  The motif to aggregate (e.g., B3)
      <basename>   The basename of the toe_lis files (e.g. cell_12_6)
-     
+     <motifname>  The motif to aggregate (e.g., B3). If this is not supplied,
+                  plots rasters for responses to all the motifs
+
+     Assumes the toe_lis files are in the current directory.
 
 CDM, 1/2007
  
 """
 
 
-from pylab import *
 import scipy as nx
 from motifdb import db, importer
 from dlab import toelis, plotutils, pcmio, signalproc
@@ -37,6 +39,8 @@ def plotresps(basename, motifname, motif_db,
     Aggregates responses by motif; plots the motif, the feature labels,
     and the responses.
     """
+    from pylab import figure, title, getp, setp, axis, \
+         ion, ioff, isinteractive, ylabel, xlabel, show
 
     m = motif_db
     tls = stat.aggregate(m, motifname, basename, dir, motif_pos)
@@ -64,7 +68,7 @@ def plotresps(basename, motifname, motif_db,
         if sort_featmap:
             I,K,L = importer.sortfeatures(I)
         plot_motif(m.get_data(motifname), I)
-    except:
+    except IndexError:
         plot_motif(m.get_data(motifname))
 
     title("%s - %s" % (basename, motifname))
@@ -101,6 +105,9 @@ def plotoverlay(basename, motifname, motif_db, dir='.',
     motif, and as a smoothed response kernel overlaid on the
     spectrogram
     """
+    from pylab import figure, ylabel, xlabel, getp, twinx, \
+         setp, plot, title, show, gca
+    
     m = motif_db
     # aggregate allows us to collect responses from pairs, etc
     tls = stat.aggregate(m, motifname, basename, dir, motif_pos)
@@ -131,6 +138,10 @@ def plotselectivity(basename, motif_db, dir='.',
     """
     Estimates firing rate for all the motifs.
     """
+    from pylab import figure, ylabel, xlabel, getp, twinx, \
+         setp, plot, title, show, isinteractive, ioff, ion, draw, \
+         subplot
+    
     m = motif_db
     motifs = m.get_motifs()
     pdata = []
@@ -168,7 +179,7 @@ def plotselectivity(basename, motif_db, dir='.',
         if tl.nevents==0:
             continue
         if rasters:
-            plotutils.plot_raster(tl,mec='k')
+            plotutils.plot_raster(tl,mec='k',markersize=3)
             plot([0,0],[0,tl.nrepeats],'b',[mdur,mdur],[0,tl.nrepeats],'b', hold=True)
         else:
             b,v = tl.histogram(binsize=1.,normalize=1)
@@ -203,6 +214,9 @@ def plotrs(basename, motif_db, dir='.', **kwargs):
     Computes response strength (using toestat) for all motifs, and plots
     them
     """
+    from pylab import figure, ylabel, xlabel, getp, twinx, \
+         setp, plot, title, show, gca
+
     fig = figure()
     width = 0.5
 ##    motifs, resps = stat.toestat_allrs(basename, motif_db)
@@ -228,21 +242,23 @@ def plot_motif(pcmfile, features=None, nfft=320, shift=10):
     This code should really go somewhere else. Produces an (annotated)
     plot of a motif
     """
+    from pylab import figure, ylabel, xlabel, getp, twinx, \
+         setp, plot, title, show, imshow, cm, text, isinteractive, draw
+
     # generate the spectrogram
     sig = pcmio.sndfile(pcmfile).read()
     (PSD, T, F) = signalproc.spectro(sig, NFFT=nfft, shift=shift)
 
     # set up the axes and plot PSD
     extent = (T[0], T[-1], F[0], F[-1])
-    imshow(PSD, cmap=cm.Greys, extent=extent, origin='lower')
+    imshow(PSD, cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
 
     # plot annotation if needed
     if features != None:
-        hold(True)
         # convert to masked array
         if len(T) > features.shape[1]: T.resize(features.shape[1])
         if len(F) > features.shape[0]: F.resize(F.shape[0])
-        plotutils.dcontour(features, T, F)  # this will barf if the feature file has the wrong resolution
+        plotutils.dcontour(features, T, F, hold=1)  # this will barf if the feature file has the wrong resolution
 
         # locate the centroid of each feature and label it
         retio = isinteractive()
@@ -253,13 +269,12 @@ def plot_motif(pcmfile, features=None, nfft=320, shift=10):
 
         draw()
         if retio: ion()
-        hold(False)
 
 if __name__=="__main__":
 
     import sys, getopt
 
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print __doc__
         sys.exit(-1)
 
@@ -280,5 +295,8 @@ if __name__=="__main__":
             motif_db = v
 
     m = db.motifdb(motif_db)
-    plotresps(args[1], args[0], m, motif_pos=motif_pos)
+    if len(args)==2:
+        plotresps(args[0], args[1], m, motif_pos=motif_pos)
+    else:
+        plotselectivity(args[0], m, motif_pos=motif_pos)
     del(m)
