@@ -519,6 +519,71 @@ def fband(S, **kwargs):
     
     return nx.sqrt(a_val)
 
+def autocorr(S, **kwargs):
+    """
+    Computes the autocorrelation matrix of one or more signals. This
+    is the autocorrelation of each signal with all other signals,
+    including itself.  The matrix is symmetric, and is returned as
+    an NxM matrix, with N samples in the autocorrelation window
+    and M = (n choose 2) where n is the number of signals. The
+    pairings for each function are stored in order,
+    e.g. (1,1),(1,2),...(1,n),(2,2)...(n,n)
+
+    The input S should be a vector or matrix with signals in the columns
+
+    Optional parameters:
+    Fs - the sampling rate of the signals (default 1)
+    window - the number of sampling intervals (samples/Fs) on either side
+             (default 200)
+    mcorrect - whether to subtract off the mean of the signal in each column
+               (default false)
+    """
+
+    if S.ndim==1: S = nx.atleast_2d(S).T
+
+        
+    Fs = kwargs.get('Fs',1.)
+    window = kwargs.get('window', 200.)
+    TWINDOW = int(window * Fs)
+
+    nsamp,nband = S.shape
+    ncorr = (nband*(nband-1))/2 + nband
+    if kwargs.get('mcorrect',False):
+        m = S.mean(axis=0)
+    else:
+        m = nx.zeros(nband)
+
+    A = nx.zeros((2*TWINDOW+1, ncorr))
+    n = nx.zeros((2*TWINDOW+1, 1),'i')
+
+    code = """
+         # line 553 "signalproc.py"
+         int ib1, ib2, it1, it2, st, xb;
+         double stim1, stim2;
+         xb = 0;
+         for ( ib1 = 0; ib1 < nband; ib1++) {
+              for ( ib2 = ib1; ib2 < nband; ib2++) {
+                   for ( it1 = 0; it1 < nsamp; it1++) {
+                        stim1 = S(it1,ib1) - m(ib1);
+                        for (it2 = it1-TWINDOW; it2 <= it1+TWINDOW; it2++) {
+                             if (it2 < 0) continue;
+                             else if (it2 >= nsamp) break;
+
+                             st = it2 - it1 + TWINDOW;
+                             A(st,xb) += stim1 * (S(it2,ib2) - m(ib2));
+                             n(st) += 1;
+                        }
+                   }
+                   xb += 1;
+              }
+        }
+    """
+
+    weave.inline(code,
+                 ['S','TWINDOW','nband','nsamp','A', 'n','m'],
+                 type_converters=weave.converters.blitz)
+
+    return A / n
 
 if __name__=="__main__":
 
