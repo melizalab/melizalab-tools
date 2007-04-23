@@ -54,6 +54,14 @@ def tuples(S,k):
             ans.append(y)
     return ans
 
+def binomial(n,k):
+    """
+    Returns the binomial coefficient n choose k
+    """
+    p = 1
+    for j in range(0,k):
+        p = p*(n - j)/(j + 1)
+    return p
 
 def seqshuffle(S):
     """
