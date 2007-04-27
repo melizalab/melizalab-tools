@@ -585,6 +585,16 @@ def autocorr(S, **kwargs):
 
     return A / n
 
+def threshold(signal, thresh):
+    """
+    Thresholds a signal. The signal is adjusted by <thresh> and
+    then rectified.
+    """
+    sig = signal.copy()
+    sig -= thresh
+    sig[sig<0.] = 0.
+    return sig
+
 if __name__=="__main__":
 
     from dlab import pcmio
