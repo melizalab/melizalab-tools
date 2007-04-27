@@ -151,6 +151,7 @@ def importfeaturemap(m, symbol, idxfile):
          if len(line) > 0 and line[0].isdigit():
              fields = line.split()
              featnum = int(fields[0])
+             s = sndfile(os.path.join(tdir, "%s_sfeature_%03d.pcm" % (symbol, featnum)))
              if _resort:
                  featnum = new_srt[featnum]
              feat = schema.Feature({
@@ -161,10 +162,9 @@ def importfeaturemap(m, symbol, idxfile):
                  'maxpower' : float(fields[5]),
                  'area' : int(fields[6])
                  })
-             s = sndfile(os.path.join(tdir, "%s_sfeature_%03d.pcm" % (symbol, featnum)))
              # add the feature to the sorted featuremap
              m.add_feature(symbol, fmap_num, feat, s.read())
-             print "---> Import feature %d " % featnum
+             print "---> Import feature %d: " % featnum
     # end loop through output
     fp.close()
     # cleanup
