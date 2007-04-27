@@ -28,13 +28,13 @@ import scipy as nx
 from motifdb import db, importer
 from dlab import toelis, plotutils, pcmio, signalproc
 from spikes import stat
-from scipy.ndimage import center_of_mass, gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d
 import os
 
 
 def plotresps(basename, motifname, motif_db,
               dir='.', motif_pos=None, padding=(-100, 200),
-              sort_featmap=False):
+              featmap=0):
     """
     Aggregates responses by motif; plots the motif, the feature labels,
     and the responses.
@@ -63,13 +63,7 @@ def plotresps(basename, motifname, motif_db,
     else:
         axpos = (0.1, 0.1 + 0.8 / nplots, 0.8, 0.8 / nplots)
     ax.append(fig.add_axes(axpos, **axprops))
-    try:
-        I = m.get_featmap_data(motifname)
-        if sort_featmap:
-            I,K,L = importer.sortfeatures(I)
-        plot_motif(m.get_data(motifname), I)
-    except IndexError:
-        plot_motif(m.get_data(motifname))
+    m.plot_motif(motifname, featmap)
 
     title("%s - %s" % (basename, motifname))
     # pad out the display
@@ -86,7 +80,8 @@ def plotresps(basename, motifname, motif_db,
     for motif in motifs:
         yy -= ystep
         ax.append(fig.add_axes((0.1, yy, 0.8, ystep), **axprops))
-        plotutils.plot_raster(tls[motif])
+        if tls[motif].nevents > 0: 
+            plotutils.plot_raster(tls[motif])
         ylabel(motif, **yprops)
 
         setp(ax[-2].get_xticklabels(), visible=False)
@@ -113,7 +108,7 @@ def plotoverlay(basename, motifname, motif_db, dir='.',
     tls = stat.aggregate(m, motifname, basename, dir, motif_pos)
 
     fig = figure()
-    plot_motif(m.get_data(motifname))
+    m.plot_motif(motifname)
     ylabel('Frequency (Hz)')
     xlim = getp(gca(), 'xlim')
 
@@ -140,7 +135,7 @@ def plotselectivity(basename, motif_db, dir='.',
     """
     from pylab import figure, ylabel, xlabel, getp, twinx, \
          setp, plot, title, show, isinteractive, ioff, ion, draw, \
-         subplot
+         subplot, axes
     
     m = motif_db
     motifs = m.get_motifs()
@@ -187,7 +182,9 @@ def plotselectivity(basename, motif_db, dir='.',
             maxrate = max(maxrate, smooth_v.max())
             mdurs.append(mdur)
             plot(b,smooth_v,'b', hold=True)
-        
+
+        if pnums[plotnum]==2:
+            title(basename)
         setp(a.get_yticklabels(), visible=False)
         ylabel(motif.tostring())
         plotnum += 1
@@ -237,38 +234,6 @@ def plotrs(basename, motif_db, dir='.', **kwargs):
     show()
         
 
-def plot_motif(pcmfile, features=None, nfft=320, shift=10):
-    """
-    This code should really go somewhere else. Produces an (annotated)
-    plot of a motif
-    """
-    from pylab import figure, ylabel, xlabel, getp, twinx, \
-         setp, plot, title, show, imshow, cm, text, isinteractive, draw
-
-    # generate the spectrogram
-    sig = pcmio.sndfile(pcmfile).read()
-    (PSD, T, F) = signalproc.spectro(sig, NFFT=nfft, shift=shift)
-
-    # set up the axes and plot PSD
-    extent = (T[0], T[-1], F[0], F[-1])
-    imshow(PSD, cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
-
-    # plot annotation if needed
-    if features != None:
-        # convert to masked array
-        if len(T) > features.shape[1]: T.resize(features.shape[1])
-        if len(F) > features.shape[0]: F.resize(F.shape[0])
-        plotutils.dcontour(features, T, F, hold=1)  # this will barf if the feature file has the wrong resolution
-
-        # locate the centroid of each feature and label it
-        retio = isinteractive()
-        if retio: ioff()
-        for fnum in nx.unique(features[features>-1]):
-            y,x = center_of_mass(features==fnum)
-            text(T[int(x)], F[int(y)], "%d" % fnum, color='w', fontsize=20)            
-
-        draw()
-        if retio: ion()
 
 if __name__=="__main__":
 
