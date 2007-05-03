@@ -1,5 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
+"""
+featurematch computes similarity scores for features against motifs. This
+is a lot like a convolution, except that the score is normalized against
+the variance of the signal under the filter, so it is equivalent to computing
+a sliding correlation coefficient.
+
+Running the script computes the similarity scores for all features against
+all motifs, so it can take quite some time
+"""
 
 import scipy as nx
 
@@ -55,11 +64,6 @@ def xcorr2_norm(A,nu,nv):
            type_converters = converters.blitz)
 
     return s,s2,e,e2
-    # copy the constant values
-##     s[(nu-ni),:] = A[0,:]
-##     s[:,(nv-nj)] = A[:,0]
-##     s2[(nu-ni),:] = AA[0,:]
-##     s2[:,(nv-nj)] = AA[:,0]
     
     
 
@@ -98,19 +102,6 @@ def slidingsimilarity(a,b):
                            b[:,b_slice])
 
     return out
-##     # very inefficient
-##     nrow,ncol = a.shape
-##     assert nrow == b.shape[0]
-##     filtcol = b.shape[1]
-
-##     out = nx.zeros(ncol)
-##     for i in range(ncol):
-##         a_slice = slice(max(0,i-filtcol+1),(i+1))
-##         b_slice = slice(-min(i+1,filtcol),None)
-##         out[i] = corrcoef2(a[:,a_slice],
-##                            b[:,b_slice])
-
-##     return out
 
 
 def slidingsim(sig,filt,window=None,thresh=4.0):
@@ -167,24 +158,114 @@ def slidingsim(sig,filt,window=None,thresh=4.0):
     den  = Es2.mean(0) - (Es.mean(0))**2
 
     return (num/nx.sqrt(den)/norm(filt))[:,:sigcol]
-    
+
+def gausskern(sigma=(17./4, 9./4)):
+    from scipy.signal import gaussian
+    from dlab.linalg import outer
+
+    w = [gaussian(int(x*4), x) for x in sigma]
+    return outer(*w)
 
 if __name__=="__main__":
 
+    # parameters for the run
+    nfft = 320
+    shift = 10
+    method = 'stft'
+    
+    specthresh = 3.0
+    featsigma = (17./4, 9./4)
+    bandlimit = True   # if true, similarities are only calculated for frequency
+                       # bands between the highest and lowest frequency of the filter
+    
     from motifdb import db
-    from dlab import pcmio, signalproc
+    from dlab import pcmio, signalproc, imgutils
+    import tables as t
+    
     m = db.motifdb()
-    motifs = ['A7', 'B0']
-    feat = 0
+    motifs = m.get_motifs().tolist()  # analyze all features against each other
+    motifs.remove('N1')      # except the noise signal
+    #motifs = ['A0','A1']  # test set
+    print "Analyzing motifs: %s" % motifs
 
-    pad = pcmio.sndfile(m.get_data('N1')).read()
-    s = [pcmio.sndfile(m.get_motif_data(motif)).read() for motif in motifs]
-    
-    f = m.get_feature_data(motifs[0],0,feat)
-    # pad the signals with noise equal in length to the filter
-    s = [nx.concatenate([pad[0:f.size], sig, pad[-f.size:]]) for sig in s]
+    # this is a a nice gaussian used to smooth feature masks
+    W = gausskern(featsigma)
 
-    S = [signalproc.spectro(sig)[0][:,:-20] for sig in s]
-    F = signalproc.spectro(f)[0]
+    # this table is used to store which bands a feature is matched on
+    fband_desc = {'feature': t.StringCol(length=16),
+                  'fstart': t.Int16Col()}
 
-    
+
+    # open the output file
+    _h5filt = t.Filters(complevel=1, complib='zlib')
+    fp = t.openFile('featmatch.h5','w', filters=_h5filt)
+    motgrp = fp.createGroup('/', 'motifs', title='Motif Spectrograms')
+    motgrp._v_attrs.params = {'nfft' : nfft, 'shift' : shift, 'method' : method}
+    featgrp = fp.createGroup('/', 'features', title="Feature Spectrograms")
+    featbnd = fp.createTable('/features','fbands',fband_desc,
+                             title="Feature Bands")
+    featgrp._v_attrs.params = {'featsigma' : featsigma, 'bandlimit': bandlimit}
+    ccgrp  = fp.createGroup('/', 'featcc', title='Feature Correlations')
+    ccgrp._v_attrs.params = {'specthresh': specthresh}
+
+    # First load all the signals and spectrograms
+    print "Loading motifs"
+    S = {}
+    for rmotif in motifs:
+        sig = pcmio.sndfile(m.get_motif_data(rmotif)).read() 
+        Sig = signalproc.spectro(sig, nfft=nfft, shift=shift)[0]
+        ar = fp.createCArray('/motifs', rmotif, Sig.shape, t.FloatAtom(shape=Sig.shape,
+                                                                  itemsize=Sig.dtype.itemsize,
+                                                                  flavor='numpy'))
+        ar[::] = Sig
+        S[rmotif] = Sig
+        
+    fp.flush()
+
+    F = {}
+    Fstart = {}
+    for rmotif in motifs:
+        fp.createGroup('/featcc', rmotif)
+        for cmotif in motifs:
+            print "Examining %s vs %s" % (rmotif,cmotif)
+            nfeats = m.get_features(cmotif,0).size
+            for featnum in range(nfeats):
+                fname = "%s_%d" % (cmotif, featnum)
+                if F.has_key(fname):
+                    Feat = F[fname]
+                    fstart = Fstart[fname]
+                else:
+                    I = m.get_featmap_data(cmotif,0)
+                    M,fstart,tstart = imgutils.weighted_mask(I, W, featnum)
+                    if bandlimit:
+                        Feat = imgutils.apply_mask(S[cmotif], M, (fstart,tstart))
+                    else:
+                        Feat = nx.zeros((I.shape[0],M.shape[1]))
+                        Feat[fstart:(fstart+M.shape[0]),:] = imgutils.apply_mask(S[cmotif],
+                                                                                 M, (fstart,tstart))
+                        fstart = 0
+                        
+                    ar = fp.createCArray('/features', fname, Feat.shape,
+                                         t.FloatAtom(shape=Feat.shape,
+                                                     itemsize=Feat.dtype.itemsize,
+                                                     flavor='numpy'))
+                    ar[::] = Feat
+                    r = featbnd.row
+                    r['feature'] = fname
+                    r['fstart'] = fstart
+                    r.append()
+                    Fstart[fname] = fstart
+                    F[fname] = Feat
+
+                xcc = slidingsim(S[rmotif][fstart:(fstart+Feat.shape[0]),:],
+                                 Feat, thresh=specthresh)
+                xcc = xcc.mean(0)
+                name = "%s_%d" % (cmotif, featnum)
+                ar = fp.createCArray('/featcc/%s' % rmotif,
+                                     name, xcc.shape,
+                                     t.FloatAtom(shape=xcc.shape,
+                                                 itemsize=xcc.dtype.itemsize,
+                                                 flavor='numpy'))
+                ar[:] = xcc
+
+            fp.flush()
