@@ -71,23 +71,26 @@ class _sndfile(object):
 
 class _wavfile(_sndfile):
 
-    def __init__(self, filename, mode='r'):
-        if mode != 'r':
-            raise NotImplementedError, "Writing to wav files not implemented"
+    def __init__(self, filename, mode='r', framerate=20000, dataformat='h'):
         
-        self.fp = wave.open(filename, 'r')
-        bitdepth = self.fp.getsampwidth()
-        if bitdepth == 1:
-            self._dtype = dtype('b')
-        elif bitdepth == 2:
-            self._dtype = dtype('h')
-        elif bitdepth == 4:
-            self._dtype = dtype('f')
+        self.fp = wave.open(filename, mode)
+        if mode=='r':
+            bitdepth = self.fp.getsampwidth()
+            if bitdepth == 1:
+                self._dtype = dtype('b')
+            elif bitdepth == 2:
+                self._dtype = dtype('h')
+            elif bitdepth == 4:
+                self._dtype = dtype('f')
+            else:
+                raise NotImplementedError, "Unable to handle wave files with bitdepth %d" % bitdepth
+            self._nframes = self.fp.getnframes()
+            self._framerate = self.fp.getframerate()
         else:
-            raise NotImplementedError, "Unable to handle wave files with bitdepth %d" % bitdepth
-        self._nframes = self.fp.getnframes()
-        self._framerate = self.fp.getframerate()
-
+            self._dtype = dtype(dataformat)
+            self._framerate = framerate
+            self.fp.setparams((1, self._dtype.itemsize, self._framerate, 0,
+                     "NONE", "not compressed"))
 
     def read(self, length=None, mem_type=None):
     
@@ -104,6 +107,8 @@ class _wavfile(_sndfile):
         else:
             return S
 
+    def write(self, data):
+        self.fp.writeframes(data.astype(self._dtype).tostring())
 
 class _pcmfile(_sndfile):
 
