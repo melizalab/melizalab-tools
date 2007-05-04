@@ -42,6 +42,7 @@ def stft(S, **kwargs):
 
     """
     from scipy.signal import get_window
+    from scipy.linalg import norm
     
     nfft = int(kwargs.get('nfft', 320))
     window = kwargs.get('window', 'hamming')
@@ -59,6 +60,8 @@ def stft(S, **kwargs):
         window = get_window(window, nfft)
     elif len(window) != nfft:
         window.resize(nfft, refcheck=True)
+
+    # normalize the window to a total power of 1
 
     # generate the grid
     if kwargs.has_key('grid'):
@@ -78,7 +81,9 @@ def stft(S, **kwargs):
         workspace[i,:] = S_tmp[grid+i-1] * window[i]
 
     C = sfft.fft(workspace, nfft, axis=0, overwrite_x=1)
-    return C
+
+    # correct for window power
+    return C / norm(window)
 
 def istft(C, **kwargs):
     """
@@ -167,15 +172,22 @@ def spectro(S, fun=stft, **kwargs):
         PSD = nx.power(nx.absolute(PSD),2)  # compute power from full complex stft
     
     if S.dtype.kind!='c':
-        nfft = nx.floor(nfft/2)
-        PSD = PSD[1:(nfft+2), :]
+        if nx.remainder(nfft,2):
+            nfft = (nfft+1)/2
+            PSD = PSD[0:nfft, :]
+            # double all frequencies except DC
+            PSD[1:,:] *= 2
+        else:
+            nfft = nfft/2+1
+            PSD = PSD[0:nfft,:]
+            # double all frequencies except DC and nyquist
+            PSD[1:-1,:] *= 2
         F = nx.arange(0, Fs/2., (Fs/2.)/PSD.shape[0])
     else:
         F = nx.arange(-Fs/2., Fs/2., float(Fs)/PSD.shape[0])
-    
-    PSD = nx.log10(PSD)
-    PSD[PSD<0] = 0
 
+    # scale by sampling frequency for PSD
+    PSD /= Fs
     T = nx.arange(0, PSD.shape[1] * 1000. / Fs * shift, 1000. / Fs * shift)
 
     return (PSD, T, F)
