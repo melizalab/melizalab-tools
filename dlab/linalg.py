@@ -6,6 +6,7 @@ Some statistics and linear algebra functions
 """
 import scipy as nx
 from scipy.linalg import get_blas_funcs
+from datautils import autovectorized
 
 def gemm(a,b,alpha=1.,**kwargs):
     """
@@ -79,6 +80,60 @@ def cov(m, y=None, rowvar=1, bias=0):
         return gemm(X, X.conj(), alpha=1/fact, trans_b=1).squeeze()
     else:
         return gemm(X, X.conj(), alpha=1/fact, trans_a=1).squeeze()
+
+def squareform(A, dir=None):
+    """
+    Reformat a distance matrix between upper triangular and square form.
+    
+    Z = SQUAREFORM(Y), if Y is a vector as created by the PDIST function,
+    converts Y into a symmetric, square format, so that Z(i,j) denotes the
+    distance between the i and j objects in the original data.
+ 
+    Y = SQUAREFORM(Z), if Z is a symmetric, square matrix with zeros along
+    the diagonal, creates a vector Y containing the Z elements below the
+    diagonal.  Y has the same format as the output from the PDIST function.
+ 
+    Z = SQUAREFORM(Y,'tovector') forces SQUAREFORM to treat Y as a vector.
+    Y = SQUAREFORM(Z,'tomatrix') forces SQUAREFORM to treat Z as a matrix.
+    These formats are useful if the input has a single element, so it is
+    ambiguous as to whether it is a vector or square matrix.
+
+    Example:  If Y = (1:6) and X = [0  1  2  3
+                                    1  0  4  5
+                                    2  4  0  6
+                                    3  5  6  0],
+              then squareform(Y) is X, and squareform(X) is Y.
+    """
+    A = nx.asarray(A)
+    if dir==None:
+        if A.ndim <2:
+            dir = 'tomatrix'
+        else:
+            dir = 'tovector'
+
+
+
+    if dir=='tomatrix':
+        Y = A.ravel()
+        n = Y.size
+        m = (1 + nx.sqrt(1+8*n))/2
+        if m != nx.floor(m):
+            raise ValueError, "The size of the input vector is not correct"
+        Z = nx.zeros((m,m),dtype=Y.dtype)
+        if m > 1:
+            ind = nx.tril(nx.ones((m,m)),-1).nonzero()
+            Z[ind] = Y
+            Z = Z + Z.T
+    elif dir=='tovector':
+        m,n = A.shape
+        if m != n:
+            raise ValueError, "The input matrix must be square with zeros on the diagonal"
+        ind = nx.tril(nx.ones((m,m)),-1).nonzero()        
+        Z = A[ind]
+    else:
+        raise ValueError, 'Direction argument must be "tomatrix" or "tovector"'
+
+    return Z
 
 
 if __name__=="__main__":
