@@ -22,8 +22,8 @@ def isnested(x):
 def autovectorized(f):
     """Function wrapper to enable autovectorization of a scalar function."""
     def wrapper(input):
-        if type(input) == numpy.ndarray:
-            return numpy.vectorize(f)(input)
+        if type(input) == nx.ndarray:
+            return nx.vectorize(f)(input)
         return f(input)
     return wrapper
 
