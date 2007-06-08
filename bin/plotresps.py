@@ -243,7 +243,7 @@ if __name__=="__main__":
         print __doc__
         sys.exit(-1)
 
-    opts, args = getopt.getopt(sys.argv[1:], "hp:")
+    opts, args = getopt.getopt(sys.argv[1:], "hp:d:")
 
     opts = dict(opts)
     if opts.has_key('-h'):
@@ -260,8 +260,13 @@ if __name__=="__main__":
             motif_db = v
 
     m = db.motifdb(motif_db)
-    if len(args)==2:
-        plotresps(args[0], args[1], m, motif_pos=motif_pos)
+    basename = args[0]
+    if os.path.exists(basename):
+        dir = basename
     else:
-        plotselectivity(args[0], m, motif_pos=motif_pos)
+        dir = '.'
+    if len(args)==2:
+        plotresps(basename, args[1], m, motif_pos=motif_pos, dir=dir)
+    else:
+        plotselectivity(basename, m, motif_pos=motif_pos, dir=dir)
     del(m)
