@@ -86,5 +86,25 @@ def background(tls, binsize=1., bandwidth=5., mintime=-1000):
     return f.mean(), f.var()
 
 
-def resppeaks(tls, thresh, binwidth=1., bandwidth=5.):
-    pass
+def resppeaks(tl, thresh, binsize=1., bandwidth=5., start=0, stop=None):
+    """
+    Find response peaks.  These are regions where the firing rate goes above
+    a threshold.  Returns an Nx3 array, with the indices of the two threshold
+    crossings and the peak
+    """
+
+    f = frate(tl, binsize=binsize, bandwidth=bandwidth, start=start, stop=stop)
+    trans = nx.diff((f > thresh).astype('i'))
+
+    istart = (trans > 0).nonzero()[0]
+    istop  = (trans < 0).nonzero()[0]
+    # correct for cases where we can't observe one of the crossings
+    if len(istart) > len(istop):
+        istop.append(len(f))
+    elif len(istart) < len(istop):
+        istart.insert(0,0)
+        
+    for i in range(len(istop)):
+        ipeak[i] = f[istart[i]:istop[i]].argmax()
+
+    return nx.column_stack([istart, ipeak, istop])
