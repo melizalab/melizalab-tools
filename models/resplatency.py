@@ -2,6 +2,9 @@
 import numpy as nx
 from dlab import toelis
 from motifdb import db
+import sys,os
+sys.path.append('/home/dmeliza/src/tinbergen/python')
+import tinbergen
 
 ext = '.2choice_eDAT'
 rext = '.2choice_rDAT'
@@ -212,8 +215,10 @@ def combinelogs(rlog, elog, outfile, **kwargs):
               'selected','accuracy','key','nevents','event0']
     fp = open(outfile,'wt')
     fp.write("\t".join(fields) + '\n')
-    
 
+    stims = nx.unique(rlog['stimulus']).tolist()
+    stimlen = dict([(x,motif_ends(x)[-1]) for x in stims])
+    
     itrial = 0
     out = []
     for trial in rlog:
@@ -230,9 +235,10 @@ def combinelogs(rlog, elog, outfile, **kwargs):
             fp.write("%s\tNA\t0\tNA\n" % explan)
         else:
             key = _keys[nx.asarray(_vals).argmin()]
-            fp.write("%s\t%d\t%d\t%d\n" % (explan, key+1,
+            event0 = elog[itrial,key][0] / stimlen[trial['stimulus'].tostring()]
+            fp.write("%s\t%d\t%d\t%.4f\n" % (explan, key+1,
                                            elog[itrial,key].size,
-                                           elog[itrial,key][0]))  # only write first event
+                                           event0))  # only write first event
             out.append(elog[itrial,key][0])
         itrial +=1
         
@@ -242,11 +248,7 @@ def combinelogs(rlog, elog, outfile, **kwargs):
 
 if __name__=="__main__":
 
-    # load the tinbergen module
-    import sys,os
-    sys.path.append('/home/dmeliza/src/tinbergen/python')
-    import tinbergen
-    
+   
     # load all the eventlogs into memory
     # assumes they're all in the current subdirectory
     print "Loading event logs:"

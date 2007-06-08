@@ -11,6 +11,7 @@ all motifs, so it can take quite some time
 """
 
 import scipy as nx
+from os.path import exists
 
 def xcorr2(a2,b2):
     """ 2D cross correlation (unnormalized) """
@@ -104,7 +105,7 @@ def slidingsimilarity(a,b):
     return out
 
 
-def slidingsim(sig,filt,window=None,thresh=4.0):
+def slidingsim(sig,filt,window=None):
     """
     Computes a sliding similarity window between two 2D arrays. This is
     a lot like a convolution, except that the result is normalized by
@@ -127,10 +128,6 @@ def slidingsim(sig,filt,window=None,thresh=4.0):
     sigrow,sigcol = sig.shape
     filrow,filcol = filt.shape
     assert sigrow == filrow
-
-    if thresh:
-        sig = threshold(sig, thresh)
-        filt = threshold(filt, thresh)
 
     sig = sig.copy() - sig.mean()
     filt = filt.copy() - filt.mean()
@@ -166,16 +163,94 @@ def gausskern(sigma=(17./4, 9./4)):
     w = [gaussian(int(x*4), x) for x in sigma]
     return outer(*w)
 
-if __name__=="__main__":
+def loadspectrograms(specdb, mdb, motifs, params=None):
+    """
+    Compute spectrograms of all motifs and store them in an h5 file.
+    Also compute feature spectrograms by masking out the feature from the spectrogram
+    
+    If the .h5 file exists, it's used instead of calculating the spectrograms.
+    If params is set it must match the metadata stored in the h5 file
+    If the .h5 file does not exist, params must be set, and have the following fields:
+
+    nfft - number of freq bins
+    shift - number of frames to shift for each time bin
+    method - the spectrogram method
+    featsigma - the bandwidth of the gaussian kernel used to mask out the features
+    bandlimit - if true, only stores the nonzero rows of the feature
+    """
+    import tables as t
+    from dlab import pcmio, signalproc
+    _h5filt = t.Filters(complevel=1, complib='zlib')
+    
+    if params==None and not exists(specdb):
+        raise ValueError, "You must specify a valid h5 database or a set of parameters"
+    if params!=None and not params.keys() <= ['nfft','shift','method']:
+        raise ValueError, "Parameters missing from params argument"
+    
+    if exists(specdb):
+        fp = t.openFile(specdb, 'r+')
+        if params==None:
+            params = fp.root._v_attrs.params
+        elif not fp.root._v_attrs.params <= params:
+            raise ValueError, "The database spectrogram parameters don't match the supplied params"
+    else:
+        fp = t.openFile(specdb, 'w', filters=_h5filt)
+        fp.root._v_attrs.params = params
+        motgrp = fp.createGroup('/', 'motifs', title='Motif Spectrograms')
+        featgrp = fp.createGroup('/', 'features', title='Feature Spectrograms')
+
+    W = gausskern(params['featsigma'])
+    specfun = getattr(signalproc, params['method'])
+    # now cycle through the motifs and make sure the node exists in the database
+    storedmotifs = [x.name for x in fp.listNodes('/motifs')]
+    storedfeats = [x.name for x in fp.listNodes('/features')]
+    
+    for rmotif in motifs:
+        if rmotif not in storedmotifs:
+            sig = pcmio.sndfile(mdb.get_motif_data(rmotif)).read()
+            Sig = nx.log10(signalproc.spectro(sig, nfft=params['nfft'], shift=params['shift'], fun=specfun)[0])
+            ar = fp.createCArray('/motifs', rmotif, Sig.shape, t.FloatAtom(shape=Sig.shape,
+                                                                  itemsize=Sig.dtype.itemsize,
+                                                                  flavor='numpy'))
+            ar[::] = Sig
+        else:
+            Sig = fp.getNode('/motifs/%s' % rmotif).read()
+
+        nfeats = m.get_features(rmotif,0).size
+        for featnum in range(nfeats):
+            fname = "%s_%d" % (rmotif, featnum)
+            if fname not in storedfeats:
+                I = m.get_featmap_data(rmotif,0)
+                M,fstart,tstart = imgutils.weighted_mask(I, W, featnum)
+                if params['bandlimit']:
+                    Feat = imgutils.apply_mask(Sig, M, (fstart,tstart))
+                else:
+                    Feat = nx.zeros((I.shape[0],M.shape[1]))
+                    Feat[fstart:(fstart+M.shape[0]),:] = imgutils.apply_mask(Sig,
+                                                                             M, (fstart,tstart))
+                    fstart = 0
+                        
+                ar = fp.createCArray('/features', fname, Feat.shape,
+                                     t.FloatAtom(shape=Feat.shape,
+                                                 itemsize=Feat.dtype.itemsize,
+                                                 flavor='numpy'))
+                ar[::] = Feat
+                ar.attrs.fstart = fstart
+        
+    fp.flush()
+    return fp
+    
+
+def featvsmotifs(specdb):
 
     # parameters for the run
     nfft = 320
     shift = 10
     method = 'stft'
     
-    specthresh = 3.0
+    specthresh = -3.0
     featsigma = (17./4, 9./4)
-    bandlimit = True   # if true, similarities are only calculated for frequency
+    bandlimit = False  # if true, similarities are only calculated for frequency
                        # bands between the highest and lowest frequency of the filter
     
     from motifdb import db
@@ -185,7 +260,7 @@ if __name__=="__main__":
     m = db.motifdb()
     motifs = m.get_motifs().tolist()  # analyze all features against each other
     motifs.remove('N1')      # except the noise signal
-    #motifs = ['A0','A1']  # test set
+    motifs = ['A0','A1']  # test set
     print "Analyzing motifs: %s" % motifs
 
     # this is a a nice gaussian used to smooth feature masks
@@ -200,20 +275,23 @@ if __name__=="__main__":
     _h5filt = t.Filters(complevel=1, complib='zlib')
     fp = t.openFile('featmatch.h5','w', filters=_h5filt)
     motgrp = fp.createGroup('/', 'motifs', title='Motif Spectrograms')
-    motgrp._v_attrs.params = {'nfft' : nfft, 'shift' : shift, 'method' : method}
+    motgrp._v_attrs.params = {'nfft' : nfft, 'shift' : shift, 'method' : method,
+                              'specthresh': specthresh}
     featgrp = fp.createGroup('/', 'features', title="Feature Spectrograms")
     featbnd = fp.createTable('/features','fbands',fband_desc,
                              title="Feature Bands")
     featgrp._v_attrs.params = {'featsigma' : featsigma, 'bandlimit': bandlimit}
     ccgrp  = fp.createGroup('/', 'featcc', title='Feature Correlations')
-    ccgrp._v_attrs.params = {'specthresh': specthresh}
+    ccgrp._v_attrs.params = {}
 
     # First load all the signals and spectrograms
     print "Loading motifs"
+    specfun = getattr(signalproc, method)
     S = {}
     for rmotif in motifs:
-        sig = pcmio.sndfile(m.get_motif_data(rmotif)).read() 
-        Sig = signalproc.spectro(sig, nfft=nfft, shift=shift)[0]
+        sig = pcmio.sndfile(m.get_motif_data(rmotif)).read()
+        Sig = nx.log10(signalproc.spectro(sig, nfft=nfft, shift=shift, fun=specfun)[0])
+        Sig = signalproc.threshold(Sig, specthresh)
         ar = fp.createCArray('/motifs', rmotif, Sig.shape, t.FloatAtom(shape=Sig.shape,
                                                                   itemsize=Sig.dtype.itemsize,
                                                                   flavor='numpy'))
@@ -224,6 +302,8 @@ if __name__=="__main__":
 
     F = {}
     Fstart = {}
+
+
     for rmotif in motifs:
         fp.createGroup('/featcc', rmotif)
         for cmotif in motifs:
@@ -258,7 +338,7 @@ if __name__=="__main__":
                     F[fname] = Feat
 
                 xcc = slidingsim(S[rmotif][fstart:(fstart+Feat.shape[0]),:],
-                                 Feat, thresh=specthresh)
+                                 Feat)
                 xcc = xcc.mean(0)
                 name = "%s_%d" % (cmotif, featnum)
                 ar = fp.createCArray('/featcc/%s' % rmotif,
@@ -269,3 +349,78 @@ if __name__=="__main__":
                 ar[:] = xcc
 
             fp.flush()
+
+def featvsfeat(specdb, fbands=16):
+
+    features = [x.name for x in specdb.listNodes('/features')]
+    nfeats = len(features)
+
+    out = nx.zeros((nfeats, nfeats), dtype='f')
+
+    for i in range(nfeats):
+        f1 = features[i]
+        F1 = specdb.getNode('/features/%s' % f1).read()
+        for j in range(i,nfeats):
+            f2 = features[j]
+            F2 = specdb.getNode('/features/%s' % f2).read()
+            #xcc = slidingsim(F1, F2)
+            #sim = xcc.mean(0).max()
+            print "%s vs %s" % (f1, f2)
+            xcc = xcorr2(F1,F2)
+            if fbands != None:
+                midband = xcc.shape[0]/2  # zero frequency offset
+                xcc = xcc[midband-fbands:midband+fbands+1,:]
+            sim = xcc.max()
+            out[i,j] = sim
+            out[j,i] = sim # xcorr2 is symmetric
+
+    # normalize to give a CC-like measure
+    pow = nx.diag(out)
+    
+    return (out * out) / nx.outer(pow, pow)
+
+
+if __name__=="__main__":
+
+    # parameters for the run
+    params = {'nfft': 320,
+              'shift' : 10,
+              'method': 'stft',
+              'specthresh' : -3.0,
+              'featsigma' : (17./4, 9./4),
+              'bandlimit' : False}
+    specdbfname = 'specdb_%(nfft)d_%(shift)d_%(method)s.h5' % params
+
+    from motifdb import db
+    from dlab import pcmio, signalproc, imgutils, datautils, linalg
+    import tables as t
+    
+    
+    m = db.motifdb()
+    motifs = m.get_motifs().tolist()  # analyze all features against each other
+    if 'N1' in motifs: motifs.remove('N1')      # except the noise signal
+    #motifs = ['A0','A1']  # test set
+    print "Analyzing motifs: %s" % motifs                       
+
+    print "Loading spectrograms and masks"
+    specdb = loadspectrograms(specdbfname, m, motifs, params)
+    features = [x.name for x in specdb.listNodes('/features')]    
+
+    if exists('featxcorr.bin'):
+        print "Loading feature dissimilarity matrix"
+        fcc = datautils.bimatrix('featxcorr.bin',read_type='d')
+
+        #testcell = '/z1/users/dmeliza/acute_data/st271/20070306/cell_9_2_1'
+        #testcell = '/z1/users/dmeliza/acute_data/st298/20061213/cell_11_4_1'
+        # these are either features that are known to excite the cell (A2 & A7)
+        # or are thought to based on latency
+        excitefeats_1 = ['A7_0','A7_2','A7_3','A7_5','B3_0','B6_2','B6_3','B6_7','B6_8',
+                       'B7_4','Bc_3','Bc_9','C6_6','C7_6']
+        excitefeats_2 = ['A2_0','A2_3','A2_5','A4_1','A7_1','A7_5','B0_0','Ad_0','Ad_1',
+                       'C2_0']
+        featinds_1 = nx.asarray([x in excitefeats_1 for x in features]).nonzero()[0]
+        featinds_2 = nx.asarray([x in excitefeats_2 for x in features]).nonzero()[0]        
+        
+        efcc_1 = fcc[featinds_1,:][:,featinds_1]
+        efcc_2 = fcc[featinds_2,:][:,featinds_2]        
+        

@@ -31,10 +31,16 @@ def ftable(symbol, motif_db, binsize):
 def ctable(motif, basename, motif_db,
            binsize=1., bandwidth=5., pattern="%s_0(%d)",
            dir = '.',
-           onset=0., pad=(100,100), use_recon=False, use_resid=False):
+           onset=0., pad=(100,100), use_recon=False, use_resid=False,
+           correct_times=0.):
     
     m = motif_db
     tls = stat.aggregate(m, motif, basename, dir)
+    if correct_times != 0.0:
+        for name,tl in tls.items():
+            if name == motif: continue
+            tl.offset(correct_times)
+            
     dur = m.get(motif)['length']
 
     def rate_est(tl):
