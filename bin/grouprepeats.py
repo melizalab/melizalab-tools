@@ -1,14 +1,43 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-grouprepeats.py - a module for grouping the event information in toe_lis
-                  files into multi-repeat toe_lis files, grouped by
-                  any number of parameters
+grouprepeats.py - group the event information in toe_lis files into multi-repeat toe_lis files
+                  
+Usage: grouprepeats.py [--file=\"...\"] [--stimulus=\"...\"]
+                       [--start=1] [--stop=N] [--unit=N]
+                       [--allfiles [--basename=<basename>]] <explog>
+        
+       --file specifies which files to include in the grouping.
+       Supply a comma-delimited list of basenames to include, e.g.
+       --file='st302_20060904b, st302_20060904c'
+        
+       --stimulus specifies which stimuli to include in the grouping
+       (otherwise all stimuli are processed)
+       Supply a comma-delimited list of the stimuli, without extensions, e.g.
+       --stimulus='A,B,C' (single or double quotes required)
+
+       --start and --stop control which entries will be included. This
+       is useful if you didn't type site at the start of a recording.
+       For example, '--file='ZZZb' --start=4' will analyze all the toe_lis
+       files from ZZZb_004 to the end of ZZZb.
+       '--file='ZZZb,ZZZc' --start=4 --stop=44' will analyze from ZZZb_004
+       to ZZZc_044.
+
+       --unit restricts the analysis to a single unit. This is necessary
+       when not all the toe_lis files have the same number of units.
+        
+       The --allfiles flag instructs grouprepeats to group only by stimulus.
+       By default, output is grouped by basename and stimulus, and the
+       output files have the name '<basename>_<stimulus>.toe_lis'; if this
+       option is set, output files have the name '<stimulus>.toe_lis'
+       
+       --basename specifies a replacement base file name; only applies
+       if --allfiles is set. Output will be <basename>_<stimulus>.toe_lis
 """
 
 from dlab import episode, toelis
 
-def grouprepeats(episodes):
+def grouprepeats(episodes, unit=None):
     """
     
     Group repeats by stimulus and basename. Collects all the toe_lis
@@ -35,17 +64,21 @@ def grouprepeats(episodes):
         bn_episodes = [ep for ep in episodes if ep.basename==basename]
 
 
-        tl_dict[basename] = groupstimuli(bn_episodes)
+        tl_dict[basename] = groupstimuli(bn_episodes, unit)
 
     return tl_dict
 # end grouprepeats
 
 
-def groupstimuli(episodes):
+def groupstimuli(episodes, unit=None):
     """
     This function groups all the toelis data for stimuli in the supplied
     episodes argument, ignoring basenames. By default, all stimuli will be
     used; limit to particular stimuli by supplying the stimulus_list argument.
+
+    Optional arguments:
+    <unit> - if any of the toelis files are multi-unit, specify which one
+             to use
 
     Returns a dictionary of toelis objects, keyed by stimulus name
     """
@@ -74,14 +107,17 @@ def groupstimuli(episodes):
             toelis_name = "%s_%03d.toe_lis" % (ep.basename, ep.entry)
             try:
                 tl = toelis.readfile(toelis_name)
+                if unit!=None:
+                    tl = tl.unit(unit)
+                    
                 # align episodes to the start of the first stimulus (usually the only one)
                 tl.offset(-ep.stim_start[0])
                 if toelises:
                     toelises.extend(tl)
                 else:
                     toelises = tl
-            except:
-                print "** Error processing file %s, skipping" % toelis_name
+            except Exception, e:
+                print "** Error processing file %s: %s" % (toelis_name,e)
 
             tl_dict[stimulus] = toelises
         print "stim %s matches %s" % (stimulus, entries)
@@ -134,40 +170,13 @@ def filterepisodes(episodes, basename_list=None, stimulus_list=None,
 if __name__=="__main__":
 
     import sys, getopt
-
-    def usage():
-        print "Usage: grouprepeats.py [--file=\"...\"] [--stimulus=\"...\"] "
-        print "                       [--start=1] [--stop=N] "
-        print "                       [--allfiles [--basename=<basename>]] <explog>\n"
-        
-        print "       --file specifies which files to include in the grouping."
-        print "       Supply a comma-delimited list of basenames to include, e.g."
-        print "       --file='st302_20060904b, st302_20060904c'\n"
-        
-        print "       --stimulus specifies which stimuli to include in the grouping"
-        print "       (otherwise all stimuli are processed)"
-        print "       Supply a comma-delimited list of the stimuli, without extensions, e.g."
-        print "       --stimulus='A,B,C' (single or double quotes required)\n"
-
-        print "       --start and --stop control which entries will be included. This"
-        print "       is useful if you didn't type site at the start of a recording."
-        print "       For example, '--file='ZZZb' --start=4' will analyze all the toe_lis"
-        print "       files from ZZZb_004 to the end of ZZZb.  "
-        print "       '--file='ZZZb,ZZZc' --start=4 --stop=44' will analyze from ZZZb_004"
-        print "       to ZZZc_044.\n"
-        
-        print "       The --allfiles flag instructs grouprepeats to group only by stimulus."
-        print "       By default, output is grouped by basename and stimulus, and the "
-        print "       output files have the name '<basename>_<stimulus>.toe_lis'; if this"
-        print "       option is set, output files have the name '<stimulus>.toe_lis'\n"
-        print "       --basename specifies a replacement base file name; only applies"
-        print "       if --allfiles is set. Output will be <basename>_<stimulus>.toe_lis\n"
+    if len(sys.argv) < 2:
+        print __doc__
         sys.exit(-1)
-        
-    if len(sys.argv) < 2: usage()
     
     opts, args = getopt.getopt(sys.argv[1:], "h", \
-                               ["basename=", "stimulus=", "help", "allfiles", "file=", "start=", "stop="])
+                               ["basename=", "stimulus=", "help", "allfiles",
+                                "file=", "start=", "stop=", "unit="])
 
     opts = dict(opts)
     if opts.get('-h') or opts.get('--help'): usage()
@@ -182,6 +191,7 @@ if __name__=="__main__":
     custom_basename = None
     start_entry = None
     stop_entry = None
+    unit = None
     allfiles = False
     for o,a in opts.items():
         if o == '--file':
@@ -196,6 +206,8 @@ if __name__=="__main__":
             allfiles = True
         elif o == '--basename':
             custom_basename = a
+        elif o == '--unit':
+            unit = int(a)
 
     # read in episodes
     episodes = episode.readexplog(args[0])
@@ -205,7 +217,7 @@ if __name__=="__main__":
         sys.exit(-1)
 
     if not allfiles:
-        tl_dict = grouprepeats(episodes)
+        tl_dict = grouprepeats(episodes, unit)
         for (basename, obj) in tl_dict.items():
             for (stimname, tl) in obj.items():
                 if tl:
@@ -214,7 +226,7 @@ if __name__=="__main__":
                     
     else:
         print "Processing repeats for all files:"
-        tl_dict = groupstimuli(episodes)
+        tl_dict = groupstimuli(episodes, unit)
         for (stimname, tl) in tl_dict.items():
             if tl:
                 if custom_basename:
