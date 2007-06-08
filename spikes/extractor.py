@@ -90,7 +90,7 @@ def extract_spikes(S, events, **kwargs):
     time is extracted.  Returns a 3D array, (sample, event, channel)
     """
 
-    window = kwargs.get('window',16)
+    window = kwargs.get('window',30)
     nsamples, nchans = S.shape
     #events = [e for e in events if e > window and e + window < nsamples]
     nevents = len(events)
@@ -169,8 +169,8 @@ def thresh_spikes(S, thresh, **kwargs):
     <refrac> - the minimum distance between spikes (in samples)
     """
 
-    window = kwargs.get('window',16)
-    refrac = kwargs.get('refrac',20)
+    window = kwargs.get('window',30)
+    refrac = kwargs.get('refrac',window)
 
     if not isinstance(S, nx.ndarray):
         raise TypeError, "Input must be an ndarray"
