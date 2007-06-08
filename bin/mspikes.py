@@ -33,8 +33,8 @@ mspikes --inspect -p <pen> -s <site> [--chan=""] [-u [--unit=""]] <explog.h5>
         extracted, and the --unit(s) argument is given, plots the unit
         events as dots overlaid on the waveforms.
 
-mspikes --extract -p <pen> -s <site> [--chan=""] [-r <rms_thresh> | -a <abs_thresh>]
-         [-f 3] [--kkwik] <explog.h5>
+mspikes --extract -p <pen> -s <site> [--chan=""] [-i] [-r <rms_thresh> | -a <abs_thresh>]
+         [-f 3] [-w 20] [--kkwik] <explog.h5>
 
         Extract spikes from raw waveforms and output in a format usable
         by klusters and klustakwik. If multiple channels
@@ -46,7 +46,10 @@ mspikes --extract -p <pen> -s <site> [--chan=""] [-r <rms_thresh> | -a <abs_thre
         delimited list, like '6.5,6.5,5'
 
         The -f flag controls how many principal components and their projections
-        to calculate (default 3 per channel)
+        to calculate (default 3 per channel). The -w flag controls the number of
+        points on either side of the spike to keep.
+
+        -i inverts the signal prior to spike detection
 
         Outputs a number of files that can be used with Klusters or KlustaKwik.
         With an explog, the files are:
@@ -68,6 +71,7 @@ import os, sys, getopt
 options = {
     'rms_thresh' : [4.5],
     'nfeats' : 3,
+    'window' : 20,
     'channels' : [0],
     'kkwik': False,
     'sort_raw' : True
@@ -81,7 +85,7 @@ if __name__=="__main__":
         sys.exit(-1)
 
 
-    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:e:hlu",
+    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:e:w:ihlu",
                                ["sort","stats","cull","inspect","extract",
                                 "chan=","unit=","help","kkwik"])
 
@@ -213,14 +217,21 @@ if __name__=="__main__":
             P.show()
             
         elif opts.has_key('--cull'):
-            thresh = float(opts.get('-t',-1))
-            if thresh < 0:
-                print "Error: must supply a positive maximum rms power for threshhold"
-                sys.exit(-1)
-            rms = k.getstats(statname='rms', onlyvalid=False)
-            if rms.ndim > 1:
-                rms = rms.mean(0)
-            keep = rms<thresh
+            keep = nx.ones(k.nentries, dtype='b1')
+            if opts.has_key('-e'):
+                keep = nx.arange(k.nentries)<= int(opts['-e'])
+            if opts.has_key('-t'):
+                
+                thresh = float(opts['-t'])
+                if thresh < 0:
+                    print "Error: must supply a positive maximum rms power for threshhold"
+                    sys.exit(-1)
+                    
+                rms = k.getstats(statname='rms', onlyvalid=False)
+                if rms.ndim > 1:
+                    rms = rms.mean(0)
+                keep = keep & (rms<thresh)
+                
             k.setvalid(keep)
             print "Marked %d entries as invalid: %s" % (keep.size - keep.sum(),
                                                         (keep==False).nonzero()[0])
@@ -266,11 +277,15 @@ if __name__=="__main__":
                     options['abs_thresh'] = thresh
                 elif o == '-f':
                     options['nfeats'] = int(a)
+                elif o == '-w':
+                    options['window'] = int(a)
                 elif o == '--kkwik':
                     options['kkwik'] = True
                 elif o == '--chan':
                     exec "chans = [%s]" % a
-                    options['channels'] = chans                
+                    options['channels'] = chans
+                elif o == '-i':
+                    options['invert'] = True
 
             if options.has_key('rms_thresh') and len(options['rms_thresh'])==1:
                 options['rms_thresh'] *= len(options['channels'])
