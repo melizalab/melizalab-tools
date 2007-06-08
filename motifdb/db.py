@@ -438,7 +438,7 @@ class motifdb(object):
 
         return datautils.offset_add(offsets, data, length)
 
-    def plot_motif(self, symbol, featmap=None, nfft=320, shift=10):
+    def plot_motif(self, symbol, featmap=None, **kwargs):
         """
         Plots a motif with its features. Uses matplotlib.
         """
@@ -447,16 +447,16 @@ class motifdb(object):
         from dlab.signalproc import spectro
         from dlab.plotutils import dcontour
         from dlab.pcmio import sndfile
-        from numpy import unique
+        from numpy import unique, log10
         from scipy.ndimage import center_of_mass        
 
         # generate the spectrogram
         sig = sndfile(self.get_motif_data(symbol)).read()
-        (PSD, T, F) = spectro(sig, NFFT=nfft, shift=shift)
+        (PSD, T, F) = spectro(sig, **kwargs)
 
         # set up the axes and plot PSD
         extent = (T[0], T[-1], F[0], F[-1])
-        imshow(PSD, cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
+        imshow(log10(PSD[:,:-1]), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
         draw()
 
         # plot annotation if needed
@@ -484,11 +484,12 @@ class motifdb(object):
     def plot_feature(self, symbol, featmap, feature, nfft=320, shift=10):
         from pylab import  imshow, cm, draw
         from dlab.signalproc import spectro
+        from numpy import log10
 
         sig = self.get_feature_data(symbol, featmap, feature)
         (PSD, T, F) = spectro(sig, NFFT=nfft, shift=shift)
         extent = (T[0], T[-1], F[0], F[-1])
-        imshow(PSD, cmap=cm.Greys, extent=extent, origin='lower', aspect='auto',
+        imshow(log10(PSD+0.1), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto',
                interpolation='nearest')
         draw()
         
