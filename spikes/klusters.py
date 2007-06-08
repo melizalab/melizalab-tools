@@ -117,7 +117,7 @@ class site(explog.explog):
 
         Optional arguments:
         kkwik - if true, runs KlustaKwik on the .clu and .fet files
-        
+        invert - if true, inverts the signal prior to spike detection
         """
 
         xmlhdr = """<parameters creator="pyklusters" version="1.0" >
@@ -180,7 +180,7 @@ class site(explog.explog):
             print "Wrote features to %s.fet.%d" % (base, group)
 
             if kwargs.get('kkwik',False):
-                cmd = "KlustaKwik %s %d -UseFeatures %s" % \
+                cmd = "KlustaKwik %s %d -UseFeatures %s &" % \
                       (base, group, "".join(['1']*nfeats)+'0')
                 os.system(cmd)
             group += 1
@@ -222,7 +222,10 @@ class site(explog.explog):
         atimes = self.getentrytimes()
         for i in range(len(atimes)):
             atime = atimes[i]
-            S = self.getdata(atime=atime,channels=channels)
+            if kwargs.has_key('invert') and kwargs['invert']==True:
+                S = -self.getdata(atime=atime, channels=channels)
+            else:
+                S = self.getdata(atime=atime,channels=channels)
 
             dcoff = fdcoff(i, S)
             if not fac:
@@ -241,7 +244,7 @@ class site(explog.explog):
         events_entry = nx.concatenate(events_entry)
 
         if kwargs.get('align_spikes',True):
-            allspikes,kept_events = realign(allspikes, downsamp=False)
+            allspikes,kept_events = realign(allspikes, downsamp=True)
             if kept_events != None:
                 events = events[kept_events]
                 events_entry = events_entry[kept_events]
@@ -416,7 +419,7 @@ class site(explog.explog):
         atimes = tbl.col('entrytime')[stimuli==stimulus]
         return nx.intersect1d(atimes, self.getentrytimes())
 
-    def groupstimuli(self):
+    def groupstimuli(self, start_atime=None, stop_atime=None):
         """
         Groups event lists by stimulus. munit_events is a dictionary
         of toelis objects indexed by the abstime of the relevant entry.
@@ -433,6 +436,8 @@ class site(explog.explog):
         for stimulus in stimuli:
             atimes = self.getentry_bystimulus(stimulus)
             for atime in atimes:
+                if start_atime != None and atime < start_atime: continue
+                if stop_atime != None and atime > stop_atime: continue
                 stime = self.getstimulus(atime)['abstime'][0]
                 events = [x  / msr for x in self.getevents(atime=atime)]
                 tl = toelis.toelis(events, nunits=len(events))
