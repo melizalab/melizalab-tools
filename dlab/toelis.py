@@ -254,11 +254,21 @@ class toelis(object):
         N = n.concatenate([N, [len(d)]])
         freq = N[1:]-N[:-1]
         if normalize:
-            freq =  freq.astype('d') / (self.nrepeats * binsize / 1000.)
+            freq =  freq.astype('d') / (self.nrepeats * binsize)
             
         return bins[:-2], freq[:-2]
 
 # end toelis
+
+def aggregate(tls, dim=0):
+    """
+    Combines a list of toelis objects into a single toelis by aggregating
+    along a dimension (default repeats)
+    """
+    tll = toelis(tls[0].events)
+    for i in range(1,len(tls)):
+        tll.extend(tls[i])
+    return tll
 
 def readfile(filename):
     """
