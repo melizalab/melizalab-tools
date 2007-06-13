@@ -7,7 +7,6 @@ time offsets for triggers and stimulus presentation
 """
 
 import tables as t
-import scipy as nx
 import re, sys, os
     
 __all__ = ['explog','readexplog']
@@ -194,10 +193,15 @@ def readexplog(logfile, outfile, site_sort=False):
     chantable = _maketable(h5, h5.root,'channels',Channels)
     ftbl = _maketable(h5, h5.root,'files',Files)
 
+    # generate the table update objects
+    stim_row = stimuli.row
+    file_row = ftbl.row
+    ent_row = entries.row
     for line in fp:
         line_num += 1
+        lstart = line[0:4]  # all the start codes are the same length
 
-        if line.startswith("FFFF"):
+        if lstart == "FFFF":
             m1 = _reg_create.search(line)
             if m1:
                 if m1.group('action')=='created':
@@ -209,7 +213,7 @@ def readexplog(logfile, outfile, site_sort=False):
                     if site_sort and os.path.exists(seqfile):
                         if not os.path.exists(subdir): os.mkdir(subdir)
                         print "%s -> %s" % (seqfile, subdir)
-                        os.system("mv %s %s " % (seqfile, subdir))
+                        os.system("mv %s %s" % (seqfile, subdir))
 
                     if os.path.exists(os.path.join(subdir, seqfile)):
                         seqfile = os.path.join(subdir, seqfile)
@@ -220,19 +224,20 @@ def readexplog(logfile, outfile, site_sort=False):
                 print "parse error: Unparseable FFFF line (%d): %s" % (line_num, line)
 
         # new pen or new site
-        if line.startswith("IIII"):
+        elif lstart == "IIII":
             m1 = _reg_pen.search(line)
-            m2 = _reg_site.search(line)
             if m1:
                 currentpen = int(m1.group('pen'))
-            elif m2:
-                currentsite = int(m2.group('site'))
+            else:
+                m2 = _reg_site.search(line)
+                if m2:
+                    currentsite = int(m2.group('site'))
 
         # when saber quits or stop/starts, the abstime gets reset. Since stimuli are matched with triggers
         # by abstime, this can result in stimuli getting assigned to episodes deep in the past
         # The workaround for this is to maintain an offset that gets set to the most recent
         # abstime whenever a quit event is detected
-        if line.startswith('%%%%'):
+        elif lstart == '%%%%':
             if line.rstrip().endswith('start'):
                 absoffset = lastabs
             else:
@@ -248,56 +253,55 @@ def readexplog(logfile, outfile, site_sort=False):
         # trigger lines
         # this is kind of tricky.  Need to make one entry per trigger for
         # the files table, and one entry per abstime for the entry table
-        if line.startswith("TTTT"):
+        elif lstart == "TTTT":
             m1 = _reg_triggeron.search(line)
-            m2 = _reg_triggeroff.search(line)
             if m1:
                 # trigger on
                 time_trig = int(m1.group('onset')) + absoffset
-                triggers[(m1.group('chan'), int(m1.group('entry')))] = time_trig
+                triggers[(m1.group('chan'), int(m1.group('entry')))] = time_trig                
                 lastabs = time_trig
                 #print "Entry %d starts %d" % (currententry, time_trig)
-            elif m2:
-                # trigger off
-                key = (m2.group('chan'), int(m2.group('entry')))
-                try:
-                    trig_on = triggers[key]
-                    n_samples = int(m2.group('samples'))
-                    # check that we have a file defined in the files dict
-                    if not files.has_key(key[0]):
-                        print "parse error: found entry %s:%d but no file (line %d)" % \
-                          (key + (line_num,))
-                    else:
-                        row = ftbl.row
-                        row['abstime'] = trig_on
-                        row['filebase'] = files[key[0]]
-                        row['channel'] = channels.index(key[0])
-                        row['entry'] = key[1]
-                        row.append()
-                        triggers.pop(key)
-                        # when we've emptied the triggers dictionary, it's time to write the
-                        # entry record
-                        if len(triggers)==0:
-                            row = entries.row
-                            row['abstime'] = trig_on
-                            row['pen'] = currentpen
-                            row['site'] = currentsite
-                            row['duration'] = n_samples
-                            row['valid'] = True
-                            row.append()
-
-                except KeyError:
-                    print "parse error: found TRIG_OFF for %s:%s, but missed TRIG_ON (line %d)" % \
-                          (key + (line_num,))
-                except IndexError:
-                    print "Unable to parse channel number from %s (line %d)" % (key[0] % line_num)
-                    triggers.remove(key)
             else:
-                    print "parse error: Unparseable TTTT line (%d): %s" % (line_num, line)
+                m2 = _reg_triggeroff.search(line)
+                if m2:
+                    # trigger off
+                    key = (m2.group('chan'), int(m2.group('entry')))
+                    try:
+                        trig_on = triggers[key]
+                        n_samples = int(m2.group('samples'))
+                        # check that we have a file defined in the files dict
+                        if not files.has_key(key[0]):
+                            print "parse error: found entry %s:%d but no file (line %d)" % \
+                              (key + (line_num,))
+                        else:
+                            file_row['abstime'] = trig_on
+                            file_row['filebase'] = files[key[0]]
+                            file_row['channel'] = channels.index(key[0])
+                            file_row['entry'] = key[1]
+                            file_row.append()
+                            triggers.pop(key)
+                            # when we've emptied the triggers dictionary, it's time to write the
+                            # entry record
+                            if len(triggers)==0:
+                                ent_row['abstime'] = trig_on
+                                ent_row['pen'] = currentpen
+                                ent_row['site'] = currentsite
+                                ent_row['duration'] = n_samples
+                                ent_row['valid'] = True
+                                ent_row.append()
+
+                    except KeyError:
+                        print "parse error: found TRIG_OFF for %s:%s, but missed TRIG_ON (line %d)" % \
+                              (key + (line_num,))
+                    except IndexError:
+                        print "Unable to parse channel number from %s (line %d)" % (key[0] % line_num)
+                        triggers.remove(key)
+                else:
+                        print "parse error: Unparseable TTTT line (%d): %s" % (line_num, line)
 
 
         # stimulus lines
-        if line.startswith("QQQQ"):
+        elif lstart == "QQQQ":
             m1 = _reg_stimulus.search(line)
             if m1:
                 time_stim_rel = float(m1.group('rel'))
@@ -310,20 +314,19 @@ def readexplog(logfile, outfile, site_sort=False):
                 if stimname.startswith('File='):
                     stimname = stimname[5:]
 
-                row = stimuli.row
-                row['abstime'] = time_stim_abs
-                row['name'] = stimname
-                row.append()
+                stim_row['abstime'] = time_stim_abs
+                stim_row['name'] = stimname
+                stim_row.append()
             else:
                 print "parse error: Unparseable QQQQ line: %s" % line
 
     # done parsing file
     fp.close()
 
+    ct_row = chantable.row
     for c in channels:
-        row = chantable.row
-        row['name'] = c
-        row.append()
+        ct_row['name'] = c
+        ct_row.append()
 
     # sync entries
     h5.flush()
