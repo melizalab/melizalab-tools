@@ -169,7 +169,6 @@ def readexplog(explog, samplerate=20000):
                 m2 = reg_triggeroff.search(line)
                 if m1:
                     currententry = int(m1.group('entry'))
-                    siteentry += 1
                     time_trig = int(m1.group('onset')) + absoffset
                     lastabs = time_trig
                     #print "Entry %d starts %d" % (currententry, time_trig)
@@ -189,6 +188,7 @@ def readexplog(explog, samplerate=20000):
                                               (time_trig, n_samples, currentpen, currentsite, siteentry)
                         #print "Entry %d has %d samples" % (closedentry, n_samples)
                         currententry = None
+                        siteentry += 1
                 else:
                         print "parse error: Unparseable TTTT line (%d): %s" % (line_num, line)
             except ValueError: 
