@@ -3,7 +3,7 @@
 """
 grouprepeats.py - group the event information in toe_lis files into multi-repeat toe_lis files
                   
-Usage: grouprepeats.py [--file=\"...\"] [--stimulus=\"...\"]
+Usage: grouprepeats.py [--file=\"...\"] [--group=<group>] [--stimulus=\"...\"]
                        [--start=1] [--stop=N] [--unit=N]
                        [--allfiles [--basename=<basename>]] <explog>
         
@@ -23,6 +23,9 @@ Usage: grouprepeats.py [--file=\"...\"] [--stimulus=\"...\"]
        '--file='ZZZb,ZZZc' --start=4 --stop=44' will analyze from ZZZb_004
        to ZZZc_044.
 
+       --group specifies that the toe_lis files have been generated from a single
+       pcm_seq2 file which contains all the entries for the site
+
        --unit restricts the analysis to a single unit. This is necessary
        when not all the toe_lis files have the same number of units.
         
@@ -37,7 +40,7 @@ Usage: grouprepeats.py [--file=\"...\"] [--stimulus=\"...\"]
 
 from dlab import episode, toelis
 
-def grouprepeats(episodes, unit=None):
+def grouprepeats(episodes, unit=None, groupedsite=None):
     """
     
     Group repeats by stimulus and basename. Collects all the toe_lis
@@ -64,13 +67,13 @@ def grouprepeats(episodes, unit=None):
         bn_episodes = [ep for ep in episodes if ep.basename==basename]
 
 
-        tl_dict[basename] = groupstimuli(bn_episodes, unit)
+        tl_dict[basename] = groupstimuli(bn_episodes, unit, groupedsite)
 
     return tl_dict
 # end grouprepeats
 
 
-def groupstimuli(episodes, unit=None):
+def groupstimuli(episodes, unit=None, groupedsite=None):
     """
     This function groups all the toelis data for stimuli in the supplied
     episodes argument, ignoring basenames. By default, all stimuli will be
@@ -79,6 +82,13 @@ def groupstimuli(episodes, unit=None):
     Optional arguments:
     <unit> - if any of the toelis files are multi-unit, specify which one
              to use
+    <groupedsite> - If multiple pcm_seq2 files were concatenated prior
+                    to spike sorting, the toe_lis files will be named
+                    after this file, and the entry numbers will (hopefully)
+                    correspond to the *siteentry* of the episode instead
+                    of the fileentry.  If this is set, the function
+                    uses the value as the basename of the toelis files
+                    and the siteentry as the identifier.
 
     Returns a dictionary of toelis objects, keyed by stimulus name
     """
@@ -103,8 +113,13 @@ def groupstimuli(episodes, unit=None):
         entries = []
         for ep in st_episodes:
             #entries.append("%s_%03d" % (ep.basename, ep.entry))
-            entries.append(ep.entry)
-            toelis_name = "%s_%03d.toe_lis" % (ep.basename, ep.entry)
+            if groupedsite:
+                entries.append(ep.siteentry)
+                toelis_name = "%s_%03d.toe_lis" % (groupedsite, ep.siteentry)
+            else:
+                entries.append(ep.entry)
+                toelis_name = "%s_%03d.toe_lis" % (ep.basename, ep.entry)
+                
             try:
                 tl = toelis.readfile(toelis_name)
                 if unit!=None:
@@ -175,14 +190,16 @@ if __name__=="__main__":
         sys.exit(-1)
     
     opts, args = getopt.getopt(sys.argv[1:], "h", \
-                               ["basename=", "stimulus=", "help", "allfiles",
+                               ["basename=", "group=", "stimulus=", "help", "allfiles",
                                 "file=", "start=", "stop=", "unit="])
 
     opts = dict(opts)
-    if opts.get('-h') or opts.get('--help'): usage()
+    if opts.get('-h') or opts.get('--help'):
+        print __doc__
+        sys.exit(-1)
     if len(args) < 1:
         print "Error: need an explog"
-        usage()
+        sys.exit(-1)
 
     def trim(x): return x.strip()
     
@@ -193,6 +210,8 @@ if __name__=="__main__":
     stop_entry = None
     unit = None
     allfiles = False
+    group = None
+    
     for o,a in opts.items():
         if o == '--file':
             file_list = map(trim, a.split(','))
@@ -207,7 +226,9 @@ if __name__=="__main__":
         elif o == '--basename':
             custom_basename = a
         elif o == '--unit':
-            unit = int(a)
+            unit = int(a) - 1
+        elif o == '--group':
+            group = a
 
     # read in episodes
     episodes = episode.readexplog(args[0])
@@ -217,7 +238,7 @@ if __name__=="__main__":
         sys.exit(-1)
 
     if not allfiles:
-        tl_dict = grouprepeats(episodes, unit)
+        tl_dict = grouprepeats(episodes, unit, group)
         for (basename, obj) in tl_dict.items():
             for (stimname, tl) in obj.items():
                 if tl:
@@ -226,7 +247,7 @@ if __name__=="__main__":
                     
     else:
         print "Processing repeats for all files:"
-        tl_dict = groupstimuli(episodes, unit)
+        tl_dict = groupstimuli(episodes, unit, group)
         for (stimname, tl) in tl_dict.items():
             if tl:
                 if custom_basename:

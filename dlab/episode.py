@@ -25,6 +25,7 @@ class episode:
     def __init__(self):
         self.basename = ""
         self.entry = 0
+        self.siteentry = 0
         self.abstime = 0
         self.duration = 0
         self.stimulus = []
@@ -32,8 +33,8 @@ class episode:
 
     def __str__(self):
         if not self.basename: return None
-        out = "%s_%03d: ABS=%3.3f, DUR=%3.3f" % \
-               (self.basename, self.entry, self.abstime, self.duration)
+        out = "%s_%03d: ENT=%d, ABS=%3.3f, DUR=%3.3f" % \
+               (self.basename, self.siteentry, self.entry, self.abstime, self.duration)
         for i in range(self.nstims):
             out += "\n\tSTIM=%s ON=%3.3f" % (self.stimulus[i], self.stim_start[i])
         return out
@@ -98,6 +99,7 @@ def readexplog(explog, samplerate=20000):
 
     currentfile  = None
     currententry = None
+    siteentry    = 1
     currentpen   = None
     currentsite  = None
     lastabs      = 0
@@ -146,8 +148,10 @@ def readexplog(explog, samplerate=20000):
             m2 = reg_site.search(line)
             if m1:
                 currentpen = m1.group('pen')
+                siteentry = 1
             elif m2:
                 currentsite = m2.group('site')
+                siteentry = 1
 
         # when saber quits or stop/starts, the abstime gets reset. Since stimuli are matched with triggers
         # by abstime, this can result in stimuli getting assigned to episodes deep in the past
@@ -165,6 +169,7 @@ def readexplog(explog, samplerate=20000):
                 m2 = reg_triggeroff.search(line)
                 if m1:
                     currententry = int(m1.group('entry'))
+                    siteentry += 1
                     time_trig = int(m1.group('onset')) + absoffset
                     lastabs = time_trig
                     #print "Entry %d starts %d" % (currententry, time_trig)
@@ -181,7 +186,7 @@ def readexplog(explog, samplerate=20000):
                               (closedentry, line_num)
                     else:
                         entries[(currentfile, currententry)] = \
-                                              (time_trig, n_samples, currentpen, currentsite)
+                                              (time_trig, n_samples, currentpen, currentsite, siteentry)
                         #print "Entry %d has %d samples" % (closedentry, n_samples)
                         currententry = None
                 else:
@@ -218,6 +223,7 @@ def readexplog(explog, samplerate=20000):
         ep.duration = obj[1] / msr
         ep.pen = obj[2]
         ep.site = obj[3]
+        ep.siteentry = obj[4]
 
         for (time_stim_abs, stim) in stimuli.items():
             if time_stim_abs >= obj[0] and time_stim_abs <= obj[0] + obj[1]:
