@@ -26,12 +26,19 @@ def ftable(symbol, motif_db, binsize):
     of the table is 1; otherwise 0
     """
     pass
-    
+
+def rate_est(tl, onset=None, offset=None, binsize=1., bandwidth=5.):
+    # cheapy rate estimater
+    b,v = tl.histogram(binsize=binsize,normalize=True,
+                       onset=onset,
+                       offset=offset)
+    return gaussian_filter1d(v.astype('f')*1000, bandwidth),b    
 
 def ctable(motif, basename, motif_db,
-           binsize=1., bandwidth=5., pattern="%s_0(%d)",
+           binsize=1., bandwidth=5., expattern="%s_0(%d)",
+           inhpattern = "%s_0(-%d)",
            dir = '.',
-           onset=0., pad=(100,100), use_recon=False, use_resid=False,
+           onset=0., post_pad=100, window=200,
            correct_times=0.):
     
     m = motif_db
@@ -43,62 +50,98 @@ def ctable(motif, basename, motif_db,
             
     dur = m.get(motif)['length']
 
-    def rate_est(tl):
-        # cheapy rate estimater
-        b,v = tl.histogram(binsize=binsize,normalize=True,
-                           onset=onset-pad[0],
-                           offset=onset+dur+pad[1])
-        return gaussian_filter1d(v.astype('f'), bandwidth),b
+    frates = {}
+    for name,tl in tls.items():
+        frates[name],t = rate_est(tl, onset=0., offset=dur+post_pad,
+                                binsize=binsize, bandwidth=bandwidth)
 
-    if use_recon:
-        r_full,t = rate_est(tls[motif+"_0"])
-    else:
-        r_full,t = rate_est(tls[motif])
 
-    bkgnd = (r_full[t<0]).mean()
-
-    # estimate the feature impulses from the residuals
     feats = m.get_features(motif)
-    resid = nx.zeros((r_full.size, len(feats)),dtype=r_full.dtype)
-    ctab = resid.copy()
-    acausal = resid.copy()
-    
+    nt = t.size
+    r_feat = nx.zeros((nt, len(feats)))
+    r_inhib = nx.zeros((nt, len(feats)))
     for feat in feats:
         fid = feat['id']
-        stimname = pattern % (motif, fid)
-        if not tls.has_key(stimname):
-            continue
-        rat,t = rate_est(tls[stimname])
-        if use_resid:
-            rat = r_full - rat
-        else:
-            rat = rat  - bkgnd
+        featname = expattern % (motif, fid)
+        residname = inhpattern % (motif, fid)
 
-        ctab[:,fid] = rat
-        acausal[:,fid] = rat
-        
-        # zero out acausal filter
-        ind = t < feat['offset'][0]
-        ctab[ind,fid] = 0
-        acausal[ind==False,fid] = 0
+        rstart = feat['offset'][0]
+        rend = rstart + feat['dim'][0] + window
+        #ind = t >= feat['offset'][0]
+        ind = (t >= rstart) & (t < rend)
+        r_feat[ind,fid]  = frates[featname][ind]
+        r_inhib[ind,fid] = nx.minimum(frates[motif] - frates[residname], 0)[ind]
+        #r_inhib[ind,fid] = (frates[motif] - frates[residname])[ind]
 
-    return ctab,r_full,t,acausal
+    return frates[motif], r_feat, r_inhib
 
-def predict(ctab, r_full):
+def predict(excite, inhib=None):
+    if inhib==None:
+        return excite.sum(1)
+    else:
+        return nx.maximum(excite.sum(1) + inhib.sum(1),0)
 
-    cpred = ctab.sum(1)
-    cpred[cpred < 0] = 0
-    cc = nx.corrcoef(cpred,r_full)[0,1]
-    return cc,cpred
+def phasic(tfile, start, stop):
+    """
+    Compute the phasic response index using toestat
+    """
+    from os import popen
+    
+    cmd = "toestat -range %f %f %s -stat -isiphasic" % (start, stop, tfile)
+    fp = popen(cmd)
+    out = []
+    for line in fp:
+        fields = line.split()
+        out.append(float(fields[-1]))
+    return out[0]
 
 if __name__=="__main__":
 
-    # test this with B6 in ~/z1/acute_data/st298/20061213/site_11_4
-    motif_db = db.motifdb('/home/dmeliza/z1/motif_db/motifs_st229_st298.h5')
-    ctab,r_full,t,acausal = ctable('B6', 'cell_11_4', motif_db,
-                                   dir='/home/dmeliza/z1/acute_data/st298/20061213/cell_11_4_1',
-                                   pattern="%s-%d", use_resid=1)
 
-    cc,cpred = predict(ctab, r_full)
-    print "Correlation coefficient = %3.4f" % cc
-    
+    # read table of files
+    import sys,os
+    fp = open(sys.argv[1])
+    mdb = {}
+    birds = ['229','271','298','317','318']
+    for bird in birds:
+        mdb[bird] = db.motifdb(os.path.join('st%s' % bird, 'motifs.h5'))
+
+    #import matplotlib
+    #matplotlib.use('PDF')
+    #from pylab import figure,clf, subplot,plot, imshow, title, setp, gca, gcf, close
+    #from bin.plotresps import plotresps
+    #f = figure(figsize=(8,8))
+
+    print "bird\tcell\tmotif\tCC\tCC.ex\tphasic"
+    for line in fp:
+        if line.startswith('#') or len(line.strip())==0: continue
+        fields = line.split()
+        bird,basename,date = fields[0:3]
+        dir = "st%s/%s/%s" % (bird, date, basename)
+        offset = float(fields[3])
+        expattern = fields[4]
+        inhpattern = fields[5]
+        motifs = fields[6:]
+        for motif in motifs:
+            print >> sys.stderr, "Analyzing %s/%s/%s" % (bird, basename,motif)
+            phas = phasic(os.path.join(dir, '%s_%s.toe_lis' % (basename, motif)),
+                          0, mdb[bird].get_motif(motif)['length'])
+            ct,et,it = ctable(motif, basename, mdb[bird], dir=dir, expattern=expattern,
+                              inhpattern=inhpattern, correct_times=offset)
+            cpred = predict(et, it)
+            cprede = predict(et)
+            cc = nx.corrcoef(cpred,ct)[0,1]
+            cce = nx.corrcoef(cprede,ct)[0,1]
+            print "st%s\t%s\t%s\t%3.4f\t%3.4f\t%3.4f" % (bird, basename, motif, cc, cce, phas)
+            #subplot(311),plot(ct),plot(cpred,hold=1),plot(cprede,hold=1)
+            #title("%s_%s (%s) CC=%3.4f CC(ex)=%3.4f" % (bird, basename, motif, cc, cce))
+            #setp(gca(),'xlim',[0,ct.size])
+            #subplot(312),imshow(et.T, interpolation='nearest')
+            #subplot(313),imshow(it.T, interpolation='nearest')
+            #plotresps(basename, motif, mdb[bird], dir=dir)
+            #gcf().savefig('rasters_st%s_%s_%s.pdf' % (bird, basename, motif) )
+            #close('all')
+    for m in mdb:
+        del m
+
+        
