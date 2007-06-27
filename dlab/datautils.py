@@ -114,7 +114,7 @@ def bomatrix(data, filename, write_type=None):
     assert data.ndim < 3
     fp = open(filename, 'wb')
     if data.ndim==1:
-        shape = nx.contatenate([data.shape, (1)])
+        shape = nx.asarray(data.shape + (1,))
     else:
         shape = nx.asarray(data.shape)
 
