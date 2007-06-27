@@ -163,3 +163,18 @@ def cmap_discretize(cmap, N):
         cdict[key] = tuple(L)
     # Return colormap object.
     return matplotlib.colors.LinearSegmentedColormap('colormap',cdict,1024)
+
+def drawoffscreen(f):
+    """Function wrapper to draw offscreen and then restore interactive mode"""
+    from pylab import isinteractive, ion, ioff, draw
+    def wrapper(input):
+        retio = isinteractive()
+        ioff()
+        try:
+            y = f(input)
+        finally:
+            if retio: ion()
+            draw()
+        return y
+    return wrapper
+    
