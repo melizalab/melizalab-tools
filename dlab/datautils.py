@@ -63,6 +63,26 @@ def binomial(n,k):
         p = p*(n - j)/(j + 1)
     return p
 
+def gcd(n,d):
+    """ Return the greatest common denominator """
+    if d == 0.: return 1.
+    if n == 0.: return d
+
+    n = abs(n)
+    d = abs(d)
+    while d > 0.5:
+	q = nx.floor( n/d );
+	r = n - d * q;
+	n = d;
+	d = r;
+
+    return int(n)
+
+def lcm(a,b):
+    """ Return the least common multiple """
+    return a*b/gcd(a,b)
+
+
 def seqshuffle(S):
     """
     Generates shuffled sequences based on a simple positional
