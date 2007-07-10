@@ -8,18 +8,6 @@ CDM, 1/2007
 """
 import scipy as nx
 from scipy import weave
-from matplotlib import cm
-    
-def cimap(data, cmap=cm.hsv, thresh=0.2):
-    """
-    Plot complex data using the RGB space for the phase and the
-    alpha for the magnitude
-    """
-    phase = nx.angle(data)/2/nx.pi + 0.5
-    Z = cmap(phase)
-    M = nx.log10(nx.absolute(data)+ thresh)
-    Z[:,:,3] = (M - M.min()) / (M.max() - M.min())
-    return Z
     
 
 def apply_mask(data, M, onset):

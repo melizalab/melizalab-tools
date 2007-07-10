@@ -6,10 +6,25 @@ module with useful plotting functions
 CDM, 1/2007
  
 """
-from pylab import *
 from datautils import *
-import scipy as nx
-import signalproc, pcmio, imgutils
+import numpy as nx
+from matplotlib import cm
+
+
+def drawoffscreen(f):
+    """Function wrapper to draw offscreen and then restore interactive mode"""
+    from pylab import isinteractive, ion, ioff, draw
+    def wrapper(*args, **kwargs):
+        retio = isinteractive()
+        ioff()
+        try:
+            y = f(*args, **kwargs)
+        finally:
+            if retio: ion()
+            draw()
+        return y
+    return wrapper
+
 
 def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     """
@@ -26,6 +41,7 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
 
     With huge numbers of repeats the line length gets extremely small.
     """
+    from pylab import plot, gca, axis
 
     if y == None:
         # if y is none, x needs to be a sequence of arrays
@@ -71,9 +87,10 @@ def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
 
     <kwargs> - passed to bar()
     """
+    from pylab import bar, xticks
     assert len(labels)==len(values)
+    lbl = nx.asarray(labels)
     if sort_labels:
-        lbl = nx.asarray(labels)
         ind = lbl.argsort()
         lbl.sort()
         values = values[ind]
@@ -83,7 +100,7 @@ def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
     xticks(x+width/2, lbl.tolist())
     
     
-
+@drawoffscreen
 def dcontour(*args, **kwargs):
     """
     Discrete contour function. Given a matrix I with a discrete number
@@ -95,16 +112,16 @@ def dcontour(*args, **kwargs):
     Note that arbitrary labels aren't supported very well at present
     so we can't get labels
     """
+    from pylab import contour, hold
+    
     I = args[0]
     if len(args) > 1:
         (X, Y) = args[1:3]
     else:
-        (Y, X) = (arange(I.shape[0]), arange(I.shape[1]))
+        (Y, X) = (nx.arange(I.shape[0]), nx.arange(I.shape[1]))
     
     labels = nx.unique(I[I>-1])
-    retio = isinteractive()
 
-    if retio: ioff()
     hold(True)
     h = []
     cc = colorcycle
@@ -113,11 +130,8 @@ def dcontour(*args, **kwargs):
         h.append(hh)
 
     hold(False)
-    draw()
-    if retio: ion()
     return h
     
-
 def colorcycle(ind=None):
     """
     Returns the color cycle, or a color cycle, for manually advancing
@@ -130,29 +144,32 @@ def colorcycle(ind=None):
         return cc
     
 def cmap_discretize(cmap, N):
-    """Return a discrete colormap from the continuous colormap cmap.
+    """
+    Return a categorical colormap from a continuous colormap cmap.
     
         cmap: colormap instance, eg. cm.jet. 
-        N: Number of colors.
+        N: Number of levels.
     
     Example
         x = resize(arange(100), (5,100))
         djet = cmap_discretize(cm.jet, 5)
         imshow(x, cmap=djet)
     """
+    from matplotlib.colors import LinearSegmentedColormap
+    from scipy.interpolate import interp1d
 
     cdict = cmap._segmentdata.copy()
     # N colors
-    colors_i = linspace(0,1.,N)
+    colors_i = nx.linspace(0,1.,N)
     # N+1 indices
-    indices = linspace(0,1.,N+1)
+    indices = nx.linspace(0,1.,N+1)
     for key in ('red','green','blue'):
         # Find the N colors
-        D = array(cdict[key])
-        I = interpolate.interp1d(D[:,0], D[:,1])
+        D = nx.array(cdict[key])
+        I = interp1d(D[:,0], D[:,1])
         colors = I(colors_i)
         # Place these colors at the correct indices.
-        A = zeros((N+1,3), float)
+        A = nx.zeros((N+1,3), float)
         A[:,0] = indices
         A[1:,1] = colors
         A[:-1,2] = colors
@@ -162,19 +179,16 @@ def cmap_discretize(cmap, N):
             L.append(tuple(l))
         cdict[key] = tuple(L)
     # Return colormap object.
-    return matplotlib.colors.LinearSegmentedColormap('colormap',cdict,1024)
+    return LinearSegmentedColormap('colormap',cdict,1024)
 
-def drawoffscreen(f):
-    """Function wrapper to draw offscreen and then restore interactive mode"""
-    from pylab import isinteractive, ion, ioff, draw
-    def wrapper(input):
-        retio = isinteractive()
-        ioff()
-        try:
-            y = f(input)
-        finally:
-            if retio: ion()
-            draw()
-        return y
-    return wrapper
-    
+def cimap(data, cmap=cm.hsv, thresh=0.2):
+    """
+    Plot complex data using the RGB space for the phase and the
+    alpha for the magnitude
+    """
+    phase = nx.angle(data)/2/nx.pi + 0.5
+    Z = cmap(phase)
+    M = nx.log10(nx.absolute(data)+ thresh)
+    Z[:,:,3] = (M - M.min()) / (M.max() - M.min())
+    return Z
+
