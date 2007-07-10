@@ -36,6 +36,10 @@ def weighted_mask(I, W, ID, **kwargs):
     Arguments:
     W - a weight matrix, with values between 0.0 and 1.0
     c - dimensions for the convolution. Default is floor(W.shape/2)
+    corr - a correction matrix, which is used to correct for edge
+           interference. This should be a double matrix with the same
+           extent as I, and with values ranging from 0 to 1.  The value
+           M(i,j) is the max of the kernel weights scaled by corr(i,j)
     clip - If true (default), the extent of the mask is determined,
            and the returned value is a tuple (subM, row, col), where
            subM is the smallest array that contains all the nonzero
@@ -49,10 +53,11 @@ def weighted_mask(I, W, ID, **kwargs):
     if c==None:
         c = nx.asarray(W.shape) / 2
 
+    corr = kwargs.get('corr',nx.ones(I.shape,dtype='d'))
     M = nx.zeros(I.shape, dtype='d')
 
     code = """
-      # line 409 "signalproc.py"
+      # line 60 "imgutils.py"
       int ii, ij, wi, wj;
       int di, dj, i ,j;
       
@@ -65,14 +70,15 @@ def weighted_mask(I, W, ID, **kwargs):
                       for ( wj = 0;  wj < W.columns(); wj++ ) {
                            i = wi + di;
                            j = wj + dj;
+                           double val = W(wi,wj) * corr(i,j);
                            if ( (i >= 0 && i < M.rows() && j >= 0 && j < M.cols()) &&
-                                (!M(i, j) || W(wi, wj) > M(i,j))) 
-                                 M(i, j) = W(wi, wj);
+                                (!M(i, j) || val > M(i,j))) 
+                                 M(i, j) = val;
                       }
               }
       """
 
-    weave.inline(code,['I','W','M','c','ID'],
+    weave.inline(code,['I','W','M','c','ID','corr'],
                  type_converters=weave.converters.blitz)
 
     # determine the extent of the mask
