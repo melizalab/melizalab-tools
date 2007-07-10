@@ -171,7 +171,7 @@ class motifdb(object):
         """
         table = self._stimset
         # check that the symbol isn't already defined
-        for row in table.where(table.cols.symbol==symbol):
+        for row in table.where("symbol=='%s'" % symbol):
             table.removeRows(row.nrow)
             table.flush()
 
@@ -250,15 +250,15 @@ class motifdb(object):
 
     # these methods are for common retrieval operations
 
-    def __getmotifid(self, symbol):
+    def __getmotifid(self, sym):
         table = self._stimset
-        id = [r['motif'] for r in table.where(table.cols.symbol==symbol)]
+        id = [r['motif'] for r in table.where('symbol=="%s"' % sym)]
         if len(id) > 0: return id[0]
         # try lookup on full motif name
-        id = [r.nrow for r in table.where(table.cols.motif==symbol)]
-        if len(id) > 0: return symbol
+        id = [r.nrow for r in table.where('motif=="%s"' % sym)]
+        if len(id) > 0: return sym
         
-        raise IndexError, "Motif symbol %s not defined." % symbol
+        raise IndexError, "Motif symbol %s not defined." % sym
 
     def __getfeatmaptable(self, symbol):
         """
@@ -347,7 +347,7 @@ class motifdb(object):
         """
         motifname = self.__getmotifid(motif)        
         table = self.h5.root.entities.features
-        coords = [r.nrow for r in table.where(table.cols.motif==motifname)
+        coords = [r.nrow for r in table.where('motif=="%s"' % motifname)
                   if r['featmap']==mapnum]
         return table.readCoordinates(coords)
         
@@ -359,7 +359,7 @@ class motifdb(object):
         """
         motifname = self.__getmotifid(motif)
         table = self.h5.root.entities.features
-        coord = [r.nrow for r in table.where(table.cols.motif==motifname) \
+        coord = [r.nrow for r in table.where('motif=="%s"' % motifname) \
                  if r['featmap']==mapnum and r['id']==featnum]
         if len(coord):
             return table[coord[0]]
@@ -505,7 +505,7 @@ def addunique(table, object, key):
     Flushes the table, so that the key is present during future calls.
     """
     app = True
-    for row in table.where(table.cols._f_col(key)==object[key]):
+    for row in table.where('%s == "%s"' % (key, object[key])):
         object.copyto(row)
         row.update()
         app = False
@@ -523,5 +523,5 @@ def getunique(table, key, value):
     record. This is a common enough operation that this wrapper
     should save some labor.
     """
-    rnum = table.getWhereList(table.cols._f_col(key)==value)
+    rnum = table.getWhereList('%s == "%s"' % (key, value))
     return table[rnum[0]]
