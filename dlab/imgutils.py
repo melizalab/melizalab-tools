@@ -101,3 +101,64 @@ def weighted_mask(I, W, ID, **kwargs):
                 extent[0][0],extent[1][0])
     else:
         return M
+
+def gausskern(sigma):
+    """ Generates a n-D gaussian kernel with different sigmas for each dimension """
+    from scipy.signal import gaussian
+    from dlab.linalg import outer
+
+    w = [gaussian(int(x*4), x) for x in sigma]
+    return outer(*w)
+
+def xcorr2(a2,b2):
+    """ 2D cross correlation (unnormalized) """
+    from scipy.fftpack import fftshift, fft2, ifft2
+    from scipy import conj
+    a2 = a2 - a2.mean()
+    b2 = b2 - b2.mean()
+    Nfft = (a2.shape[0] + b2.shape[0] - 1, a2.shape[1] + b2.shape[1] - 1) 
+    c = fftshift(ifft2(fft2(a2,shape=Nfft)*conj(fft2(b2,shape=Nfft))).real,axes=(0,1))
+    return c
+        
+
+## def xcorr2_win(a2,b2,win):
+##     """ 2D cross correlation, windowed """
+
+##     mi = int(win[0]/2.)
+##     mj = int(win[1]/2.)
+##     ni1,nj1 = a2.shape
+##     ni2,nj2 = b2.shape
+    
+##     a2 = a2 - a2.mean()
+##     b2 = b2 - b2.mean()
+##     out = nx.zeros((mi*2+1,mj*2+1))
+##     code = """
+##           #line 123 "imgutils.py"
+##           int i1, i2, j1, j2, oi, oj, min_j, max_j, min_i, max_i;
+
+##           for (i1 = 0; i1 < ni1; i1++) {
+##                 min_i = (i1 > mi) ? i1 - mi : 0;
+##                 max_i = ((i1 + mi + 1) < ni2) ? i1 + mi + 1 : ni2;
+##                 for (j1 = 0; j1 < nj1; j1++) {
+##                     min_j = (j1 > mj) ? j1 - mj : 0;
+##                     max_j = ((j1 + mj + 1) < nj2) ? j1 + mj + 1 : nj2;
+##                     for (oi = 0, i2 = min_i; i2 < max_i; i2++) {
+##                          for (oj = 0, j2 = min_j; j2 < max_j; j2++) {
+##                               out(oi,oj) += a2(i1,j1) * b2(i2,j2);
+##                               oj +=1;
+##                          }
+##                          oi += 1;
+##                     }
+##                 }
+##            }
+##     """
+##     weave.inline(code,['a2','b2','out','mi','mj','ni1','ni2','nj1','nj2'],
+##                         type_converters=weave.converters.blitz)
+##     return out
+ 
+
+## if __name__=="__main__":
+
+##     X = nx.randn(100,100)
+##     xcc = xcorr2(X,X,[20,20])
+
