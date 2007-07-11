@@ -205,11 +205,14 @@ def splitmotifs(mlist):
                 # this handles things like A3_feature_000
                 fnum = int(atoms[iatom+2])
                 out.append("%s.%d" % (mname, fnum))
+                iatom += 2
             elif next=='residue':
                 fnum = int(atoms[iatom+2])
                 out.append("%s-%d" % (mname, fnum))
+                iatom += 2
             elif next=='REC':
                 out.append("%sR" % mname)
+                iatom += 1
             else:
                 out.append(mname)
         iatom += 1
