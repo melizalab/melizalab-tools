@@ -68,6 +68,8 @@ def toestat(tl, rrange, srange, binsize=10., maxrep=None):
 
     rb,rf = tl.histogram(onset=rrange[0], offset=rrange[1], binsize=binsize, normalize=True)
     sb,sf = tl.histogram(onset=srange[0], offset=srange[1], binsize=binsize, normalize=True)
+    rf *= 1000
+    sf *= 1000 
 
     return tl.nrepeats, rf.mean(), rf.var(), sf.mean(), sf.var()
 
