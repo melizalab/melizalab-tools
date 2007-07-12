@@ -50,10 +50,8 @@ def weighted_mask(I, W, ID, **kwargs):
     From Zhiyi Chi, fog project
     """
 
-    c = kwargs.get('c',None)
-    if c==None:
-        c = nx.asarray(W.shape) / 2
-
+    ID = int(ID)
+    c = kwargs.get('c', nx.asarray(W.shape) / 2)
     corr = kwargs.get('corr',nx.ones(I.shape,dtype='d'))
     M = nx.zeros(I.shape, dtype='d')
 
@@ -71,10 +69,11 @@ def weighted_mask(I, W, ID, **kwargs):
                       for ( wj = 0;  wj < W.columns(); wj++ ) {
                            i = wi + di;
                            j = wj + dj;
-                           double val = W(wi,wj) * corr(i,j);
-                           if ( (i >= 0 && i < M.rows() && j >= 0 && j < M.cols()) &&
-                                (!M(i, j) || val > M(i,j))) 
-                                 M(i, j) = val;
+                           if (i >= 0 && i < M.rows() && j >= 0 && j < M.cols()) {
+                                double val = W(wi,wj) * corr(i,j);
+                                if (!M(i, j) || val > M(i,j))
+                                      M(i, j) = val;
+                           }
                       }
               }
       """
