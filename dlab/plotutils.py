@@ -8,7 +8,8 @@ CDM, 1/2007
 """
 from datautils import *
 import numpy as nx
-from matplotlib import cm
+import matplotlib
+import tempfile, shutil, os
 
 
 def drawoffscreen(f):
@@ -181,7 +182,7 @@ def cmap_discretize(cmap, N):
     # Return colormap object.
     return LinearSegmentedColormap('colormap',cdict,1024)
 
-def cimap(data, cmap=cm.hsv, thresh=0.2):
+def cimap(data, cmap=matplotlib.cm.hsv, thresh=0.2):
     """
     Plot complex data using the RGB space for the phase and the
     alpha for the magnitude
@@ -192,3 +193,107 @@ def cimap(data, cmap=cm.hsv, thresh=0.2):
     Z[:,:,3] = (M - M.min()) / (M.max() - M.min())
     return Z
 
+
+class texplotter(object):
+    """
+    
+    This class is used to group a bunch of figures into a single pdf
+    file. On initialization it creates a temporary directory where eps
+    files and the tex input file are stored.  Each call to
+    plotfigure() generates a new eps file.  Entries are stored in the
+    figures attribute for each subplot/file.  Calling makepdf() causes
+    the tex file to be compiled, and a pdf file is saved in the
+    location specified.  Destruction of the object results in cleanup
+    of the temporary directory.
+
+    """
+
+    def __init__(self, margins=(1.2, 1.0), parameters=None):
+        """
+        
+        Initialize the texplotter object. This creates the temporary
+        directory and the texfile.
+
+        Optional arguments:
+             margins - set the margins of the output file (inches, inches)
+             plotdims - set the default dimensions of plots (inches, inches)
+             parameters - a dictionary which is used to set values in matplotlib.rcParams.
+
+        For instance, tx = texplotter(parameters={'font.size':8.0})
+
+        The default margins and plotdims will plot 8 figures per page.
+        """
+
+        matplotlib.use('PS')  # useful if running from a script; otherwise the plots
+                              # will be displayed in an interactive session
+        if parameters!=None:
+            for key, value in parameters.items():
+                matplotlib.rcParams[key] = value
+        self.margins = margins
+
+        self._tdir = tempfile.mkdtemp()
+        self.figures = []
+
+
+    def __del__(self):
+
+        if hasattr(self, '_tdir') and os.path.isdir(self._tdir):
+            shutil.rmtree(self._tdir)
+
+    def plotfigure(self, fig, plotdims=None):
+        """
+        Calls savefig() on the figure object to save an eps file. Adds the figure
+        to the list of plots.
+
+        <plotdims> - override figure dimensions
+        """
+
+        if plotdims==None:
+            plotdims = fig.get_size_inches()
+        figname = "texplotter_%03d.eps" % len(self.figures)
+        fig.savefig(os.path.join(self._tdir, figname))
+        self.figures.append([figname, plotdims])
+
+    def pagebreak(self):
+        """ Insert a pagebreak in the file """
+        self.figures.append(None)
+        
+    def writepdf(self, filename):
+        """
+        Generates a pdf file from the current figure set.
+
+        filename - the file to save the pdf to
+        """
+
+        fp = open(os.path.join(self._tdir, 'texplotter.tex'), 'wt')
+        fp.writelines(['\\documentclass[10pt]{article}\n',
+                                '\\usepackage{graphics, epsfig}\n',
+                                '\\addtolength{\\oddsidemargin}{-%fin}\n' % self.margins[0],
+                                '\\addtolength{\\textwidth}{%fin}\n' % self.margins[0]*2,
+                                '\\addtolength{\\topmargin}{-%fin}\n' % self.margins[1],
+                                '\\addtolength{\\textheight}{%fin}\n' % self.margins[1]*2,
+                                '\\setlength{\\parindent}{0in}\n',
+                                '\\begin{document}\n',
+                                '\\begin{center}\n'])
+        for fig in self.figures:
+            if fig==None:
+                fp.write('\\clearpage\n')
+            else:
+                figname, plotdims = fig
+                fp.write('\\includegraphics[width=%fin,height=%fin]{%s}\n' % (plotdims +  (figname,)))
+
+        fp.write('\\end{center}\n\\end{document}\n')
+        fp.close()
+
+        pwd = os.getcwd()
+        if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
+        try:
+            os.chdir(self._tdir)
+            os.system('latex texplotter.tex > /dev/null')
+            if not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
+            os.system('dvipdf texplotter.dvi')
+            if not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
+            shutil.move('texplotter.pdf', filename)
+        finally:
+            os.chdir(pwd)
+            
