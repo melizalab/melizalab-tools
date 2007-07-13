@@ -16,6 +16,8 @@ are assumed to be in st<bird>/<subdir>/<cell>
 Optional arguments:
           -m <filename>  use a different motifdb
           -s <statfxn> use a different aggregator (default singstats)
+          -f <songfile> if <statfxn> is songstat, a song file needs to be
+             defined
           -r <reps> limit histograms to the first <reps> repeats. Avoids
               bias problems with uneven distributions of repeats
 
@@ -25,17 +27,18 @@ import sys,getopt,os
 from spikes import stat
 from dlab import toelis
 from motifdb import db
+from sys import stderr
 
 binsize = 10.
 poststim = 100.
 silence = (-1000,0)
 
 
-_statfmt = "%s_%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
-_hdr = "cell\tmotif\tnreps\tresp.m\tresp.v\tspon.m\tspon.v\tresp.on\tresp.off"
+_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
+_hdr = "bird\tcell\tmotif\tnreps\tresp.m\tresp.v\tspon.m\tspon.v\tresp.on\tresp.off"
 _statfxn = stat.toestat
 
-def pairstats(dir, motif_db, bird="", maxreps=None):
+def pairstats(dir, motif_db, bird="", maxreps=None, **kwargs):
     """
     Some stimuli were played only in pairs, but the stats function in spikes.stat
     assumes the region immediately prior to the stimulus was silent. So
@@ -70,7 +73,7 @@ def pairstats(dir, motif_db, bird="", maxreps=None):
                              (offset,offset+mlen))
                 offset += mlen
 
-def singstats(dir, motif_db, bird="", maxreps=None):
+def singstats(dir, motif_db, bird="", maxreps=None, **kwargs):
     """
     This function gathers response statistics assuming that motifs
     were played singly to the animal, and the corresponding toe_lis files
@@ -94,7 +97,7 @@ def singstats(dir, motif_db, bird="", maxreps=None):
                      _statfxn(tl, (0.,mlen), silence, binsize, maxreps) +
                      (0.,mlen))
 
-def aggstats(dir, motif_db, bird="", maxreps=None):
+def aggstats(dir, motif_db, bird="", maxreps=None, **kwargs):
     """
     This aggregator uses the aggregate function in spikes.stat to
     collect toelis data. Only the first motif in any sequence is used,
@@ -113,6 +116,55 @@ def aggstats(dir, motif_db, bird="", maxreps=None):
                  _statfxn(tl, (0.,mlen), silence, binsize, maxreps) +
                  (0.,mlen))
 
+def songstats(dir, motif_db, sequences, bird="", maxreps=None, **kwargs):
+    """
+    This aggregator is sort of special. It simulates the response strength
+    to the full sequences by pasting the responses to individual motifs
+    together.
+    """
+    from numpy import concatenate
+    
+    files = os.listdir(dir)
+    basename = dirbase(dir)
+    # first load the toelis files
+    if bird!="" and isinstance(sequences,dict):
+        sequences=sequences[bird]
+    for sequence in sequences:
+        tls = []
+        seqgood = [x for x in sequence]
+        for motif in sequence:
+            fname = "%s_%s.toe_lis" % (basename, motif)
+            if fname not in files:
+                print >> stderr, "Warning %s/%s: No toe_lis data for motif %s" % (bird, basename, motif)
+                seqgood.remove(motif)
+            else:
+                tls.append(toelis.readfile(os.path.join(dir,fname)))
+
+        nreps = [tl.nrepeats for tl in tls]
+        nreps = min(nreps)
+        if maxreps!=None:
+            nreps = min(nreps, maxreps)
+        # pick out spike times, offset them the right amount and throw them
+        # in the bucket. First for the silence period
+        evts = concatenate(tls[0].events[0:nreps])
+        evts = evts[(evts>silence[0]) & (evts<silence[1])]
+        bucket = [evts]
+        offset = 0
+        for i in range(len(seqgood)):
+            mlen = motif_db.get_motif(seqgood[i])['length'] + poststim
+            evts = concatenate(tls[i].events[0:nreps])
+            evts = evts[(evts>0) & (evts<mlen)]
+            bucket.append(evts+offset)
+            offset += mlen
+
+        tl = toelis.toelis(nrepeats=nreps)
+        tl.events[0] = concatenate(bucket)
+        print _statfmt \
+                  % ((bird, basename, "_".join(seqgood)) +
+                     _statfxn(tl, (0.,offset), silence, binsize, maxreps) +
+                     (0.,offset))    
+    
+
 def dirbase(dir):
     if dir.endswith('/'):
         return os.path.basename(dir[:-1])
@@ -126,7 +178,7 @@ if __name__=="__main__":
         sys.exit(-1)
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "m:hs:r:", ["help"])
+        opts, args = getopt.getopt(sys.argv[1:], "m:hs:r:f:", ["help"])
     except getopt.GetoptError, e:
         print "Error: %s" % e
         sys.exit(-1)        
@@ -134,8 +186,9 @@ if __name__=="__main__":
     map_file = None
     aggf = singstats
     maxreps = None
+    songfile = None
+    songs = {}
     
-
     for o,a in opts:
         if o in ('-h','--help'):
             print __doc__
@@ -144,14 +197,29 @@ if __name__=="__main__":
             map_file = a
         elif o=='-r':
             maxreps = int(a)
+        elif o=='-f':
+            songfile = a
         elif o=="-s":
-            if a == 'aggstats':
-                aggf = aggstats
-            elif a == 'pairstats':
-                aggf = pairstats
+            if a in ('aggstats','pairstats','songstats'):
+                aggf = locals()[a]
             else:
                 print "Unknown aggregation function %s" % a
                 sys.exit(-1)
+
+    if aggf==songstats:
+        if songfile==None:
+            print "Must define a song file for songstats mode"
+            sys.exit(-1)
+        else:
+            sfp = open(songfile,'rt')
+            for line in sfp:
+                if line.startswith('#') or len(line.strip())==0: continue
+                bird,seq,fam = line.split('\t')
+                if songs.has_key(bird):
+                    songs[bird].append(seq.split('_'))
+                else:
+                    songs[bird] = [seq.split('_')]
+            sfp.close()
 
     try:
         mdb = db.motifdb(map_file)
@@ -159,26 +227,23 @@ if __name__=="__main__":
         print "Unable to read motifdb %s; aborting" % map_file
         sys.exit(-1)
 
-    if len(args)==1:
-        fp = open(args[0],'rt')
-        print _hdr
-        cwd = os.getcwd()
-        for line in fp:
-            if len(line)>0 and line[0].isdigit():
-                bird,basename,location = line.split()
-                os.chdir(os.path.join("st%s" % bird, location))
-                aggf(basename, mdb, bird, maxreps)
-                os.chdir(cwd)
-    else:
-        bird = args[0]
-        basename = args[1]
-        aggf(basename, mdb, bird, maxreps)
-##     # aggregate the toelis files:
-##     tls = stat.aggregate_base(basename, mdb, dir=basename, motif_pos=0)
-##     # run through them one by one
-##     for motif, tl in tls.items():
-##         mlen = mdb.get_motif(motif)['length'] + poststim
-##         print "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f" \
-##               % ((bird, basename, motif) + stat.toestat(tl, (0.,mlen), silence, binsize))
+    try:
+        if len(args)==1:
+            fp = open(args[0],'rt')
+            print _hdr
+            cwd = os.getcwd()
+            for line in fp:
+                if len(line)>0 and line[0].isdigit():
+                    bird,basename,location = line.split()[0:3]
+                    bird = "st%s" % bird
+                    os.chdir(os.path.join(bird, location))
+                    aggf(basename, mdb, bird=bird, maxreps=maxreps, sequences=songs)
+                    os.chdir(cwd)
+        else:
+            bird = args[0]
+            basename = args[1]
+            aggf(basename, mdb, bird=bird, maxreps=maxreps, sequences=songs)
+    except Exception,e:
+        print "Error processing %s/%s: %s" % (bird, basename, e)
 
     del(mdb)
