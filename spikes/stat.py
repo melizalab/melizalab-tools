@@ -198,9 +198,8 @@ def splitmotifs(mlist):
             if next[0].isdigit():
                 # these are of the form B6_0(blahblah)
                 # we drop the shifted features because otherwise the figure is unmanageable
-                if next.find('t') ==-1:
-                    out.append(_sep.join((mname,next)))
-                    iatom += 1
+                out.append(_sep.join((mname,next)))
+                iatom += 1
             elif next=='feature':
                 # this handles things like A3_feature_000
                 fnum = int(atoms[iatom+2])
