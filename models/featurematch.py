@@ -12,16 +12,7 @@ all motifs, so it can take quite some time
 
 import scipy as nx
 from os.path import exists
-
-def xcorr2(a2,b2):
-    """ 2D cross correlation (unnormalized) """
-    from scipy.fftpack import fftshift, fft2, ifft2
-    from scipy import conj
-    a2 = a2 - a2.mean()
-    b2 = b2 - b2.mean()
-    Nfft = (a2.shape[0] + b2.shape[0] - 1, a2.shape[1] + b2.shape[1] - 1) 
-    c = fftshift(ifft2(fft2(a2,shape=Nfft)*conj(fft2(b2,shape=Nfft))).real,axes=(0,))
-    return c
+from dlab.imgutils import xcorr2
 
 def xcorr2_norm(A,nu,nv):
     """
