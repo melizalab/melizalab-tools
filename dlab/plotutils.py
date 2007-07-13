@@ -207,8 +207,14 @@ class texplotter(object):
     of the temporary directory.
 
     """
+    _defparams = params = {'backend': 'ps',
+                           'axes.labelsize': 10,
+                           'text.fontsize': 10,
+                           'xtick.labelsize': 8,
+                           'ytick.labelsize': 8,
+                           'text.usetex': False}
 
-    def __init__(self, margins=(1.2, 1.0), parameters=None):
+    def __init__(self, parameters=None, leavetempdir=False):
         """
         
         Initialize the texplotter object. This creates the temporary
@@ -227,25 +233,27 @@ class texplotter(object):
         matplotlib.use('PS')  # useful if running from a script; otherwise the plots
                               # will be displayed in an interactive session
         if parameters!=None:
-            for key, value in parameters.items():
-                matplotlib.rcParams[key] = value
-        self.margins = margins
+            self._defparams.update(parameters)
+        matplotlib.rcParams.update(self._defparams)
 
         self._tdir = tempfile.mkdtemp()
+        self._leavetempdir = leavetempdir
         self.figures = []
 
 
     def __del__(self):
 
-        if hasattr(self, '_tdir') and os.path.isdir(self._tdir):
+        if hasattr(self, '_tdir') and os.path.isdir(self._tdir) and not self._leavetempdir:
             shutil.rmtree(self._tdir)
 
-    def plotfigure(self, fig, plotdims=None):
+    def plotfigure(self, fig, plotdims=None, closefig=True):
         """
         Calls savefig() on the figure object to save an eps file. Adds the figure
         to the list of plots.
 
         <plotdims> - override figure dimensions
+        <closefig> - by default, closes figure after it's done exporting the EPS file;
+                     set to True to keep the figure
         """
 
         if plotdims==None:
@@ -253,12 +261,15 @@ class texplotter(object):
         figname = "texplotter_%03d.eps" % len(self.figures)
         fig.savefig(os.path.join(self._tdir, figname))
         self.figures.append([figname, plotdims])
+        if closefig:
+            from pylab import close
+            close(fig)
 
     def pagebreak(self):
         """ Insert a pagebreak in the file """
         self.figures.append(None)
         
-    def writepdf(self, filename):
+    def writepdf(self, filename, margins=(0.5, 0.9)):
         """
         Generates a pdf file from the current figure set.
 
@@ -266,15 +277,13 @@ class texplotter(object):
         """
 
         fp = open(os.path.join(self._tdir, 'texplotter.tex'), 'wt')
-        fp.writelines(['\\documentclass[10pt]{article}\n',
-                                '\\usepackage{graphics, epsfig}\n',
-                                '\\addtolength{\\oddsidemargin}{-%fin}\n' % self.margins[0],
-                                '\\addtolength{\\textwidth}{%fin}\n' % self.margins[0]*2,
-                                '\\addtolength{\\topmargin}{-%fin}\n' % self.margins[1],
-                                '\\addtolength{\\textheight}{%fin}\n' % self.margins[1]*2,
-                                '\\setlength{\\parindent}{0in}\n',
-                                '\\begin{document}\n',
-                                '\\begin{center}\n'])
+        fp.writelines(['\\documentclass[10pt,letterpaper]{article}\n',
+                       '\\usepackage{graphics, epsfig}\n',
+                       '\\usepackage[top=%fin,bottom=%fin,left=%fin,right=%fin,nohead,nofoot]{geometry}' % \
+                       (margins[1], margins[1], margins[0], margins[0]),
+                       '\\setlength{\\parindent}{0in}\n',
+                       '\\begin{document}\n',
+                       '\\begin{center}\n'])
         for fig in self.figures:
             if fig==None:
                 fp.write('\\clearpage\n')
@@ -291,9 +300,18 @@ class texplotter(object):
             os.chdir(self._tdir)
             os.system('latex texplotter.tex > /dev/null')
             if not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
-            os.system('dvipdf texplotter.dvi')
+            os.system('dvipdf -dAutoRotatePages=/None texplotter.dvi')
             if not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
             shutil.move('texplotter.pdf', filename)
         finally:
             os.chdir(pwd)
             
+
+if __name__=="__main__":
+
+    from pylab import plot, gcf
+    tp = texplotter()
+    plot(range(20))
+    tp.plotfigure(gcf())
+    tp.writepdf('test_texplotter.pdf')
+    

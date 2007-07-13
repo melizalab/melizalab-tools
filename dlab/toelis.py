@@ -31,7 +31,7 @@ class toelis(object):
 
         """
 
-        if data:
+        if data!=None:
             for item in data:
                 if n.isscalar(item):
                     raise ValueError, "Input data must be a list"
