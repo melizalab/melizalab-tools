@@ -24,31 +24,40 @@ CDM, 1/2007
 """
 
 
-import scipy as nx
-from motifdb import db, importer
-from dlab import toelis, plotutils, pcmio, signalproc
+import numpy as nx
+from motifdb import db
+from dlab import toelis, plotutils
 from spikes import stat
 from scipy.ndimage import gaussian_filter1d
-import os
 
 
 def plotresps(basename, motifname, motif_db,
               dir='.', motif_pos=None, padding=(-100, 200),
-              featmap=0):
+              featmap=0, plottitle=None, maxreps=None):
     """
     Aggregates responses by motif; plots the motif, the feature labels,
-    and the responses.
+    and the responses. If timeshifted features are included in the data,
+    plots a separate figure for these. Returns handles to the figure(s)
     """
+
+    tls = stat.aggregate(motif_db, motifname, basename, dir, motif_pos)
+    ptitle = plottitle if plottitle!=None else "%s - %s" % (basename, motifname)
+    shifted = [x for x in tls.keys() if x.find('t')!=-1]
+    
+    if len(shifted)>1:
+        tls_shifted = dict([(x,tls.pop(x)) for x in shifted])
+        return [_plotresps(tls, motifname, motif_db, padding, featmap, ptitle, maxreps),
+                _plotresps(tls_shifted, motifname, motif_db, padding, featmap, ptitle, maxreps)]
+    else:
+        return [_plotresps(tls, motifname, motif_db, padding, featmap, ptitle, maxreps)]
+        
+                      
+
+
+@plotutils.drawoffscreen
+def _plotresps(tls, motifname, motif_db, padding, featmap, plottitle, maxreps):
     from pylab import figure, title, getp, setp, axis, \
-         ion, ioff, isinteractive, ylabel, xlabel, show
-
-    m = motif_db
-    tls = stat.aggregate(m, motifname, basename, dir, motif_pos)
-
-    nplots = len(tls) + 1
-
-    retio = isinteractive()
-    if retio: ioff()
+         ylabel, xlabel
     
     axprops = dict()
     yprops = dict(rotation=0,
@@ -58,18 +67,18 @@ def plotresps(basename, motifname, motif_db,
     ax = []
 
     # plot the motif
+    nplots = len(tls) + 1
     if len(tls) > 5:
         axpos = (0.1, 0.7, 0.8, 0.2)
     else:
         axpos = (0.1, 0.1 + 0.8 / nplots, 0.8, 0.8 / nplots)
     ax.append(fig.add_axes(axpos, **axprops))
-    m.plot_motif(motifname, featmap)
+    motif_db.plot_motif(motifname, featmap)
 
-    title("%s - %s" % (basename, motifname))
+    title(plottitle)
     # pad out the display
     xlim = getp(ax[0], 'xlim')
     setp(ax[0], 'xlim', (xlim[0] + padding[0], xlim[1] + padding[1]))
-         
     extent = axis()
     yy = axpos[1]
     ystep = (yy - 0.1) / (nplots - 1)
@@ -80,8 +89,9 @@ def plotresps(basename, motifname, motif_db,
     for motif in motifs:
         yy -= ystep
         ax.append(fig.add_axes((0.1, yy, 0.8, ystep), **axprops))
-        if tls[motif].nevents > 0: 
-            plotutils.plot_raster(tls[motif])
+        if tls[motif].nevents > 0:
+            nreps = min(tls[motif].nrepeats, maxreps) if maxreps != None else tls[motif].nrepeats
+            plotutils.plot_raster(tls[motif][:nreps], mec='k')
         ylabel(motif, **yprops)
 
         setp(ax[-2].get_xticklabels(), visible=False)
@@ -89,9 +99,8 @@ def plotresps(basename, motifname, motif_db,
         setp(ax[-1], xlim=(extent[0:2]))
         
     xlabel('Time (ms)')
-    show()
-    
-    if retio:  ion()
+    return fig
+
 
 def plotoverlay(basename, motifname, motif_db, dir='.',
                 motif_pos=None, padding=(-200, 300), bandwidth=5):
@@ -127,15 +136,15 @@ def plotoverlay(basename, motifname, motif_db, dir='.',
     title("%s - %s" % (basename, motifname))                
     show()
 
+@plotutils.drawoffscreen
 def plotselectivity(basename, motif_db, dir='.',
                     motif_pos=None, padding=(-200,300),
-                    rasters=True, bandwidth=5):
+                    rasters=True, bandwidth=5, plottitle=None, maxreps=None):
     """
     Estimates firing rate for all the motifs.
     """
     from pylab import figure, ylabel, xlabel, getp, twinx, \
-         setp, plot, title, show, isinteractive, ioff, ion, draw, \
-         subplot, axes
+         setp, plot, title, subplot, axes
     
     m = motif_db
     motifs = m.get_motifs()
@@ -157,8 +166,6 @@ def plotselectivity(basename, motif_db, dir='.',
     # makes the columns plot first
     pnums = (nx.arange(ny*3)+1).reshape(ny,3).T.ravel()
     
-    retio = isinteractive()
-    if retio: ioff()
     ax = []
     f = figure()
 
@@ -174,7 +181,8 @@ def plotselectivity(basename, motif_db, dir='.',
         if tl.nevents==0:
             continue
         if rasters:
-            plotutils.plot_raster(tl,mec='k',markersize=3)
+            nreps = min(tl.nrepeats, maxreps) if maxreps != None else tl.nrepeats
+            plotutils.plot_raster(tl[:nreps],mec='k',markersize=3)
             plot([0,0],[0,tl.nrepeats],'b',[mdur,mdur],[0,tl.nrepeats],'b', hold=True)
         else:
             b,v = tl.histogram(binsize=1.,normalize=1)
@@ -184,7 +192,9 @@ def plotselectivity(basename, motif_db, dir='.',
             plot(b,smooth_v,'b', hold=True)
 
         if pnums[plotnum]==2:
-            title(basename)
+            title(basename if plottitle==None else plottitle)
+        if pnums[plotnum] in range(nplots-2):
+            setp(a.get_xticklabels(), visible=False)
         setp(a.get_yticklabels(), visible=False)
         ylabel(motif.tostring())
         plotnum += 1
@@ -203,8 +213,8 @@ def plotselectivity(basename, motif_db, dir='.',
     setp(a.get_yticklabels(), visible=True)
     a.get_yaxis().tick_right()
     f.subplots_adjust(hspace=0.)
-    if retio: ion()
-    show()
+    return f
+
 
 def plotrs(basename, motif_db, dir='.', **kwargs):
     """
@@ -231,13 +241,13 @@ def plotrs(basename, motif_db, dir='.', **kwargs):
     xlabel("Motif Name")
     ylabel("Response Strength")
     gca().get_xaxis().tick_bottom()
-    show()
         
 
 
 if __name__=="__main__":
 
-    import sys, getopt
+    import sys, getopt, os
+    from pylab import show
 
     if len(sys.argv) < 2:
         print __doc__
@@ -267,6 +277,8 @@ if __name__=="__main__":
         dir = '.'
     if len(args)==2:
         plotresps(basename, args[1], m, motif_pos=motif_pos, dir=dir)
+        show()
     else:
         plotselectivity(basename, m, motif_pos=motif_pos, dir=dir)
+        show()
     del(m)
