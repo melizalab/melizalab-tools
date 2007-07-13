@@ -66,7 +66,7 @@ class explog(object):
         <abstime> - the time offset of the entry
         """
         table = self.elog.root.entries
-        rnums = table.getWhereList(table.cols.abstime==int(abstime))
+        rnums = table.getWhereList('abstime==%d' % abstime)
         return table.readCoordinates(rnums)
 
     def getfiles(self, abstime):
@@ -74,7 +74,7 @@ class explog(object):
         Returns the file/entry pairs associated with a particular episode.
         """
         table = self.elog.root.files
-        rnums = table.getWhereList(table.cols.abstime==int(abstime))
+        rnums = table.getWhereList('abstime==%d' % abstime)
         return table.readCoordinates(rnums)
        
     def getentrytimes(self, entry=None):
@@ -96,7 +96,7 @@ class explog(object):
         Returns the stimulus or stimuli played in a particular episode
         """
         table = self.elog.root.stimuli
-        rnum = table.getWhereList(table.cols.entrytime==int(abstime))
+        rnum = table.getWhereList('entrytime==%d' % abstime)
         return table.readCoordinates(rnum)
 
     @property
@@ -129,22 +129,22 @@ class Entries(t.IsDescription):
     """
     Table for entries (episodes)
     """
-    abstime  = t.UInt64Col(pos=0)
+    abstime  = t.UInt32Col(pos=0)
     pen      = t.UInt16Col(pos=1)
     site     = t.UInt16Col(pos=2)
     duration = t.UInt32Col(pos=3)
     valid    = t.BoolCol(pos=4)
 
 class Stimuli(t.IsDescription):
-    abstime  = t.UInt64Col(pos=0)
+    abstime  = t.UInt32Col(pos=0)
     name     = t.StringCol(128, pos=1)
-    entrytime= t.UInt64Col(pos=2)
+    entrytime= t.UInt32Col(pos=2)
 
 class Files(t.IsDescription):
     """
     This table is used to look up the files associated with an entry
     """
-    abstime  = t.UInt64Col(pos=0)
+    abstime  = t.UInt32Col(pos=0)
     channel  = t.UInt16Col(pos=1)
     filebase = t.StringCol(128,pos=2)
     entry    = t.UInt16Col(pos=3)
@@ -370,7 +370,7 @@ def assignstimuli(h5, cull_unrecorded=True):
     
     if cull_unrecorded:
         # easiest just to copy the valid rows to a new table
-        valid = stimuli.getWhereList(stimuli.cols.entrytime!=0)
+        valid = stimuli.getWhereList('entrytime!=0')
         if len(valid)==0:
             print "Warning: no stimuli match the current site, keeping old list"
         else:        
