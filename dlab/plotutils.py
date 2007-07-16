@@ -14,7 +14,7 @@ import functools
 
 def drawoffscreen(f):
     from pylab import isinteractive, ion, ioff, draw
-    @funcutils.wraps(f)
+    @functools.wraps(f)
     def wrapper(*args, **kwargs):
         retio = isinteractive()
         ioff()
