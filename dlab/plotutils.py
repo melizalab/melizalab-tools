@@ -10,7 +10,7 @@ from datautils import *
 import numpy as nx
 import matplotlib
 import tempfile, shutil, os
-import funcutils
+import functools
 
 def drawoffscreen(f):
     from pylab import isinteractive, ion, ioff, draw
