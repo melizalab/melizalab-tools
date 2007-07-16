@@ -10,11 +10,11 @@ from datautils import *
 import numpy as nx
 import matplotlib
 import tempfile, shutil, os
-
+import funcutils
 
 def drawoffscreen(f):
-    """Function wrapper to draw offscreen and then restore interactive mode"""
     from pylab import isinteractive, ion, ioff, draw
+    @funcutils.wraps(f)
     def wrapper(*args, **kwargs):
         retio = isinteractive()
         ioff()
