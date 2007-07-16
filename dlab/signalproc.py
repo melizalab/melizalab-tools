@@ -434,6 +434,22 @@ def sincresample(S, npoints, shift=0):
 
     return y[npoints:npoints*2,:]
 
+def fftresample(S, npoints, axis=0):
+    """
+    Resample a signal using discrete fourier transform. The signal
+    is transformed in the fourier domain and then padded or truncated
+    to the correct sampling frequency.  This should be equivalent to
+    a sinc resampling.
+    """
+    from scipy.fftpack import rfft, irfft
+
+    # this may be considerably faster if we do the memory operations in C
+    newshape = list(S.shape)
+    newshape[axis] = int(npoints)
+    Sf = rfft(S, axis=axis)
+    #Sf.resize(newshape)
+    return (1. * npoints / S.shape[axis]) * irfft(Sf, npoints, axis=axis, overwrite_x=1)
+
 def fband(S, **kwargs):
     """
     Fband computes a spectrographic representation of the
