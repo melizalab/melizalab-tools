@@ -6,14 +6,21 @@ makestim.py [-d <motifdb>] [-m <num>] <stimdir> <macrodir> <motif1> [<motif2>...
 Generates several stimulus sets for use in exploring a cell's response
 to a motif.  These are: 
 
-<motif>feat : comprises the features of the motif in isolation, and
-              the residues. The residues consist of the original motif
-              minus one of the features. The set also includes the
-              synethetic motif (i.e. constructed from all the features)
+<motif>_feat : comprises the features of the motif in isolation, and
+               the residues. The residues consist of the original motif
+               minus one of the features. The set also includes the
+               synethetic motif (i.e. constructed from all the features)
 
-<motif>shift: In this set, all stimuli are based on the synthetic motif.
-              Each stimulus has one of the features shifted in time to
-              two other positions, +/- 100 ms.
+<motif>_shift: In this set, all stimuli are based on the synthetic motif.
+               Each stimulus has one of the features shifted in time to
+               two other positions, +/- 100 ms.
+
+<motif>_ampl:  Each feature is removed from the full motif, increased or
+               decreased in amplitude, and then reinserted.
+
+<motif>_gap:   For each feature, an alternative reconstruction is generated
+               in which all the features after a certain point are shifted
+               forward by 15 ms.
               
 Generates the pcm files and macro (.s) files for use in saber. Uses
 rsync to copy the files to some (potentially) remote directory.
@@ -23,7 +30,7 @@ rsync to copy the files to some (potentially) remote directory.
 import scipy as nx
 from motifdb import db, combiner
 from dlab import pcmio
-import tempfile, os, shutil
+import tempfile, os, shutil, pdb
 
 _prerec = 1000
 _postrec = 1000
@@ -40,10 +47,10 @@ def makefeatureset(parser, motif, fmap, tdir):
     features = db.get_features(motif, fmap)
     
     macro_file = open(os.path.join(tdir, "%s_feat.s" % motif), 'w')
-    macro_file.write("stim -rtrig %0.0f -dur %0.0f -prewait %0.0f -random -reps 10 %s" %
+    macro_file.write("stim -rtrig %0.0f -dur %0.0f -prewait %0.0f -random -reps 10 %s %s %s" %
                      (motif_len + _prerec + _postrec,
                      motif_len + _prerec + _postrec + _gap,
-                     _prerec, motif + _fext))
+                     _prerec, motif + _fext, motif + "_mn" + _fext, motif + "_ps" + _fext))
     
     # generate feature set
     recon_name = "%s_%d" % (motif, fmap)
@@ -66,7 +73,6 @@ def makefeatureset(parser, motif, fmap, tdir):
     macro_file.close()
     print "Generated feature breakdown set for %s" % motif
     
-
 
 def makeshiftset(parser, motif, fmap, tdir, noffsets=2):
 
@@ -101,6 +107,41 @@ def makeshiftset(parser, motif, fmap, tdir, noffsets=2):
     macro_file.close()
     print "Generated feature shiftset for %s" % motif
 
+def makegapset(parser, motif, fmap, tdir, gap=15):
+    db = parser.db
+    motif_len    = db.get(motif)['length']
+    Fs           = db.get(motif)['Fs']
+    features = db.get_features(motif, fmap)
+    macro_file = open(os.path.join(tdir, "%s_gap.s" % motif), 'w')
+    macro_file.write("stim -rtrig %0.0f -dur %0.0f -prewait %0.0f -random -reps 10 %s" %
+                     (motif_len + _prerec + _postrec,
+                     motif_len + _prerec + _postrec + _gap  + gap,
+                     _prerec,
+                      os.path.join(motif, motif + "_0" + _fext)))
+
+    features.sort(order='id')
+    for fnum in range(0,len(features)-1):
+        # the canonical descriptors can be quite long so I'm just going to
+        # skip using the parser
+        fs = features.copy()
+        shiftind = range(fnum+1, len(features))
+        #pdb.set_trace()
+        #print fs['offset']
+        for ffnum in shiftind:
+            fs[ffnum]['offset'][0] += gap
+        #print fs['offset']    
+        #fs[shiftind]['offset'][:,0] += gap
+        fs = combiner.featureset(fs, motif_len + gap, Fs)
+
+        new_motif_sym = "%s_%d(%dg%d)" % (motif, fmap, fnum, gap)
+        new_motif = db.reconstruct(fs)
+        pcmio.sndfile(os.path.join(tdir, new_motif_sym + _fext),'w').write(new_motif)
+        macro_file.write(" %s" % os.path.join(motif, new_motif_sym + _fext))
+
+    macro_file.close()
+    print "Generated feature gapset for %s" % motif
+
+
 def makeamplset(parser, motif, fmap, tdir):
 
     db = parser.db
@@ -127,7 +168,7 @@ def makeamplset(parser, motif, fmap, tdir):
 
     macro_file.close()
     print "Generated feature contrast set for %s" % motif
-    
+
 
 if __name__=="__main__":
     
@@ -171,6 +212,7 @@ if __name__=="__main__":
     
         makefeatureset(parser, motif, featmap_num, tdir)
         makeshiftset(parser, motif, featmap_num, tdir)
+        makegapset(parser, motif, featmap_num, tdir)
         makeamplset(parser, motif, featmap_num, tdir)
 
         stimdir = os.path.join(args[0], motif)
