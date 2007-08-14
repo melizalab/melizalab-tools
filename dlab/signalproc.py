@@ -417,7 +417,7 @@ def sincresample(S, npoints, shift=0):
     """
     
     x = nx.atleast_2d(S)
-    x = nx.concatenate([nx.fliplr(x), x, nx.fliplr(x)], axis=0)
+    x = nx.concatenate([nx.flipud(x), x, nx.flipud(x)], axis=0)
     np = npoints*3
     nt = x.shape[0]
     t  = nx.arange(nt)
@@ -442,7 +442,7 @@ def sincresample(S, npoints, shift=0):
 
     return y[npoints:npoints*2,:]
 
-def fftresample(S, npoints, axis=0):
+def fftresample(S, npoints, reflect=False, axis=0):
     """
     Resample a signal using discrete fourier transform. The signal
     is transformed in the fourier domain and then padded or truncated
@@ -450,13 +450,25 @@ def fftresample(S, npoints, axis=0):
     a sinc resampling.
     """
     from scipy.fftpack import rfft, irfft
+    from dlab.datautils import flipaxis
 
     # this may be considerably faster if we do the memory operations in C
+    # reflect at the boundaries
+    if reflect:
+        S = nx.concatenate([flipaxis(S,axis), S, flipaxis(S,axis)],
+                           axis=axis)
+        npoints *= 3
+
     newshape = list(S.shape)
     newshape[axis] = int(npoints)
+
     Sf = rfft(S, axis=axis)
-    #Sf.resize(newshape)
-    return (1. * npoints / S.shape[axis]) * irfft(Sf, npoints, axis=axis, overwrite_x=1)
+    Sr = (1. * npoints / S.shape[axis]) * irfft(Sf, npoints, axis=axis, overwrite_x=1)
+    if reflect:
+        return nx.split(Sr,3)[1]
+    else:
+        return Sr
+
 
 def fband(S, **kwargs):
     """
@@ -630,6 +642,31 @@ def threshold(signal, thresh):
     sig -= thresh
     sig[sig<0.] = 0.
     return sig
+
+def signalstats(S):
+    """  Compute dc offset and rms from a signal  """
+    # we want to compute these stats simultaneously
+    # it's 200x faster than .mean() and .var()!
+
+    assert S.ndim == 1, "signalstats() can only handle 1D arrays"
+    out = nx.zeros((2,))
+    code = """
+         #line 618 "signalproc.py"
+         double e = 0;
+         double e2 = 0;
+         double v;
+         int nsamp = NS[0];
+         for (int i = 0; i < nsamp; i++) {
+              v = (double)S[i];
+              e += v;
+              e2 += v * v;
+         }
+         out[0] = e / nsamp;
+         out[1] = sqrt(e2 / nsamp - out[0] * out[0]);
+
+         """
+    weave.inline(code, ['S','out'])
+    return out
 
 if __name__=="__main__":
 
