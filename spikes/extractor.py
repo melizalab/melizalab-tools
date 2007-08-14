@@ -9,7 +9,6 @@ import scipy as nx
 from dlab import _pcmseqio, linalg
 from scipy import weave, io
 from scipy.linalg import svd, get_blas_funcs
-from dlab.signalproc import sincresample
 
 _dtype = nx.int16
 
@@ -88,11 +87,13 @@ def extract_spikes(S, events, **kwargs):
     Extracts spike waveforms from raw signal data. For each
     offset in <events>, a window of samples around the event
     time is extracted.  Returns a 3D array, (sample, event, channel)
+
+    Optional arguments:
+    <dc> - subtract off this value from spike waveforms (i.e. to correct for DC offset)
     """
 
     window = kwargs.get('window',30)
     nsamples, nchans = S.shape
-    #events = [e for e in events if e > window and e + window < nsamples]
     nevents = len(events)
     spikes = nx.zeros((nevents, 2*window, nchans), _dtype)
 
@@ -100,6 +101,8 @@ def extract_spikes(S, events, **kwargs):
         toe = events[i]
         spikes[i,:,:] = S[toe-window:toe+window,:]
 
+##     if kwargs.has_key('dc'):
+##         spikes -= kwargs['dc']
     return spikes
 
 def get_pcs(spikes, **kwargs):
@@ -113,6 +116,7 @@ def get_pcs(spikes, **kwargs):
                    (default all of them)
     ndims - the number of dimensions to compute projections along
             (default 3)
+
     """
 
     ndims = kwargs.get('ndims',3)
@@ -138,6 +142,8 @@ def get_projections(spikes, features, **kwargs):
     """
     Calculates the projections of the spikes onto the features
     Returns a 3D array, (events, dims, chans)
+
+    peaktrough - if true, include peak and trough calculations as features
     """
     nsamp,ndims,nchans = features.shape
     nevents,nsamp1,nchans1 = spikes.shape
@@ -145,9 +151,21 @@ def get_projections(spikes, features, **kwargs):
     assert nsamp==nsamp1
     assert nchans==nchans1
 
-    proj = nx.zeros((nevents,nchans,ndims),'d')
+    if kwargs.get('peaktrough',True):
+        nfeats = ndims + 3
+    else:
+        nfeats = ndims
+        
+    proj = nx.zeros((nevents,nchans,nfeats),'d')
     for i in range(nchans):
-        proj[:,i,:] = linalg.gemm(spikes[:,:,i], features[:,:,i])
+        proj[:,i,:ndims] = linalg.gemm(spikes[:,:,i], features[:,:,i])
+
+    if kwargs.get('peaktrough',True):
+        # spikes should be aligned
+        peak_ind = spikes[0,:,0].argmax()
+        proj[:,:,ndims+0] = spikes[:,:,:].max(1)
+        proj[:,:,ndims+1] = spikes[:,0:peak_ind,:].min(1)
+        proj[:,:,ndims+2] = spikes[:,peak_ind:,:].min(1)
 
     return proj
 
@@ -233,14 +251,14 @@ def realign(spikes, **kwargs):
     downsamp    = if true, the data are downsampled back to the original
                   sampling rate after peak realignment
     """
+    from dlab.signalproc import fftresample
+    
     ax = kwargs.get('axis',1)
     resamp_rate = kwargs.get('resamp_rate',3)
     max_shift = kwargs.get('max_shift',4) * resamp_rate
 
     np = spikes.shape[1] * resamp_rate
-    upsamp = nx.zeros((spikes.shape[0], np, spikes.shape[2]))
-    for c in range(spikes.shape[2]):
-        upsamp[:,:,c] = sincresample(spikes[:,:,c].transpose(), np).transpose()
+    upsamp = fftresample(spikes,np,axis=1)
 
     # now find peaks
     if upsamp.ndim>2:
@@ -273,9 +291,7 @@ def realign(spikes, **kwargs):
 
     if kwargs.get('downsamp',False):
         npoints = (stop - start) / resamp_rate
-        dnsamp = nx.zeros((shifted.shape[0], npoints, shifted.shape[2]))
-        for c in range(shifted.shape[2]):
-            dnsamp[:,:,c] = sincresample(shifted[:,:,c].transpose(), npoints).transpose()
+        dnsamp = fftresample(shifted, npoints, axis=1)
         return dnsamp.astype(spikes.dtype),goodpeaks
     else:
         return shifted.astype(spikes.dtype),goodpeaks
@@ -334,11 +350,11 @@ def combine_channels(fp, entry):
 
 if __name__=="__main__":
 
-    basedir = '/giga1/users/dmeliza/acute_data/site_1_1/'
-    pattern = "st229_%d_20070119a.pcm_seq2"
+    basedir = '/giga1/users/dmeliza/acute_data/20070602/site_8_1/'
+    pattern = "st317_%d_20070602a.pcm_seq2"
     
     #pcmfiles = [basedir + pattern % d for d in range(1,17)]
-    pcmfiles = [basedir + pattern % d for d in range(5,6)]
+    pcmfiles = [basedir + pattern % d for d in range(5,8)]
 
     # open files
     print "---> Open test files"

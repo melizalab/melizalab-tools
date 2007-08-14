@@ -26,10 +26,10 @@ with the program mspikes.py
    generates big clusters of noise that can dramatically increase the
    RMS of the signal.  Calculate the RMS of each entry and plot it
    as a time series.  The bad episodes should pop out, even if the amount
-   of cellular activity varies greatly.  Label the episodes in the explog
-   file as bad.
+   of cellular activity varies greatly.  Use the -t or --start/--stop flags
+   in subsequent commands to exclude bad episodes.
+   
    mspikes.py --stats -p <pen> -s <site> <explog.h5>
-   mspikes.py --cull -p <pen> -s <site> -t <max_rms> <explog.h5>
 
 3. Extract spike times and waveforms. This is done with a threshold discriminator.
    It usually makes sense to set the threshold in terms of RMS units above

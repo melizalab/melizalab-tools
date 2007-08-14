@@ -5,49 +5,50 @@ mspikes - extracts spikes from raw pcm_seq2 data
 
 mspikes --sort [-l] [-o <outfile>] <explog>
 
-         parses <explog> to an .h5 file and moves pcm_seq2
-         files to directories for each pen/site
-         [-l] - leave files in the current directory
-         [-o <outfile>] - specify an alternative outfile
+         parses <explog> to an .h5 file and moves pcm_seq2 files to
+         directories for each pen/site [-l] - leave files in the
+         current directory [-o <outfile>] - specify an alternative
+         outfile
 
 Once the files are sorted and the explog parsed, use the .h5 file
 instead of the raw .explog file
 
 mspikes --stats -p <pen> -s <site>  <explog.h5>
 
-        plots statistics for each entry. With no options, plots the RMS power
-        of the signal.  For multi-channel acquisitions, plots the mean across all channels.
-
-mspikes --cull -p <pen> -s <site> [-t <max_rms>] [-e <max_entry>] <explog.h5>:
-
-        mark unusable episodes in the explog.h5 file. Specify a maximum
-        RMS power; all episodes with more than that value are marked as bad
-        in the explog.h5 file
+        plots statistics for each entry. With no options, plots the
+        RMS power of the signal.  For multi-channel acquisitions,
+        plots the mean across all channels.
 
 mspikes --inspect -p <pen> -s <site> [--chan=""] [-u [--unit=""]] <explog.h5>
 
         view the raw waveform of the signal, plotted in units relative
-        to the RMS power of the signal. Useful in determining what threshold
-        value(s) to set in extraction. Restrict the set of channels plotted
-        (default all) with --chan.  If spike times have already been
-        extracted, and the --unit(s) argument is given, plots the unit
-        events as dots overlaid on the waveforms.
+        to the RMS power of the signal. Useful in determining what
+        threshold value(s) to set in extraction. Restrict the set of
+        channels plotted (default all) with --chan.  If spike times
+        have already been extracted, and the --unit(s) argument is
+        given, plots the unit events as dots overlaid on the
+        waveforms.
 
 mspikes --extract -p <pen> -s <site> [--chan=""] [-i] [-r <rms_thresh> | -a <abs_thresh>]
-         [-f 3] [-w 20] [--kkwik] <explog.h5>
+         [-t <max_rms>] [-f 3] [-w 20] [--kkwik] <explog.h5>
 
-        Extract spikes from raw waveforms and output in a format usable
-        by klusters and klustakwik. If multiple channels
-        were recorded, these can be specified and grouped using the --chan flag.
-        For example, --chan='1,5,7' will extract spikes from channels 1,5, and 7.
-        If recording from tetrodes, grouping can be done with parentheses: e.g.
-        --chan='(1,2,3,4),(5,6,7,8)' Set dynamic or absolute thresholds with the
-        -r and -a flags. Either one value for all channels, or a quoted, comma
+        Extract spikes from raw waveforms and output in a format
+        usable by klusters and klustakwik. If multiple channels were
+        recorded, these can be specified and grouped using the --chan
+        flag.  For example, --chan='1,5,7' will extract spikes from
+        channels 1,5, and 7.  If recording from tetrodes, grouping can
+        be done with parentheses: e.g.  --chan='(1,2,3,4),(5,6,7,8)'
+        Set dynamic or absolute thresholds with the -r and -a
+        flags. Either one value for all channels, or a quoted, comma
         delimited list, like '6.5,6.5,5'
 
-        The -f flag controls how many principal components and their projections
-        to calculate (default 3 per channel). The -w flag controls the number of
-        points on either side of the spike to keep.
+        -t limits analysis to episodes where the total rms is less
+         than <max_rms>
+
+        The -f flag controls how many principal components and their
+        projections to calculate (default 3 per channel). The -w flag
+        controls the number of points on either side of the spike to
+        keep.
 
         -i inverts the signal prior to spike detection
 
@@ -86,7 +87,7 @@ if __name__=="__main__":
 
 
     opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:e:w:ihlu",
-                               ["sort","stats","cull","inspect","extract",
+                               ["sort","stats","inspect","extract",
                                 "chan=","unit=","help","kkwik"])
 
     opts = dict(opts)
@@ -96,58 +97,44 @@ if __name__=="__main__":
 ###
 # wait to load the heavyweight modules
 from spikes import klusters, extractor
-from dlab import explog
+from dlab.datautils import filecache
+from dlab.signalproc import signalstats
+from dlab import explog, _pcmseqio
 import scipy as nx
 import pylab as P
 
+# cache handles to files
+_fcache = filecache()
+_fcache.handler = _pcmseqio.pcmfile
 
-def plotall(t,S,ax=None,lbl=None):
-    nplots = S.shape[1]
+def plotentry(k, entry, channels=None, units=False, ax=None):
+    atime = k.getentrytimes(entry)
+    stim = k.getstimulus(atime)['name']
+    files = k.getfiles(atime)
+    files.sort(order='channel')
+    pfp = []
+    for f in files:
+        fp = _fcache[f['filebase'].tostring()]
+        fp.seek(f['entry'])        
+        pfp.append(fp)
+    if channels==None:
+        channels = files['channel'].tolist()
+
+    P.ioff()
+    nplots = len(channels)
+    # clear the figure and create subplots if needed
     if ax==None or len(ax) != nplots:
         P.clf()
         ax = []
         for i in range(nplots):
             ax.append(P.subplot(nplots,1,i+1))
-    
+
     for i in range(nplots):
-        ax[i].plot(t,S[:,i],'k')
-        if lbl!=None:
-            ax[i].set_ylabel("%d" % lbl[i])
-        
-    return ax
-
-def plotentry(k, entry, channels=None, units=False, ax=None):
-    s = k.getdata(entry, channels=channels)
-    m = k.getstats(entry,statname='mu')
-    r = k.getstats(entry)
-    atime = k.getentrytimes(entry)
-    stim = k.getstimulus(atime)
-    if len(stim): stim = stim['name']
-
-    if channels!=None:
-        r = r[channels]
-        m = m[channels]
-    else:
-        channels = range(s.shape[0])
-        
-    sc = (s - m) / r
-    t = nx.linspace(0,sc.shape[0]/k.samplerate,sc.shape[0])
-    P.ioff()
-    # plot the pcm data
-    ax = plotall(t,sc,ax,lbl=channels)
-
-    # plot the units on all the axes
-    if units!=False:
-        events = k.getevents(entry)
-        if units!=None:
-            events = events[units]
-        if events!=None:
-            for i in range(len(ax)):
-                P.axes(ax[i])
-                P.hold(1)
-                for e in events:
-                    ax[i].plot(t[e],sc[e,i],'o')
-                P.hold(0) 
+        s = pfp[i].read()
+        t = nx.linspace(0,s.shape[0]/k.samplerate,s.shape[0])        
+        mu,rms = signalstats(s)
+        ax[i].plot(t,(s - mu)/rms,'k')
+        ax[i].set_ylabel("%d" % channels[i])
 
     # fiddle with the plots a little to make them pretty
     for i in range(len(ax)-1):
@@ -180,7 +167,7 @@ if __name__=="__main__":
             os.remove(outfile)
         k = explog.readexplog(infile, outfile, options['sort_raw'])
         print "Parsed explog: %d episodes, %d stimuli, and %d channels" % \
-              (k.nentries, len(k.elog.root.stimuli), k.nchannels)
+              (k.totentries, k.totstimuli, k.nchannels)
         
 
     else:
@@ -202,66 +189,39 @@ if __name__=="__main__":
             sys.exit(-1)
 
         # open the kluster.site object
-        k = klusters.site(infile,pen,site)
+        #k = klusters.site(infile,pen,site)
+        k = explog.explog(infile)
+        k.site = (pen,site)
         
         # now check for the other modes
         if opts.has_key('--stats'):
             # stats mode computes statistics for the site
-            rms = k.getstats(statname='rms')
+            m,rms,t = klusters.sitestats(k)
             if rms.ndim > 1:
-                rms = rms.mean(0)
+                rms = rms.mean(1)
             # plot them
             P.plot(rms,'o')
             P.xlabel('Entry')
             P.ylabel('RMS')
             P.show()
-            
-        elif opts.has_key('--cull'):
-            keep = nx.ones(k.nentries, dtype='b1')
-            if opts.has_key('-e'):
-                keep = nx.arange(k.nentries)<= int(opts['-e'])
-            if opts.has_key('-t'):
-                
-                thresh = float(opts['-t'])
-                if thresh < 0:
-                    print "Error: must supply a positive maximum rms power for threshhold"
-                    sys.exit(-1)
-                    
-                rms = k.getstats(statname='rms', onlyvalid=False)
-                if rms.ndim > 1:
-                    rms = rms.mean(0)
-                keep = keep & (rms<thresh)
-                
-            k.setvalid(keep)
-            print "Marked %d entries as invalid: %s" % (keep.size - keep.sum(),
-                                                        (keep==False).nonzero()[0])
 
         elif opts.has_key('--inspect'):
             # this is faster in aplot, but the results are scaled by rms here
-            P.ioff()
             if opts.has_key('--chan'):
                 exec "chans = [%s]" % opts['--chan']
             else:
                 chans = None
-                
-            if opts.has_key('-u'):
-                if opts.has_key('--unit'):
-                    exec "units = [%s]" % opts['--unit']
-                else:
-                    units = None
-            else:
-                units = False
 
             def keypress(event):
                 if event.key in ('+', '='):
                     keypress.currententry += 1
-                    plotentry(k, keypress.currententry, channels=chans, units=units, ax=ax)
+                    plotentry(k, keypress.currententry, channels=chans, ax=ax)
                 elif event.key in ('-', '_'):
                     keypress.currententry -= 1
-                    plotentry(k, keypress.currententry, channels=chans, units=units, ax=ax)
+                    plotentry(k, keypress.currententry, channels=chans, ax=ax)
                 
             keypress.currententry = int(opts.get('-e','0'))
-            ax = plotentry(k, keypress.currententry, channels=chans, units=units)
+            ax = plotentry(k, keypress.currententry, channels=chans)
             P.gcf().subplots_adjust(hspace=0.)
             P.connect('key_press_event',keypress)
             P.show()
@@ -275,6 +235,8 @@ if __name__=="__main__":
                 elif o == '-a':
                     exec "thresh = [%s]" % a            
                     options['abs_thresh'] = thresh
+                elif o == '-t':
+                    options['max_rms'] = float(a)
                 elif o == '-f':
                     options['nfeats'] = int(a)
                 elif o == '-w':
@@ -293,7 +255,8 @@ if __name__=="__main__":
                 options['abs_thresh'] *= len(options['channels'])
 
             changroups = options.pop('channels')
-            k.extractgroups('site_%d_%d' % k.site, changroups, **options)
+            klusters.extractgroups(k, 'site_%d_%d' % k.site, changroups, **options)
+            #k.extractgroups('site_%d_%d' % k.site, changroups, **options)
             
 
     # cleanup removes an annoying message
