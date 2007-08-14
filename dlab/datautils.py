@@ -208,3 +208,17 @@ class filecache(dict):
 
     def __setitem__(self, key, value):
         raise NotImplementedError, "Use getter methods to add items to the cache"    
+
+def flipaxis(data, axis):
+    """
+    Like fliplr and flipud but applies to any axis
+    """
+
+    assert axis < data.ndim
+    slices = []
+    for i in range(data.ndim):
+        if i == axis:
+            slices.append(slice(None,None,-1))
+        else:
+            slices.append(slice(None))
+    return data[slices]
