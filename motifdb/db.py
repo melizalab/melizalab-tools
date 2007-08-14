@@ -89,8 +89,8 @@ class motifdb(object):
         self.h5 = openFile(filename, mode='w', title='motif database')
 
         g = self.h5.createGroup('/', 'entities', 'Tables describing entities')
-        self.__maketable(g, 'motifs', schema.Motif.descr)
-        self.__maketable(g, 'features', schema.Feature.descr)
+        self.h5.createTable(g, 'motifs', schema.Motif.descr)
+        self.h5.createTable(g, 'features', schema.Feature.descr)
 
         g = self.h5.createGroup('/', 'motifmaps', 'Tables describing motif maps')
         g = self.h5.createGroup('/', 'featmaps', 'Tables describing feature maps')
@@ -100,13 +100,8 @@ class motifdb(object):
         g = self.h5.createGroup('/', 'feat_data', 'Arrays holding feature pcm data',
                                 filters=self._h5filt)
 
-    def __maketable(self, base, name, descr):
-        t = self.h5.createTable(base, name, descr)
-        t.flavor = 'numpy'
-        return t
-
     def __makestimset(self, stimset):
-        return self.__maketable(self.h5.root.motifmaps, stimset, schema.Motifmap.descr)
+        return self.h5.createTable(self.h5.root.motifmaps, stimset, schema.Motifmap.descr)
         
     def __getstimset(self):
         """
@@ -192,14 +187,14 @@ class motifdb(object):
         try:
             table = self.h5.getNode("/featmaps/%s" % motifname)
         except NoSuchNodeError:
-            table = self.__maketable('/featmaps', motifname, schema.Featmap.descr)
+            table = self.h5.createTable('/featmaps', motifname, schema.Featmap.descr)
 
         index = table.nrows
 
         # now store the data, in case something goes wrong
         mapname = self._mapname % (motifname, index)
-        ca = self.h5.createCArray('/featmap_data', mapname, featmap_data.shape,
-                                  Int16Atom(shape = featmap_data.shape, flavor='numpy'))
+        ca = self.h5.createCArray('/featmap_data', mapname, shape=featmap_data.shape,
+                                  atom=Int16Atom())
         ca[::] = featmap_data
         ca.flush()
 
@@ -232,8 +227,8 @@ class motifdb(object):
         # import the data; this should be pcm data sampled at the base motif's
         # sampling rate, 16 bit signed integers
         featname = self._featname % (motifname, featmap, feature['id'])
-        ca = self.h5.createCArray('/feat_data', featname, (len(feat_data),),
-                                  FloatAtom(shape = (len(feat_data),), flavor='numpy'))
+        ca = self.h5.createCArray('/feat_data', featname, shape=(len(feat_data),),
+                                  atom=FloatAtom())
         ca[::] = feat_data
         ca.flush()
 
@@ -523,5 +518,8 @@ def getunique(table, key, value):
     record. This is a common enough operation that this wrapper
     should save some labor.
     """
-    rnum = table.getWhereList('%s == "%s"' % (key, value))
+    if isinstance(value,str):
+        rnum = table.getWhereList('%s == "%s"' % (key, value))
+    else:
+        rnum = table.getWhereList('%s == %s' % (key, value))
     return table[rnum[0]]

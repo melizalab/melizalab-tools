@@ -10,7 +10,7 @@ CDM, 1/2007
 import re
 import scipy as nx
 from dlab import datautils, pcmio
-from numpy import recarray, record, arange
+from numpy import recarray, arange
 
 class seqparser(object):
     """
@@ -276,7 +276,6 @@ class featmerge(seqparser):
             posfeats = set(range(nfeats)).difference(negfeats)
 
         # compute the set of features from this motif
-        motif_feats = self.db.get_features(mm['motif'],int(mm['featmap']))
         for f in posfeats:
             outfeats.append(self.db.get("%s.%s" % (fmap_name, f)))
 
@@ -291,8 +290,6 @@ class featmerge(seqparser):
         t<number>, which adjusts the time of the feature by <number> ms,
         and a<factor>, which adjusts the amplitude of the feature by <factor>
         """
-        if not hasattr(feat, 'options'):
-            feat.options = {}
         if options.startswith('t'):
             offset = options[1:]
             feat['offset'][0] += float(offset)
@@ -362,7 +359,7 @@ class featureset(nx.recarray):
         """
         nrecs = 0
         for d in data:
-            if isinstance(d, record):
+            if hasattr(d,'dtype'):
                 nrecs += 1
                 mydtype = d.dtype
         
@@ -375,7 +372,7 @@ class featureset(nx.recarray):
 
         rnum = 0
         for item in data:
-            if isinstance(item, record):
+            if hasattr(item, 'dtype'):
                 self[rnum] = item
                 rnum += 1
             else:
