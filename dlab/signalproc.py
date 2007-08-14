@@ -106,6 +106,8 @@ def istft(C, **kwargs):
             
     shift  - number of samples to shift the window by (default 10)             
     """
+    from scipy.signal import get_window
+    
     assert C.ndim > 1
     nrows, ncols = C.shape
     # if the array is conjugate, the imaginary component of DC and the Nyquist freq
@@ -121,8 +123,14 @@ def istft(C, **kwargs):
         shift = kwargs.get('shift',10)
         grid = nx.arange(0,ncols*shift,shift)
 
-    window = kwargs.get('window', hamming)
-    W = window(nrows)
+    window = kwargs.get('window', 'hamming')
+    if callable(window):
+        W = window(nrows)
+    elif isinstance(window, str):
+        W = get_window(window, nrows)
+    elif len(window) != nrows:
+        window.resize(nrows, refcheck=True)    
+
     W2 = nx.power(W,2)
 
     # we can assume that the imaginary component is extremely small if the
@@ -169,7 +177,7 @@ def spectro(S, fun=stft, **kwargs):
     
     PSD = fun(S, **kwargs)
     if PSD.dtype.kind=='c':
-        PSD = nx.power(nx.absolute(PSD),2)  # compute power from full complex stft
+        PSD = nx.absolute(PSD)  # compute power from full complex stft
     
     if S.dtype.kind!='c':
         if nx.remainder(nfft,2):
@@ -187,7 +195,7 @@ def spectro(S, fun=stft, **kwargs):
         F = nx.arange(-Fs/2., Fs/2., float(Fs)/PSD.shape[0])
 
     # scale by sampling frequency for PSD
-    PSD /= Fs
+    # PSD /= Fs
     T = nx.arange(0, PSD.shape[1] * 1000. / Fs * shift, 1000. / Fs * shift)
 
     return (PSD, T, F)
@@ -626,5 +634,5 @@ def threshold(signal, thresh):
 if __name__=="__main__":
 
     from dlab import pcmio
-    S = pcmio.sndfile('/home/dmeliza/src/python/data/B0.pcm').read()
+    S = pcmio.sndfile('/z1/users/dmeliza/stimsets/stimuli/B0.pcm').read()
     
