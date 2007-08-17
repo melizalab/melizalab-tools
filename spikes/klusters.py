@@ -6,13 +6,13 @@ class in dlab.explog
 """
 
 from extractor import *
+import _readklu
 import tables as t
-import dlab.explog as _explog
 from dlab.signalproc import signalstats
 from dlab.datautils import filecache
 from dlab import toelis, _pcmseqio
-import scipy as nx
-import os, pdb
+import numpy as nx
+import os
 
 def sitestats(elog, pen=None, site=None):
     """
@@ -278,24 +278,79 @@ def extractfeatures(spikes, events=None, **kwargs):
     else:
         return nx.column_stack([proj, events])
 
+
+def groupstimuli(elog, **kwargs):
+    """
+    Groups event lists by stimulus. munit_events is a dictionary
+    of toelis objects indexed by the abstime of the relevant entry.
+    These entries are used to look up the associated stimulus,
+    and the toelis objects for each stimulus are grouped as multiple
+    repeats.
+
+    Optional arguments:
+    range - a slice or index array indicating which episodes to keep
+    units - a slice or index array indicating which units to analyze
+    """
+
+    # load stimulus times
+    stimtable = elog._gettable('stimuli')
+    # load event times
+    events = readevents(elog, kwargs.get('units',None))
+    nunits = len(events)
+    eprange = kwargs.get('range',slice(None))
+    episodes = stimtable[eprange]
+    
+    stimuli = nx.unique(episodes['name'])
+    tls = dict([(x, toelis.toelis(nunits=nunits, nrepeats=0)) for x in stimuli])
+
+    for i in range(len(episodes)):
+        stim = episodes[i]['name']
+        tl = toelis.toelis([unit[i] for unit in events], nunits=nunits)
+        tls[stim].extend(tl)
+                
+    return tls
+
+def readevents(elog, units=None):
+    """
+    Read event times and cluster identity from *.fet.n and *.clu.n files
+
+    elog - an explog object. The current site is used as the basename
+    units - specify which units to keep (default is all of them)
+
+    Returns a list of lists. Each element of the list corresponds to a
+    unit; only valid units (i.e. excluding clusters 0 and 1 if there
+    are higher numbered clusters) are returned.  Each subelement is a list
+    of event times in each episode.
+    """
+    from glob import glob
+
+    basename = "site_%d_%d" % elog.site
+    cnames = glob("%s.clu.*" % basename)
+    assert len(cnames) > 0, "No event data for %s."
+
+    # _readklu.readclusters expects a list of sorted ints
+    atimes = elog.getentrytimes().tolist()
+    atimes.sort()
+
+    allunits = []
+    for group in range(len(cnames)):
+        print "Electrode group %d/%d..." % (group+1, len(cnames))
+        fname = "%s.fet.%d" % (basename, group+1)
+        cname = "%s.clu.%d" % (basename, group+1)
+        episodes = _readklu.readclusters(fname, cname, atimes)
+        allunits.extend(episodes)
+
+    if units==None:
+        return allunits
+    else:
+        return allunits[units]
+    
         
 if __name__=="__main__":
 
-    testexplog = 'st298_20061208.explog.h5'
-    pen = 8
-    nsite = 1
-    print "Opening %s to pen %d, site %d" % (testexplog, pen, nsite)
-    x = _explog(testexplog)
-    x.site = (pen,nsite)
-
-    sitename = "site_%d_%d" % k.site
-    print "Loading events from %s" % sitename
-    events,groups = klu2events('site_1_1')
-
-    print groups
-
-    print "Grouping event lists by episode"
-    eevents = k.groupchannels(events)
-
-    print "Grouping event lists by stimulus"
-    sevents = k.groupstimuli(eevents)
+    from dlab import explog
+    basedir = '/z1/users/dmeliza/acute_data/st319/20070807/'
+    os.chdir(basedir)
+    elog = explog.explog('st319.explog.h5')
+    elog.site = (4,2)
+    tls = groupstimuli(elog)
