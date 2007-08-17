@@ -70,7 +70,7 @@ class explog(object):
 
     def _set_site(self, site):
         self._site = (int(site[0]), int(site[1]))
-        g = self.__getgroup()  # this will throw an error if the site is not defined
+        g = self._getgroup()  # this will throw an error if the site is not defined
 
     site = property(_get_site, _set_site, None, "The current recording site")
 
@@ -79,20 +79,20 @@ class explog(object):
         """ Return a list of currently defined sites """
         return self.elog.root._g_listGroup()[0]
 
-    def __getgroup(self):
+    def _getgroup(self):
         """ Returns the group for the current site """
         try:
             return self.elog.getNode('/site_%d_%d' % self.site)
         except t.NoSuchNodeError:
             raise ValueError, "The pen/site %d/%d has note been defined." % self.site
 
-    def __gettable(self, tablename):
+    def _gettable(self, tablename):
         """ Returns the table associated with the current site """
-        return self.elog.getNode(self.__getgroup(), tablename)
+        return self.elog.getNode(self._getgroup(), tablename)
 
     def __iter__(self):
         """ Iterates through all the entries in the current site.  """
-        table = self.__gettable('entries')
+        table = self._gettable('entries')
         for r in table:
             yield r
 
@@ -100,7 +100,7 @@ class explog(object):
         for sname in self.sites:
             b,pen,site = sname.split("_")
             self.site = (pen,site)
-            yield self.__getgroup()
+            yield self._getgroup()
 
     def getentry(self, abstime):
         """
@@ -109,7 +109,7 @@ class explog(object):
 
         <abstime> - the time offset of the entry
         """
-        table = self.__gettable('entries')
+        table = self._gettable('entries')
         rnums = table.getWhereList('abstime==%d' % abstime)
         return table.readCoordinates(rnums)
 
@@ -117,7 +117,7 @@ class explog(object):
         """
         Returns the file/entry pairs associated with a particular episode.
         """
-        table = self.__gettable('files')
+        table = self._gettable('files')
         if abstime==None:
             return table[:]
         rnums = table.getWhereList('abstime==%d' % abstime)
@@ -130,7 +130,7 @@ class explog(object):
         an entry will have the same abstime.  This method returns all
         the abstime values.
         """
-        table = self.__gettable('entries')
+        table = self._gettable('entries')
         atimes = table.col('abstime')
         if entry==None:
             return atimes
@@ -141,7 +141,7 @@ class explog(object):
         """
         Returns the stimulus or stimuli played in a particular episode
         """
-        table = self.__gettable('stimuli')
+        table = self._gettable('stimuli')
         rnum = table.getWhereList('entrytime==%d' % abstime)
         return table.readCoordinates(rnum)
 
@@ -158,7 +158,7 @@ class explog(object):
     @property
     def nentries(self):
         """ Returns the number of entries in the currrent site """
-        return len(self.__gettable('entries'))
+        return len(self._gettable('entries'))
 
     @property
     def totentries(self):
