@@ -140,6 +140,7 @@ private:
  		for (map<int, vector<vector<long> > >::const_iterator it = uvec.begin();
 		     it != uvec.end(); it++) {
 			int unit = it->first;
+			//printf("cluster %d.\n", unit);
  			int nreps = uvec[unit].size();
  			Py::List rlist;
  			for (int j = 0; j < nreps; j++) {

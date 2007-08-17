@@ -294,6 +294,7 @@ def groupstimuli(elog, **kwargs):
 
     # load stimulus times
     stimtable = elog._gettable('stimuli')
+    msr = float(elog.samplerate)
     # load event times
     events = readevents(elog, kwargs.get('units',None))
     nunits = len(events)
@@ -305,7 +306,9 @@ def groupstimuli(elog, **kwargs):
 
     for i in range(len(episodes)):
         stim = episodes[i]['name']
+        offset = (episodes[i]['abstime'] - episodes[i]['entrytime']) / msr
         tl = toelis.toelis([unit[i] for unit in events], nunits=nunits)
+        tl.offset(-offset)
         tls[stim].extend(tl)
                 
     return tls
@@ -342,8 +345,10 @@ def readevents(elog, units=None):
 
     if units==None:
         return allunits
-    else:
+    elif isinstance(units,slice):
         return allunits[units]
+    else:
+        return [allunits[i] for i in units]
     
         
 if __name__=="__main__":
@@ -353,4 +358,4 @@ if __name__=="__main__":
     os.chdir(basedir)
     elog = explog.explog('st319.explog.h5')
     elog.site = (4,2)
-    tls = groupstimuli(elog)
+    tls = groupstimuli(elog, units=[1,4])
