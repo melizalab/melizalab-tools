@@ -21,6 +21,7 @@ _readklu = Extension('_readklu',
                      sources = ['readklu.cc',
                                 os.path.join(cxxsupp,'cxxsupport.cxx'),
                                 os.path.join(cxxsupp,'cxx_extensions.cxx'),
+                                os.path.join(cxxsupp,'IndirectPythonInterface.cxx'),
                                 os.path.join(cxxsupp,'cxxextensions.c')])
 
 	

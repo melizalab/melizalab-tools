@@ -4,54 +4,53 @@
 #include "CXX/Extensions.hxx"
 #include <cstdio>
 #include <vector>
+#include <set>
+#include <map>
 using std::vector;
+using std::set;
+using std::map;
 
-static vector<vector<vector<long> > >
+static map<int, vector<vector<long> > >
 readklu(FILE* cfp, FILE* ffp, const Py::List &atimes) 
 {
 
 	int rp = 0;
 	int nclusts, nfeats;
-	int startclust = 0;
 	long nlines = 0;
 
 	// number of clusters and features
 	rp = fscanf(cfp,"%d\n", &nclusts);
 	rp = fscanf(ffp, "%d\n", &nfeats);
-	printf("Clusters: %d\nFeatures:%d\n", nclusts, nfeats);
+	//printf("Clusters: %d\nFeatures: %d\n", nclusts, nfeats);
 	
-	// because we're dropping 0 and 1 (but only if there are more than 1 or 2
-	// units) we have to scan through the cluster file to see if they're there
-	bool has_zero = false;
-	bool has_one = false;
+	// cluster numbers can be noncontiguous so we need to scan the cluster file
 	int clust;
+	set<int> clusters;
 	while(rp != EOF) {
 		rp = fscanf(cfp, "%d\n", &clust);
-		if (!has_zero && clust==0)
-			has_zero = true;
-		if (!has_one && clust==1)
-			has_one = true;
+		clusters.insert(clust);
 		nlines +=1;
 	}
 	fseek(cfp, 0, 0);
 	rp = fscanf(cfp, "%d\n", &nclusts);
-	// with one cluster, we start at 0 (and end there)
-	// with two clusters, we drop 0 or 1 (whichever is lowest)
-	// with three clusters or more, we drop 0 and 1, if either is present
-	if (nclusts==2 && (has_zero || has_one))
-		startclust = 1;
-	if (nclusts>2 && has_zero)
-		startclust = 1;
-	if (nclusts>2 && has_one)
-		startclust += 1;
+	// with one cluster, that's the one we use
+	// with more than one cluster, we drop 0
+	// if there's still more than one cluster, we drop 1
+	if ((nclusts> 1) && (clusters.count(0)))
+		clusters.erase(0);
+	if ((nclusts> 1) && (clusters.count(1)))
+		clusters.erase(1);
 
-	printf("Events: %ld\n", nlines);
-	printf("Valid clusters: %d\n", nclusts-startclust);
+	//printf("Events: %ld\n", nlines);
+	//printf("Valid clusters: %d\n", (int)clusters.size());
 	// allocate storage
 	int nepisodes = atimes.size();
-	printf("Episodes: %d\n", nepisodes);
-        vector<vector<vector<long> > > uvec(nclusts-startclust, 
-                                            vector<vector<long> >(nepisodes, vector<long>(0)));
+	//printf("Episodes: %d\n", nepisodes);
+	map <int, vector<vector<long> > > uvec;
+	for (set<int>::const_iterator it = clusters.begin(); it != clusters.end(); it++) {
+		int cluster = *it;
+		uvec[cluster] = vector<vector<long> >(nepisodes, vector<long>(0));
+	}
 
 	// now iterate through the two files concurrently
 	// while matching times to the episode times
@@ -59,30 +58,32 @@ readklu(FILE* cfp, FILE* ffp, const Py::List &atimes)
 	long et = Py::Int(atimes[episode]);
 	long nt = Py::Int(atimes[episode+1]);
 	long atime;
-	printf("Start time: %ld\n", et);
-	printf("Episode %d: ", episode);
+	//printf("Start time: %ld\n", et);
+	//printf("Episode %d: ", episode);
 	while (rp != EOF) {
  		for (int j = 0; j < nfeats && rp != EOF; j++)
  			rp = fscanf(ffp, "%ld", &atime);
 		rp = fscanf(cfp, "%d\n", &clust);
-		if (clust >= startclust) {
+		//printf("%d", clust);
+		if (clusters.count(clust)) {
+			////printf("%d\n", clustind);
 			// THIS CODE ASSUMES THE ABSTIMES ARE SORTED
  			if (atime < et)
  				printf("\nWarning: %ld comes before the current episode\n", atime);
 			// Advance the pointers until the episodetime is correct
  			while ((nt>0) && (atime >= nt)) {
  				episode += 1;
-				printf("\nEpisode %d: ", episode);
+				//printf("\nEpisode %d: ", episode);
  				et = nt;
 				if (episode+1 < nepisodes) 
 					nt = Py::Int(atimes[episode+1]);
 				else
 					nt = -1;
  			}
-			printf("*");
-			uvec[clust-startclust][episode].push_back(atime - et);
+			uvec[clust][episode].push_back(atime - et);
 		}
 	}
+	//printf("\n");
 
 	return uvec;
 
@@ -129,22 +130,23 @@ private:
 		if ((ffp = fopen(fname.as_std_string().c_str(), "rt"))==NULL)
 			throw Py::NameError("Could not open file " + fname.as_std_string());
 				
-  		vector<vector<vector<long> > > uvec = readklu(cfp, ffp, atimes);
+  		map<int, vector<vector<long> > > uvec = readklu(cfp, ffp, atimes);
 
 		fclose(cfp);
 		fclose(ffp);
 
  		// convert output to python lists
- 		int nunits = uvec.size();
  		Py::List ulist;
- 		for (int i = 0; i < nunits; i++) {
- 			int nreps = uvec[i].size();
+ 		for (map<int, vector<vector<long> > >::const_iterator it = uvec.begin();
+		     it != uvec.end(); it++) {
+			int unit = it->first;
+ 			int nreps = uvec[unit].size();
  			Py::List rlist;
  			for (int j = 0; j < nreps; j++) {
  				Py::List events;
- 				int nevents = uvec[i][j].size();
+ 				int nevents = uvec[unit][j].size();
  				for (int k = 0; k < nevents; k++)
- 					events.append(Py::Float(uvec[i][j][k] / samplerate));
+ 					events.append(Py::Float(uvec[unit][j][k] / samplerate));
  				rlist.append(events);
  			}
  			ulist.append(rlist);
