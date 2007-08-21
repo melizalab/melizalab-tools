@@ -1,5 +1,4 @@
 #include <Python.h>
-#include "numpy/arrayobject.h"
 #include "CXX/Objects.hxx"
 #include "CXX/Extensions.hxx"
 #include <cstdio>
@@ -10,8 +9,8 @@ using std::vector;
 using std::set;
 using std::map;
 
-static map<int, vector<vector<long> > >
-readklu(FILE* cfp, FILE* ffp, const Py::List &atimes) 
+static void
+readklu(FILE* cfp, FILE* ffp, const Py::List &atimes, map<int, vector<vector<long> > > &uvec) 
 {
 
 	int rp = 0;
@@ -45,8 +44,8 @@ readklu(FILE* cfp, FILE* ffp, const Py::List &atimes)
 	//printf("Valid clusters: %d\n", (int)clusters.size());
 	// allocate storage
 	int nepisodes = atimes.size();
+	uvec.clear();
 	//printf("Episodes: %d\n", nepisodes);
-	map <int, vector<vector<long> > > uvec;
 	for (set<int>::const_iterator it = clusters.begin(); it != clusters.end(); it++) {
 		int cluster = *it;
 		uvec[cluster] = vector<vector<long> >(nepisodes, vector<long>(0));
@@ -84,8 +83,6 @@ readklu(FILE* cfp, FILE* ffp, const Py::List &atimes)
 		}
 	}
 	//printf("\n");
-
-	return uvec;
 
 }
 
@@ -130,7 +127,8 @@ private:
 		if ((ffp = fopen(fname.as_std_string().c_str(), "rt"))==NULL)
 			throw Py::NameError("Could not open file " + fname.as_std_string());
 				
-  		map<int, vector<vector<long> > > uvec = readklu(cfp, ffp, atimes);
+  		map<int, vector<vector<long> > > uvec;
+		readklu(cfp, ffp, atimes, uvec);
 
 		fclose(cfp);
 		fclose(ffp);
