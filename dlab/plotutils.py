@@ -44,10 +44,14 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     """
     from pylab import plot, gca, axis
 
+
     if y == None:
         # if y is none, x needs to be a sequence of arrays
         y = nx.concatenate([nx.ones(x[z].shape) * z for z in range(len(x))])
         x = nx.concatenate(x)
+
+    if len(x)==0:
+        return None
 
     # filter events
     if start != None:
