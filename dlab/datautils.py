@@ -222,3 +222,37 @@ def flipaxis(data, axis):
         else:
             slices.append(slice(None))
     return data[slices]
+
+
+
+def histogram(data, onset=None, offset=None, binsize=20.):
+    """
+    Computes the histogram of time series data. Input is any kind
+    of collection of event times; this function computes the frequency of
+    an event occurring within each time bin. Returns a tuple
+    with the time bins and the frequencies
+
+    Optional arguments:
+    <onset> - only events after <onset> are included
+    <offset> - only events before <offset> are included
+    <binsize> - the size of the bins in ms (default 20.)
+    """
+    d = nx.concatenate(data)
+    if onset!=None:
+        d = d[d>=onset]
+        min_t = onset
+    else:
+        min_t = d.min()
+
+    if offset!=None:
+        d = d[d<=offset]
+        max_t = offset
+    else:
+        max_t = d.max()
+
+    binsize = float(binsize)
+    bins = nx.arange(min_t, max_t + 2*binsize, binsize)  
+    N = nx.searchsorted(nx.sort(d), bins)
+    N = nx.concatenate([N, [len(d)]])
+    freq = N[1:]-N[:-1]
+    return bins[:-2], freq[:-2]

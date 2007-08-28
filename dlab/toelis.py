@@ -7,6 +7,7 @@ module for processing toe_lis files
  
 """
 import numpy as n
+from datautils import histogram
 
 class toelis(object):
     """
@@ -59,7 +60,7 @@ class toelis(object):
         Retrieve an event list by index. If only a single index is
         given (integer or slice), the index refers to the internal
         list of events; if a pair of indices are supplied, retrieves
-        event lists by repeat,unit
+        event lists by repeat,unit.
         """
         if n.iterable(index):
             id = self.index[index]
@@ -222,7 +223,7 @@ class toelis(object):
 
 
     def histogram(self, onset=None, offset=None,
-                  unit=0, binsize=20., normalize=False):
+                  unit=0, repeats=None, binsize=20., normalize=False):
         """
         Converts the response data to a frequency histogram, i.e.
         the number of events in a time bin. Returns a tuple
@@ -232,31 +233,19 @@ class toelis(object):
         <onset> - only events after <onset> are included
         <offset> - only events before <offset> are included
         <unit> - the unit to compute the histogram of (default 0)
+        <repeats> - restrict analysis to the given repeats (list or slice)
         <binsize> - the size of the bins in ms (default 20.)
         <normalize> - if True, return spikes/sec, otherwise total spike counts
         """
-        d = n.concatenate([self.events[ri] for ri in self.index[:,unit]])
-        if onset!=None:
-            d = d[d>=onset]
-            min_t = onset
-        else:
-            min_t = d.min()
+        if repeats==None:
+            repeats = slice(None)
             
-        if offset!=None:
-            d = d[d<=offset]
-            max_t = offset
-        else:
-            max_t = d.max()
-        
-        binsize = float(binsize)
-        bins = n.arange(min_t, max_t + 2*binsize, binsize)  
-        N = n.searchsorted(n.sort(d), bins)
-        N = n.concatenate([N, [len(d)]])
-        freq = N[1:]-N[:-1]
+        data = [self.events[ri] for ri in self.index[repeats,unit]]
+        bins, freq = histogram(data, onset=onset, offset=offset, binsize=binsize)
         if normalize:
-            freq =  freq.astype('d') / (self.nrepeats * binsize)
+            freq =  freq.astype('d') / (len(data) * binsize)
             
-        return bins[:-2], freq[:-2]
+        return bins, freq
 
 # end toelis
 
