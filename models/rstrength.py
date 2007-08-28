@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-rstrength.py [-m <motifdb>] [-s <statfxn>] [-r reps] <bird> <basename>
+rstrength.py [-m <motifdb>] [-s <statfxn>] [-n nboot] <bird> <basename>
 rstrength.py ... <map.info>
 
 Replicates TQG's response strength analysis but on a motif level. Run
@@ -18,27 +18,67 @@ Optional arguments:
           -s <statfxn> use a different aggregator (default singstats)
           -f <songfile> if <statfxn> is songstat, a song file needs to be
              defined
-          -r <reps> limit histograms to the first <reps> repeats. Avoids
-              bias problems with uneven distributions of repeats
+          -n <nboot> the number of bootstrap calculations to use
 
 """
 
-import sys,getopt,os
+import sys,getopt,os,glob
 from spikes import stat
 from dlab import toelis
+from dlab.datautils import histogram
 from motifdb import db
 from sys import stderr
+from scipy.stats import randint, stats
 
 binsize = 10.
 poststim = 100.
 silence = (-1000,0)
+nboot = 1000
+alpha = 0.05
+
+#_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
+#_hdr = "bird\tcell\tmotif\tnreps\tresp.m\tresp.v\tspon.m\tspon.v\tresp.on\tresp.off"
+#_statfxn = stat.toestat
 
 
-_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
-_hdr = "bird\tcell\tmotif\tnreps\tresp.m\tresp.v\tspon.m\tspon.v\tresp.on\tresp.off"
-_statfxn = stat.toestat
+def _rstrength(data, rrange, srange, binsize):
+    rf = histogram(data, onset=rrange[0], offset=rrange[1], binsize=binsize)[1] # * 1000
+    sf = histogram(data, onset=srange[0], offset=srange[1], binsize=binsize)[1] # * 1000
+    return rf.var() / sf.var()
 
-def pairstats(dir, motif_db, bird="", maxreps=None, **kwargs):
+def rstrength_ci(tl, rrange, srange, binsize=10., maxreps=None, nboot=100, alpha=0.05):
+    """
+    Computes response strength with confidence intervals for toelis
+    data using bootstrap statistics.  Returns the median and alpha/2
+    quantiles of the resulting distribution (the upper quantile is very unstable
+    and not used)
+
+    <maxreps> - The maximum number of repetitions to use in a calculation. Should
+                be the minimum number of repeats in the dataset to avoid bias
+    <nboot> - the number of bootstrap calculations to perform. Because RS involves
+              a ratio this should be at least 1000 to be reasonably stable
+    """
+
+    if maxreps==None:
+        maxreps = tl.nrepeats
+    
+    #repind = range(tl.nrepeats)
+    rs = []
+    for i in range(nboot):
+        repind = randint.rvs(tl.nrepeats, size=maxreps)
+        data = [tl.events[x] for x in repind if x != i]
+        rs.append(_rstrength(data, rrange, srange, binsize))
+
+    return (stats.median(rs),
+            stats.scoreatpercentile(rs, alpha/2. * 100))
+#            stats.scoreatpercentile(rs, 1 - alpha/2. * 100))
+    
+_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
+_hdr = "bird\tcell\tmotif\tnreps\tRS\tRS.l\tresp.on\tresp.off"
+_statfxn = rstrength_ci
+    
+
+def pairstats(dir, motif_db, bird="", **kwargs):
     """
     Some stimuli were played only in pairs, but the stats function in spikes.stat
     assumes the region immediately prior to the stimulus was silent. So
@@ -56,24 +96,30 @@ def pairstats(dir, motif_db, bird="", maxreps=None, **kwargs):
     motifs = m.get_motifs()
     ext = '.toe_lis'
 
+    # load all files first to see how many repeats we have
+    tls = {}
     for file in files:
         # assume the file starts with basename
         if file.startswith(basename) and file.endswith(ext):
             fname = file[len(basename)+1:-len(ext)]
-            mnames = fname.split('_')
-            tl = toelis.readfile(os.path.join(dir,file))
-            offset = 0
-            for mname in mnames:
-                motif_base = m.get_basemotif(mname)
-                mlen = m.get_motif(motif_base)['length'] + poststim
-                if mname in motifs:
-                    print _statfmt \
-                          % ((bird, basename, mname) +
-                             _statfxn(tl, (offset,offset+mlen), silence, binsize, maxreps) +
-                             (offset,offset+mlen))
-                offset += mlen
+            tls[fname] = toelis.readfile(os.path.join(dir, file))
 
-def singstats(dir, motif_db, bird="", maxreps=None, **kwargs):
+    maxreps = max([tl.nrepeats for tl in tls.values()])
+
+    for fname, tl in tls.items():
+        mnames = fname.split('_')
+        offset = 0
+        for mname in mnames:
+            motif_base = m.get_basemotif(mname)
+            mlen = m.get_motif(motif_base)['length'] + poststim
+            if mname in motifs:
+                print _statfmt \
+                      % ((bird, basename, mname, tl.nrepeats) +
+                         _statfxn(tl, (offset,offset+mlen), silence, binsize, maxreps, nboot, alpha) +
+                         (offset,offset+mlen))
+            offset += mlen
+
+def singstats(dir, motif_db, bird="", **kwargs):
     """
     This function gathers response statistics assuming that motifs
     were played singly to the animal, and the corresponding toe_lis files
@@ -84,20 +130,30 @@ def singstats(dir, motif_db, bird="", maxreps=None, **kwargs):
     basename = dirbase(dir)
         
     motifs = m.get_motifs()
-    ext = '.toe_lis'    
+    ext = '.toe_lis'
+
+    # load all files first to see how many repeats we have
+    tls = {}
+    for file in files:
+        # assume the file starts with basename
+        if file.startswith(basename) and file.endswith(ext):
+            fname = file[len(basename)+1:-len(ext)]
+            tls[fname] = toelis.readfile(os.path.join(dir, file))
+
+    maxreps = max([tl.nrepeats for tl in tls.values()])
 
     for motif in motifs:
         # scan through files
         mlen = m.get_motif(motif)['length'] + poststim
-        fname = "%s_%s.toe_lis" % (basename,motif)
-        if fname in files:
-            tl = toelis.readfile(os.path.join(dir,fname))
+        #fname = "%s_%s.toe_lis" % (basename,motif)
+        if motif in tls.keys():
+            tl = tls[motif]
             print _statfmt \
-                  % ((bird, basename, motif) +
-                     _statfxn(tl, (0.,mlen), silence, binsize, maxreps) +
+                  % ((bird, basename, motif, tl.nrepeats) +
+                     _statfxn(tl, (0.,mlen), silence, binsize, maxreps, nboot, alpha) +
                      (0.,mlen))
 
-def aggstats(dir, motif_db, bird="", maxreps=None, **kwargs):
+def aggstats(dir, motif_db, bird="", **kwargs):
     """
     This aggregator uses the aggregate function in spikes.stat to
     collect toelis data. Only the first motif in any sequence is used,
@@ -108,12 +164,13 @@ def aggstats(dir, motif_db, bird="", maxreps=None, **kwargs):
     
     # aggregate the toelis files:
     tls = stat.aggregate_base(basename, mdb, dir=dir)#, motif_pos=0)
+    maxreps = max([tl.nrepeats for tl in tls.values()])    
     # run through them one by one
     for motif, tl in tls.items():
         mlen = mdb.get_motif(motif)['length'] + poststim
         print _statfmt \
-              % ((bird, basename, motif) +
-                 _statfxn(tl, (0.,mlen), silence, binsize, maxreps) +
+              % ((bird, basename, motif, tl.nrepeats) +
+                 _statfxn(tl, (0.,mlen), silence, binsize, maxreps, nboot, alpha) +
                  (0.,mlen))
 
 def songstats(dir, motif_db, sequences, bird="", maxreps=None, **kwargs):
@@ -121,6 +178,9 @@ def songstats(dir, motif_db, sequences, bird="", maxreps=None, **kwargs):
     This aggregator is sort of special. It simulates the response strength
     to the full sequences by pasting the responses to individual motifs
     together.
+
+    The results aren't very interesting so I'm not going to fix it to use the
+    bootstrapped response strength
     """
     from numpy import concatenate
     
@@ -161,7 +221,7 @@ def songstats(dir, motif_db, sequences, bird="", maxreps=None, **kwargs):
         tl.events[0] = concatenate(bucket)
         print _statfmt \
                   % ((bird, basename, "_".join(seqgood)) +
-                     _statfxn(tl, (0.,offset), silence, binsize, maxreps) +
+                     _statfxn(tl, (0.,offset), silence, binsize, maxreps, nboot, alpha) +
                      (0.,offset))    
     
 
@@ -178,7 +238,7 @@ if __name__=="__main__":
         sys.exit(-1)
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "m:hs:r:f:", ["help"])
+        opts, args = getopt.getopt(sys.argv[1:], "m:hs:n:f:", ["help"])
     except getopt.GetoptError, e:
         print "Error: %s" % e
         sys.exit(-1)        
@@ -195,8 +255,8 @@ if __name__=="__main__":
             sys.exit(-1)
         elif o=='-m':
             map_file = a
-        elif o=='-r':
-            maxreps = int(a)
+        elif o=='-n':
+            nboot = int(a)
         elif o=='-f':
             songfile = a
         elif o=="-s":
