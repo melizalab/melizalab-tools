@@ -183,7 +183,7 @@ def plotselectivity(basename, motif_db, dir='.',
         if rasters:
             nreps = min(tl.nrepeats, maxreps) if maxreps != None else tl.nrepeats
             plotutils.plot_raster(tl[:nreps],mec='k',markersize=3)
-            plot([0,0],[0,tl.nrepeats],'b',[mdur,mdur],[0,tl.nrepeats],'b', hold=True)
+            plot([0,0],[0,nreps],'b',[mdur,mdur],[0,nreps],'b', hold=True)
         else:
             b,v = tl.histogram(binsize=1.,normalize=1)
             smooth_v = gaussian_filter1d(v.astype('f'), bandwidth)
