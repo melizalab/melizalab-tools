@@ -18,11 +18,12 @@ from motifdb import db
 from spikes import stat
 from scipy.ndimage import gaussian_filter1d
 
-def rate_est(tl, onset=None, offset=None, binsize=1., bandwidth=5.):
+def rate_est(tl, onset=None, offset=None, binsize=1., bandwidth=5., repeats=None):
     # cheapy rate estimater
     b,v = tl.histogram(binsize=binsize,normalize=True,
                        onset=onset,
-                       offset=offset)
+                       offset=offset,
+                       repeats=repeats)
     return gaussian_filter1d(v.astype('f')*1000, bandwidth),b    
 
 def ctable(motif, basename, motif_db,
@@ -30,7 +31,10 @@ def ctable(motif, basename, motif_db,
            inhpattern = "%s_0(-%d)",
            dir = '.',
            onset=0., post_pad=100, window=200,
-           correct_times=0.):
+           correct_times=0., correct_mean=False):
+
+    pre_pad = 500. # include data from before stimulus for subtracting off mean
+    npre_pad = int(pre_pad / binsize)
     
     m = motif_db
     tls = stat.aggregate(m, motif, basename, dir)
@@ -40,12 +44,14 @@ def ctable(motif, basename, motif_db,
             tl.offset(correct_times)
             
     dur = m.get(motif)['length']
-    rstrength = stat.toestat(tls[motif], (0,dur+100), (-1000,0), maxrep=10)
+
+    # compare the same number of reps for each stimulus
+    maxreps = min([tl.nrepeats for tl in tls.values()])
 
     frates = {}
     for name,tl in tls.items():
-        frates[name],t = rate_est(tl, onset=0., offset=dur+post_pad,
-                                binsize=binsize, bandwidth=bandwidth)
+        frates[name],t = rate_est(tl, onset=-pre_pad, offset=dur+post_pad,
+                                  binsize=binsize, bandwidth=bandwidth)
 
     feats = m.get_features(motif)
     nt = t.size
@@ -61,30 +67,32 @@ def ctable(motif, basename, motif_db,
         rend = rstart + feat['dim'][0] + window
         ind = (t >= rstart) & (t < rend)
         r_feat[ind,fid]  = frates[featname][ind]
+        if correct_mean:
+            featstart = ind.nonzero()[0][0]
+            r_feat[ind,fid] -= frates[featname][featstart-npre_pad:featstart].mean()
+            
         r_inhib[ind,fid] = nx.minimum(frates[motif] - frates[residname], 0)[ind]
         r_sum[:,fid] = frates[featname] + frates[residname]
         
     # also return the response to the full reconstruction
     if expattern=='%s_0(%d)':
         recname = '%s_0' % motif
-        r_rec = frates[recname]
     elif expattern=='%s.%d':
         recname = '%sR' % motif
-        r_rec = frates[recname]        
     else:
         print >> sys.stderr, "Unable to guess reconstruction name for %s - %s" % (dir, motif)
         r_rec = None
 
-    return {'motif':frates[motif],
-            'excite':r_feat,
-            'suppress': r_inhib,
-            'recon': frates[recname],
-            'sums': r_sum,
-            'rstrength': rstrength[2]/rstrength[4]}
+    return {'motif':frates[motif][npre_pad:],
+            'excite':r_feat[npre_pad:,:],
+            'suppress': r_inhib[npre_pad:,:],
+            'recon': frates[recname][npre_pad:],
+            'sums': r_sum[npre_pad:,:],
+            'reps': maxreps}
 
 def predict(excite, inhib=None):
     if inhib==None:
-        return excite.sum(1)
+        return nx.maximum(excite.sum(1), 0)
     else:
         return nx.maximum(excite.sum(1) + inhib.sum(1),0)
 
@@ -157,31 +165,29 @@ def residpower(mdb, featmap=0):
 
 if __name__=="__main__":
 
-    do_plot = False
+    do_plot = True
 
     # read table of files
     fp = open(sys.argv[1])
     mdb = {}
     residpow = {}
     maskerr = {}
-    birds = ['229','271','298','317','318']
+    birds = ['229','271','298','317','318','319']
     print >> sys.stderr, "Loading motif databases and calculating residual power"
     for bird in birds:
         print >> sys.stderr, "Bird %s" % bird
         mdb[bird] = db.motifdb(os.path.join('st%s' % bird, 'motifs.h5'))
-        #residpow[bird], maskerr[bird] = residpower(mdb[bird])
 
     if do_plot:
         import matplotlib
         matplotlib.use('PS')
         from dlab.plotutils import texplotter
         ctp = texplotter()
-        rtp = texplotter()
         from pylab import figure,clf, subplot,plot, imshow, title, setp, gca, gcf, close
         from bin.plotresps import plotresps
 
 
-    print "bird\tcell\tmotif\tCC\tCC.ex\tCC.rec\tCC.lin\tphasic\tpow.resid\terr.mask\trstrength"
+    print "bird\tcell\tmotif\treps\tCC\tCC.ex\tCC.rec\tCC.lin\tphasic"
     for line in fp:
         if line.startswith('#') or len(line.strip())==0: continue
         fields = line.split()
@@ -196,7 +202,7 @@ if __name__=="__main__":
             phas = phasic(os.path.join(dir, '%s_%s.toe_lis' % (basename, motif)),
                           0, mdb[bird].get_motif(motif)['length'])
             ctabs = ctable(motif, basename, mdb[bird], dir=dir, expattern=expattern,
-                           inhpattern=inhpattern, correct_times=offset)
+                           inhpattern=inhpattern, correct_times=offset, bandwidth=10., correct_mean=True)
             cpred = predict(ctabs['excite'],ctabs['suppress'])
             cprede = predict(ctabs['excite'])
             cc = corrcoef(cpred,ctabs['motif'])
@@ -204,12 +210,8 @@ if __name__=="__main__":
             ccr = corrcoef(ctabs['motif'],ctabs['recon'])
             lins = linsum(ctabs)
             
-##             print "st%s\t%s\t%s\t%3.4f\t%3.4f\t%3.4f\t%3.4f\t%3.4f\t%3.4f\t%3.5f\t%3.4f" % \
-##                   (bird, basename, motif, cc, cce, ccr, lins, phas,
-##                    residpow[bird][motif], maskerr[bird][motif], ctabs['rstrength'])
-            print "st%s\t%s\t%s\t%3.4f\t%3.4f\t%3.4f\t%3.4f\t%3.4f\t%3.4f" % \
-                  (bird, basename, motif, cc, cce, ccr, lins, phas,
-                   ctabs['rstrength'])
+            print "st%s\t%s\t%s\t%d\t%3.4f\t%3.4f\t%3.4f\t%3.4f\t%3.4f" % \
+                  (bird, basename, motif, ctabs['reps'], cc, cce, ccr, lins, phas)
             if do_plot:
                 f = figure(figsize=(6,8))
                 subplot(311),plot(ctabs['motif']),plot(cpred,hold=1),plot(ctabs['recon'],hold=1)
@@ -220,15 +222,10 @@ if __name__=="__main__":
                 ctp.plotfigure(f)
                 ctp.pagebreak()
                 
-                plotresps(basename, motif, mdb[bird], dir=dir)
-                gcf().set_size_inches((6,8))
-                rtp.plotfigure(gcf())
-                rtp.pagebreak()
                 close('all')
 
     if do_plot:
         ctp.writepdf('contingency.pdf')
-        rtp.writepdf('rasters.pdf')
     for m in mdb:
         del m
 
