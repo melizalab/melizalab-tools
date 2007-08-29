@@ -9,13 +9,31 @@ using std::vector;
 using std::set;
 using std::map;
 
+static long
+getclusters(FILE* cfp, set<int> &clusters)
+{
+	int clust, rp, fpos;
+	long nlines = 0;
+	fpos = ftell(cfp);
+	fseek(cfp, 0, 0);
+	rp = fscanf(cfp, "%d\n", &clust);  // throw away first line
+	clusters.clear();
+	while(rp != EOF) {
+		rp = fscanf(cfp, "%d\n", &clust);
+		clusters.insert(clust);
+		nlines += 1;
+	}
+	fseek(cfp, fpos, 0);
+
+	return nlines;
+}
+
 static void
 readklu(FILE* cfp, FILE* ffp, const Py::List &atimes, map<int, vector<vector<long> > > &uvec) 
 {
 
 	int rp = 0;
 	int nclusts, nfeats;
-	long nlines = 0;
 
 	// number of clusters and features
 	rp = fscanf(cfp,"%d\n", &nclusts);
@@ -25,19 +43,14 @@ readklu(FILE* cfp, FILE* ffp, const Py::List &atimes, map<int, vector<vector<lon
 	// cluster numbers can be noncontiguous so we need to scan the cluster file
 	int clust;
 	set<int> clusters;
-	while(rp != EOF) {
-		rp = fscanf(cfp, "%d\n", &clust);
-		clusters.insert(clust);
-		nlines +=1;
-	}
-	fseek(cfp, 0, 0);
-	rp = fscanf(cfp, "%d\n", &nclusts);
+	getclusters(cfp, clusters);
+
 	// with one cluster, that's the one we use
 	// with more than one cluster, we drop 0
 	// if there's still more than one cluster, we drop 1
-	if ((nclusts> 1) && (clusters.count(0)))
+	if ((clusters.size()> 1) && (clusters.count(0)))
 		clusters.erase(0);
-	if ((nclusts> 1) && (clusters.count(1)))
+	if ((clusters.size()> 1) && (clusters.count(1)))
 		clusters.erase(1);
 
 	//printf("Events: %ld\n", nlines);
@@ -95,6 +108,8 @@ public:
 		{
 			add_keyword_method("readclusters", &_readklu_module::rk_readclusters, 
 					   "readclusters (fetfile, clufile, eptimes, samplerate=20) - sorts events into episodes");
+			add_varargs_method("getclusters", &_readklu_module::rk_getclusters,
+					   "getclusters (clufile) - returns a list of the clusters defined in the cluters file");
                                             
 
 			initialize( "Reads events from klusters files and assigns them to episodes" );
@@ -103,6 +118,26 @@ public:
 	virtual ~_readklu_module() {}
 
 private:
+
+	Py::Object
+	rk_getclusters(const Py::Tuple &args) {
+		
+		FILE *cfp;
+		Py::String cname(args[0]);
+		if ((cfp = fopen(cname.as_std_string().c_str(), "rt"))==NULL)
+			throw Py::NameError("Could not open file " + cname.as_std_string());
+
+		set<int> clusters;
+		getclusters(cfp, clusters);
+
+		fclose(cfp);
+		Py::List out;
+		for (set<int>::const_iterator it = clusters.begin(); it != clusters.end(); it++)
+			out.append(Py::Int(*it));
+
+		return out;
+	}
+		
 
 	Py::Object
 	rk_readclusters(const Py::Tuple &args, const Py::Dict &kws) {
