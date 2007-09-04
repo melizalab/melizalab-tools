@@ -85,8 +85,8 @@ def rstrength_ci(tls, rrange, srange, binsize=10., nboot=100, alpha=0.05):
 
     return rs
 
-_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
-_hdr = "bird\tcell\tmotif\tnreps\tRS\tRS.l\tresp.on\tresp.off"
+_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
+_hdr = "bird\tcell\tmotif\tnreps\tRS\tRS.l\tspon.m\tresp.m\tresp.on\tresp.off"
 _statfxn = rstrength_ci
 
 def singstats(dir, motif_db, bird="", **kwargs):
@@ -118,12 +118,13 @@ def singstats(dir, motif_db, bird="", **kwargs):
         return
     
     # get stats
-    tlstats = _statfxn(tls, rrange, silence, binsize, nboot, alpha)
+    bstats = _statfxn(tls, rrange, silence, binsize, nboot, alpha)
     
     for motif, tl in tls.items():
+        tlstats = stat.toestat(tl, rrange[motif], silence, binsize)
         print _statfmt \
               % ((bird, basename, motif, tl.nrepeats) +
-                 tlstats[motif] + rrange[motif])
+                 bstats[motif] + tlstats[3:4] + tlstats[1:2] + rrange[motif])
 
 def aggstats(dir, motif_db, bird="", **kwargs):
     """
@@ -146,12 +147,14 @@ def aggstats(dir, motif_db, bird="", **kwargs):
         print >> stderr, "Skipping %s/%s: Unable to aggregate toe_lis data." % (bird, basename)
         return        
     # pass the event lists and time ranges to the stats function
-    tlstats =  _statfxn(tls, rrange, silence, binsize, nboot, alpha)
+    bstats =  _statfxn(tls, rrange, silence, binsize, nboot, alpha)
     # print them out
     for motif, tl in tls.items():
+        tlstats = stat.toestat(tl, rrange[motif], silence, binsize)
         print _statfmt \
               % ((bird, basename, motif, tl.nrepeats) +
-                 tlstats[motif] + rrange[motif])
+                 bstats[motif] + tlstats[3:4] + tlstats[1:2] + rrange[motif])
+
 
 def dirbase(dir):
     if dir.endswith('/'):

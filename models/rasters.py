@@ -42,7 +42,7 @@ else:
 
 
 mdb = {}
-birds = ['229','271','298','317','318']
+birds = ['229','271','298','317','318','319']
 from motifdb import db
 for bird in birds:
     mdb[bird] = db.motifdb(os.path.join('st%s' % bird, 'motifs.h5'))
@@ -53,6 +53,10 @@ for cell in cells:
     bird,basename,location = cell[0:3]
     sys.stdout.write("st%s -> %s " % (bird, basename)), sys.stdout.flush()
     os.chdir(os.path.join(rundir, "st%s" % bird, location))
+    if not os.path.exists(basename):
+        sys.stdout.write(" DIRECTORY NOT FOUND\n")
+        continue
+    
     f = plotresps.plotselectivity(basename, mdb[bird], basename,
                                   plottitle='st%s - %s' % (bird, basename),
                                   maxreps=10)

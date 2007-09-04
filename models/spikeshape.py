@@ -114,7 +114,7 @@ def plotspikes(S, nspikes=50):
 if __name__=="__main__":
 
     basedir = '/z1/users/dmeliza/acute_data'
-    cellinfo = os.path.join(basedir, 'CMMall.info')
+    cellinfo = os.path.join(basedir, 'units.info')
     siteinfo = os.path.join(basedir, 'site.info')
 
     import matplotlib
