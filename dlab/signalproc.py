@@ -348,7 +348,7 @@ def dpss(npoints, mtm_p):
     e - 2D array of eigenvectors, shape (npoints, n)
     """
     from scipy.linalg import norm
-    from tridiag import dgtsv, dstegr
+    from tridiag import dgtsv, dstemr
 
     if mtm_p >= npoints * 2:
         raise ValueError, "mtm_p may only be as large as npoints/2"
@@ -361,7 +361,7 @@ def dpss(npoints, mtm_p):
     d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
     ee = nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2
 
-    v = dstegr(d, nx.concatenate((ee, [0])), npoints-ntapers+1, npoints)[1]
+    v = dstemr(d, nx.concatenate((ee, [0])), npoints-ntapers+1, npoints)[1]
     v = nx.flipud(v[0:ntapers])
 
     # compute the eigenvectors

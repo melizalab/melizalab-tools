@@ -63,6 +63,45 @@ interface
       integer intent(hide),depend(n) :: liwork=10*n
       integer intent(out) :: info
   end subroutine dstegr
+
+  subroutine dstemr(jobz,range,n,d,e,vl,vu,il,iu,m,w,z,ldz,nzc,isuppz,tryrac,work,lwork,iwork,liwork,info)
+
+      ! x,info stegr(d,e,il,iu,overwrite_d=0,overwrite_e=0)
+      ! Determine the eigenvalues of the symmetric tridiagonal matrix A
+      ! with diagonal D and superdiagonal E. Returns the eigenvalues
+      ! between IL and IU
+
+      !callstatement '''
+      !              (*f2py_func)(jobz,range,&n,d,e,&vl,&vu,&il,&iu,&m,w,z,
+      !                           &ldz,&nzc,isuppz,&tryrac,work,&lwork,iwork,&liwork,&info)
+      !              '''
+      !callprotoargument '''
+      !               char*,char*,int*,double*,double*,double*,double*,int*,int*,int*,double*,double*,
+      !               int*,int*,int*,int*,double*,int*,int*,int*,int*
+      !               '''
+      character intent(hide) :: jobz="N"
+      character intent(hide) :: range="I"
+      integer depend(d),intent(hide) :: n=len(d)
+      double precision dimension(n),intent(copy) :: d
+      double precision dimension(n),intent(copy) :: e
+      double precision intent(hide) :: vl=0
+      double precision intent(hide) :: vu=0
+      integer optional:: il=1
+      integer optional:: iu=n
+      integer intent(out) :: m
+      double precision dimension(n),intent(out) :: w
+      double precision dimension(n),intent(hide,cache) :: z
+      integer intent(hide) :: ldz=1
+      integer intent(hide) :: nzc=-1
+      integer dimension(1),intent(hide) :: isuppz
+      logical intent(hide) :: tryrac=0
+      double precision dimension(lwork),intent(hide,cache):: work
+      integer intent(hide),depend(n) :: lwork=13*n
+      integer dimension(liwork),intent(hide,cache) :: iwork
+      integer intent(hide),depend(n) :: liwork=10*n
+      integer intent(out) :: info
+  end subroutine dstemr
+  
 end interface
 end python module tridiag
       
