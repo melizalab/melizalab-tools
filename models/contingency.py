@@ -99,16 +99,6 @@ def predict(excite, inhib=None):
 def corrcoef(A,B):
     return nx.corrcoef(A,B)[0,1]
 
-def linsum(ctabs):
-    """
-    One measure of the linearity of the cell's response (in feature space) is
-    whether the response to the isolated feature plus the residual equals the
-    original response.  This function calculates this (using CC) for each feature
-    and returns the mean CC for all features.
-    """
-    nfeats = ctabs['sums'].shape[1]
-    return nx.mean([corrcoef(ctabs['motif'],ctabs['sums'][:,i]) for i in range(nfeats)])
-
 def phasic(tfile, start, stop):
     """
     Compute the phasic response index using toestat
@@ -122,46 +112,6 @@ def phasic(tfile, start, stop):
         fields = line.split()
         out.append(float(fields[-1]))
     return out[0]
-
-def residpower(mdb, featmap=0):
-    """
-    Calculates the residual power in a motif after all features have
-    been extracted from it.  Regions which aren't included in a
-    feature contribute to this, as well as regions that get
-    'oversampled' by the feature extraction process.  Returns a dictionary
-    where each motif name is associated with the ratio of residual power to
-    total power.
-    """
-    from dlab import pcmio
-    from dlab.imgutils import gausskern, weighted_mask
-
-    W = gausskern((17./4, 9./4))
-    motifs = mdb.get_motifs().tolist()
-    residpow = {}
-    maskerr = {}
-    for motif in motifs:
-        Fs = mdb.get_motif(motif)['Fs']
-        Sorig = pcmio.sndfile(mdb.get_motif_data(motif)).read()
-        feats = mdb.get_features(motif, featmap)
-        Srecon = nx.zeros(Sorig.shape, dtype=Sorig.dtype)
-        try:
-            Fmap = mdb.get_featmap_data(motif, featmap)
-        except IndexError:
-            continue
-        Totmask = nx.zeros(Fmap.shape, dtype='d')
-        for feat in feats:
-            Sfeat = mdb.get_feature_data(motif, featmap, feat['id'])
-            offset = int(feat['offset'][0] * Fs / 1000)
-            dur = Sfeat.size if offset+Sfeat.size < Srecon.size else Srecon.size - offset
-            Srecon[offset:offset+dur] += Sfeat[:dur]
-            Totmask += weighted_mask(Fmap, W, feat['id'], clip=0)
-
-        Sresid = Sorig - Srecon;
-        residpow[motif] = nx.sqrt(Sresid.var() / Sorig.var())
-        maskerr[motif] = 1. * nx.sum(Totmask>1) / Totmask.size
-
-    return residpow, maskerr
-
 
 if __name__=="__main__":
 
@@ -187,7 +137,7 @@ if __name__=="__main__":
         from bin.plotresps import plotresps
 
 
-    print "bird\tcell\tmotif\treps\tCC\tCC.ex\tCC.rec\tCC.lin\tphasic"
+    print "bird\tcell\tmotif\treps\tCC\tCC.ex\tCC.rec\tmean.inh\tphasic"
     for line in fp:
         if line.startswith('#') or len(line.strip())==0: continue
         fields = line.split()
@@ -208,14 +158,16 @@ if __name__=="__main__":
             cc = corrcoef(cpred,ctabs['motif'])
             cce = corrcoef(cprede,ctabs['motif'])
             ccr = corrcoef(ctabs['motif'],ctabs['recon'])
-            lins = linsum(ctabs)
+            #lins = linsum(ctabs)
+            inhvar = ctabs['suppress'].mean(1).var()
+            inhmean = ctabs['suppress'].mean()
             
             print "st%s\t%s\t%s\t%d\t%3.4f\t%3.4f\t%3.4f\t%3.4f\t%3.4f" % \
-                  (bird, basename, motif, ctabs['reps'], cc, cce, ccr, lins, phas)
+                  (bird, basename, motif, ctabs['reps'], cc, cce, ccr, inhmean, phas)
             if do_plot:
                 f = figure(figsize=(6,8))
-                subplot(311),plot(ctabs['motif']),plot(cpred,hold=1),plot(ctabs['recon'],hold=1)
-                title("%s_%s (%s) CC=%3.4f CC(rec)=%3.4f" % (bird, basename, motif, cc, ccr))
+                subplot(311),plot(ctabs['motif']),plot(cprede,hold=1),plot(ctabs['recon'],hold=1)
+                title("%s_%s (%s) CC=%3.4f CC(rec)=%3.4f" % (bird, basename, motif, cce, ccr))
                 setp(gca(),'xlim',[0,ctabs['motif'].size])
                 subplot(312),imshow(ctabs['excite'].T, interpolation='nearest')
                 subplot(313),imshow(ctabs['suppress'].T, interpolation='nearest')
