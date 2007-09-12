@@ -57,6 +57,7 @@ clustering.  This would also be addressed by the solutions to problem (2).
 """
 import scipy as nx
 from dlab import toelis, pcmio, signalproc
+from dlab.plotutils import drawoffscreen
 from dlab.imgutils import xcorr2
 from scipy.ndimage import gaussian_filter1d
 
@@ -109,7 +110,8 @@ def resppeaks(tl, thresh, binsize=1., bandwidth=5., start=0, stop=None):
     return nx.column_stack([istart, ipeak, istop])
 
 
-def getstimuli(resps, stimfile, swindow, peakpad=False, maxlag=None, bkgnd=0.001,
+def getstimuli(resps, stimfile, swindow,
+               peakpad=False, maxlag=None, bkgnd=0.001, sigpad=False,
                **kwargs):
     """
     Extracts the stimuli associated with each response peak. Computes
@@ -123,6 +125,7 @@ def getstimuli(resps, stimfile, swindow, peakpad=False, maxlag=None, bkgnd=0.001
                 surrounding the peak
     <maxlag> - any responses lagging the stimulus by more than this
                value are ignored
+    additional arguments are passed to spectro
     """
 
     sig = pcmio.sndfile(stimfile).read()
@@ -130,7 +133,10 @@ def getstimuli(resps, stimfile, swindow, peakpad=False, maxlag=None, bkgnd=0.001
     # this also minimizes the onset transient
     shift = kwargs.get('shift',20)
     pad = nx.zeros(swindow*shift)
-    sig = nx.concatenate([pad, sig, pad])
+    if sigpad:
+        sig = nx.concatenate([pad, sig, pad])
+    else:
+        sig = nx.concatenate([sig, pad])
     kwargs['shift'] = shift
     Sig = nx.log10(signalproc.spectro(sig, **kwargs)[0] + bkgnd)
     #pad = nx.resize(nx.log10(bkgnd), (Sig.shape[0], swindow))
@@ -138,11 +144,12 @@ def getstimuli(resps, stimfile, swindow, peakpad=False, maxlag=None, bkgnd=0.001
 
     stims = []
     for i in range(resps.shape[0]):
-        p = resps[i,:] + swindow
+        p = resps[i,:].copy()
+        if sigpad: p += swindow
         if peakpad:
-            sl = slice(p[0] - swindow, p[2])
+            sl = slice(max(p[0] - swindow,0), p[2])
         else:
-            sl = slice(p[1] - swindow, p[1])
+            sl = slice(max(p[1] - swindow,0), p[1])
             
         if sl.stop > Sig.shape[1]:
             # no stimulus to return
@@ -154,15 +161,35 @@ def getstimuli(resps, stimfile, swindow, peakpad=False, maxlag=None, bkgnd=0.001
 
     return stims
 
-def sxcorr(a, b, lags=(20,32)):
+def sxcorr(a, b, lags=(32,20)):
     """
     Compute stimulus similarity from the peak of the cross-correlation
     function within a limited window around the origin.
     """
-    xcc = xcorr2(a,b,lags)
-    return xcc.max()
+    from scipy.fftpack import fftshift
+    xcc = xcorr2(a,b)
+    # need to find the center relative to the following edge of the signals
+    lx,ly = lags
+    cx,cy = [xcc.shape[i]/2 - (b.shape[i] - a.shape[i]) for i in (0,1)]
+    sx,sy = (slice(cx-lx,cx+lx+1), slice(cy-ly,cy+ly+1))
+    # we may have to wrap around the zeropoint
+    if sx.start < 0 or sx.stop > xcc.shape[0]:
+        xcc = fftshift(xcc, axes=(0,))
+        adj = -nx.sign(sx.start) * xcc.shape[0]/2
+        sx  = slice(sx.start+adj, sx.stop+adj)
+    if sy.start < 0 or sy.stop > xcc.shape[1]:
+        xcc = fftshift(xcc, axes=(1,))
+        adj = -nx.sign(sy.start) * xcc.shape[1]/2        
+        sy  = slice(sy.start+adj, sy.stop+adj)        
+    #print "x: %s; y: %s" % (sx, sy)
+    xcc = xcc[sx,sy]
+    return xcc
+    #return xcc.max()
 
-def smatrix(stims, dfun=sxcorr, norm=True, **kwargs):
+def smaxcorr(a,b,**kwargs):
+    return sxcorr(a,b,**kwargs).max()
+
+def smatrix(stims, dfun=smaxcorr, norm=True, **kwargs):
     """
     Constructs the dissimilarity matrix for a set of stimuli. Each pair of
     stimuli is passed to <dfun>, which should return a single number. The
@@ -186,22 +213,30 @@ def smatrix(stims, dfun=sxcorr, norm=True, **kwargs):
     else:
         return S
 
+@drawoffscreen
 def plotstims(stims):
-    from pylab import clf, subplot, imshow, title, isinteractive,ioff,ion,draw
+    from pylab import clf, subplot, imshow, title, ylabel, setp
 
-    retio = isinteractive()
-    ioff()
     nstims = len(stims)
     x = nx.ceil(nx.sqrt(nstims))
     clf()
     i = 1
-    for n,s in stims.items():
-        subplot(x,x,i)
-        imshow(s)
-        title(n)
+    snames = stims.keys()
+    snames.sort()
+    for n in snames:
+        a = subplot(x,x,i)
+        imshow(stims[n], aspect='equal')
+        setp(a,'xticklabels',[],'yticklabels',[])
+        ylabel(n)
         i += 1
-    if retio: ion()
-    draw()
+
+
+def writesmat(filename, names, values):
+    from scipy.io import write_array
+
+    fp = open(filename,'wt')
+    fp.write(" ".join(stims.keys()) + "\n")
+    write_array(fp, values, keep_open=False)
     
 
 if __name__=="__main__":
@@ -210,27 +245,27 @@ if __name__=="__main__":
     from motifdb import db
     from spikes import stat
     from dlab.stringutils import uniquemiddle
-    basename = 'cell_11_4_1'
-    respdir = '/z1/users/dmeliza/acute_data/st298/20061213/cell_11_4_1/'
+    #basename = 'cell_11_4_1'
+    #respdir = '/z1/users/dmeliza/acute_data/st298/20061213/cell_11_4_1/'
     stimdir = '/z1/users/dmeliza/stimsets/simplseq2/acute'
     bandwidth = 5.
-    swindow = 200
-    rthresh = 0.01
-    sthresh = 0.1
+    swindow = 100
+    rthresh = 0.10
+    sthresh = 0.2
     m = db.motifdb()
     motifs = m.get_motifs()
 
     # try to guess basename
-    #toefiles = [x for x in os.listdir('.') if x.endswith('.toe_lis')]
-    #basename = uniquemiddle(toefiles)[1][:-1]
+    toefiles = [x for x in os.listdir('.') if x.endswith('.toe_lis')]
+    basename = uniquemiddle(toefiles)[1][:-1]
 
-    print "Loading toelis files from the current directory"
+    print "Loading toelis files (%s...) from the current directory." % basename
     # load toelis files
     tls = {}
     frates = {}
     for motif in motifs:
         try:
-            tll = stat.aggregate(m, motif, basename, respdir)
+            tll = stat.aggregate(m, motif, basename)
             tls[motif] = tll[motif]
             frates[motif] = frate(tls[motif], bandwidth=bandwidth)[1]
         except ValueError:
@@ -251,16 +286,18 @@ if __name__=="__main__":
 ##                 frates[stimname] = frate(tls[stimname], bandwidth=bandwidth)[1]
     
     #m,v = background(tls.values())
+    print "Extracting features for responses > %3.2f" % rthresh
     stims = {}
     for n,tl in tls.items():
         resps = resppeaks(tl, rthresh, bandwidth=bandwidth)
         if len(resps) > 0:
             print "Preprocessing %d stimuli from %s" % (resps.shape[0], n)
             ss = getstimuli(resps, os.path.join(stimdir,n +'.pcm'),
-                            swindow, maxlag=100, bkgnd=sthresh, shift=20)
+                            swindow, maxlag=100, bkgnd=sthresh, sigpad=True, shift=20)
             #ss = getstimuli(resps, m.get_motif_data(n), 200, shift=20)
             for i in range(len(ss)):
                 stims['%s_%d' % (n,i)] = ss[i]
 
+    print "Found %d features" % len(stims)
     del m
     #smat  = smatrix(stims)
