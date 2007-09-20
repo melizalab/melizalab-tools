@@ -74,7 +74,7 @@ def toestat(tl, rrange, srange, binsize=10., maxrep=None):
     return tl.nrepeats, rf.mean(), rf.var(), sf.mean(), sf.var()
 
 def toestat_motifs(tls, motif_db, binsize=10., silence=(-1000.,0.), poststim=200):
-    from scipy import zeros
+    from numpy import zeros
     m = motif_db
     mnames = []
     out = zeros((len(tls),5),dtype='d')
@@ -85,6 +85,50 @@ def toestat_motifs(tls, motif_db, binsize=10., silence=(-1000.,0.), poststim=200
         mnames.append(motif)
 
     return mnames, out
+
+def meanrate(tl, rrange, maxrep=None, dt=1000):
+    """
+    Computes the mean firing rate (i.e. spikes per unit time) over a time period.
+    Returns a vector of doubles, one for each repeat.
+    """
+    from numpy import zeros, sum
+    out = zeros(tl.nrepeats)
+    delta = float(rrange[1] - rrange[0]) / dt 
+    if maxrep != None:
+        maxrep = min(maxrep, tl.nrepeats)
+    else:
+        maxrep = tl.nrepeats
+
+    for i in range(0,maxrep):
+        rep = tl.unit(0).events[i]
+        out[i] = sum( (rep >= rrange[0]) & (rep < rrange[1])) / delta
+
+    return out
+
+def instrate(tl, rrange, maxrep=None, dt=1000):
+    """
+    Computes the mean firing rate from the instantaneous firing rate (i.e.
+    the reciprocal of the ISIs in the analysis window
+    """
+    from numpy import zeros, diff, mean
+    out = zeros(tl.nrepeats)
+    if maxrep != None:
+        maxrep = min(maxrep, tl.nrepeats)
+    else:
+        maxrep = tl.nrepeats
+
+    for i in range(0,maxrep):
+        rep = tl.unit(0).events[i] / dt
+        ind = (rep >= rrange[0]) & (rep < rrange[1])
+        isi = diff (rep [ind])
+        if isi.size == 0:
+            # revert to count for 1 or 0 spikes
+            out[i] = sum(ind) / float(rrange[1] - rrange[0]) * dt
+        else:
+            out[i] = mean (1 / diff( rep[ind]))
+
+    return out
+    
 
 def aggregate_base(basename, motif_db, dir='.', motif_pos=None):
     """

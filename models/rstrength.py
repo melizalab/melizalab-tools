@@ -85,8 +85,43 @@ def rstrength_ci(tls, rrange, srange, binsize=10., nboot=100, alpha=0.05):
 
     return rs
 
-_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
-_hdr = "bird\tcell\tmotif\tnreps\tRS\tRS.l\tspon.m\tresp.m\tresp.on\tresp.off"
+def zscores(tls, rranges, srange):
+    """
+    Calculate z-score of responses to each stimulus. The zscore is the
+    difference in means normalized by the determinant of the covariance
+    matrix [sqrt(var_s^2, var_spont^2 - 2 Cov_{s,spont})]
+
+    Due to the low firing rate of some of these cells it's necessary
+    to calculate the mean and variance of the spontaneous activity, as well
+    as the covariance, from all the repeats.
+    """
+    # calcuate spontaneous stats on whole dataset
+    sratesall = []
+    rratesall = []
+    rratesdict = {}
+
+    for stim, tl in tls.items():
+        bgrates = stat.meanrate(tl, srange)
+        rrates = stat.meanrate(tl, rranges[stim])
+        sratesall.append(bgrates)
+        rratesall.append(rrates)
+        rratesdict[stim] = rrates
+
+    #return sratesall, rratesall, rratesdict
+    sratesall = nx.concatenate(sratesall)
+    spontmean = sratesall.mean()
+    spontstats = nx.cov(sratesall,
+                        nx.concatenate(rratesall))
+
+    out = {}
+    for stim, rrates in rratesdict.items():
+        out[stim] = (rrates.mean() - spontmean) / nx.sqrt(nx.cov(rrates).tolist() + spontstats[0,0] + \
+                                                    2 * spontstats[0,1])
+        
+    return out
+
+_statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
+_hdr = "bird\tcell\tmotif\tnreps\tRS\tRS.l\tspon.m\tresp.m\tz.resp\tresp.on\tresp.off"
 _statfxn = rstrength_ci
 
 def singstats(dir, motif_db, bird="", **kwargs):
@@ -119,12 +154,13 @@ def singstats(dir, motif_db, bird="", **kwargs):
     
     # get stats
     bstats = _statfxn(tls, rrange, silence, binsize, nboot, alpha)
+    zsc = zscores(tls, rrange, silence)
     
     for motif, tl in tls.items():
         tlstats = stat.toestat(tl, rrange[motif], silence, binsize)
         print _statfmt \
               % ((bird, basename, motif, tl.nrepeats) +
-                 bstats[motif] + tlstats[3:4] + tlstats[1:2] + rrange[motif])
+                 bstats[motif] + tlstats[3:4] + tlstats[1:2] + (zsc[motif],) + rrange[motif])
 
 def aggstats(dir, motif_db, bird="", **kwargs):
     """
