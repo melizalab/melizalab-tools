@@ -9,6 +9,110 @@ from dlab import toelis
 
 _tstat = "toestat"
 
+def isi(tl, rrange=None):
+    """ Returns a list of interspike intervals, one entry per repeat """
+    from numpy import diff
+    rates = []
+    for rep in tl:
+        if rrange!=None:
+            ind = (rep >= rrange[0]) & (rep < rrange[1])
+            ev  = rep[ind]
+        else:
+            ev  = rep
+        if ev.size == 0:
+            rates.append([])
+        elif ev.size == 1:
+            rates.append(1. * diff(rrange))
+        else:
+            isi = diff (ev)
+            rates.append(isi)
+    return rates
+
+def meanrate(tl, rrange, maxrep=None, dt=1000):
+    """
+    Computes the mean firing rate (i.e. spikes per unit time) over a time period.
+    Returns a vector of doubles, one for each repeat.
+    """
+    from numpy import zeros, sum
+    out = zeros(tl.nrepeats)
+    delta = float(rrange[1] - rrange[0]) / dt 
+    if maxrep != None:
+        maxrep = min(maxrep, tl.nrepeats)
+    else:
+        maxrep = tl.nrepeats
+
+    for i in range(0,maxrep):
+        rep = tl.unit(0).events[i]
+        out[i] = sum( (rep >= rrange[0]) & (rep < rrange[1])) / delta
+
+    return out
+
+def histomat(tl, onset=None, offset=None, binwidth=10.):
+    """
+    Compute histograms for each repeat of the toelis and returns a matrix
+    in which each cell contains the number of spikes observed during that
+    bin of that repeat.
+    """
+    from numpy import zeros, ceil
+    from dlab.datautils import histogram
+    rrange = tl.range
+    if onset==None:
+        onset = rrange[0]
+    if offset==None:
+        offset = rrange[1]
+    nbins = ceil((offset - onset) / binwidth)
+    
+    out = zeros((tl.nrepeats, nbins), dtype='i')
+    for i in range(tl.nrepeats):
+        out[i,:] = histogram([tl[i]], onset, offset, binwidth)[1]
+
+    return out
+
+def covar(tl, onset=None, offset=None, binwidth=10.):
+    """
+    Computes the mean fano factor for all bins with nonzero firing rate
+    """
+    from numpy import sqrt
+    
+    z = histomat(tl, onset, offset, binwidth)
+    m = z.mean(0)
+    v = z.var(0) * z.shape[0] / (z.shape[0]-1)  # unbiased, please
+    ind = m > 0
+    ff = sqrt(v[ind]) / m[ind]
+    return ff.mean()
+
+def varfac(tl, onset=None, offset=None, binwidth=10.):
+    """
+    Computes the ratio of the mean variance in bin count vs the variance
+    of the bin count means
+    """
+    z = histomat(tl, onset, offset, binwidth)
+    return z.mean(0).var() / z.var(0).mean()
+
+def stat_timescale(tl, statfun=varfac, onset=None, offset=None, binwidths=None, step=0.5):
+    """
+    Computes a statistic at a variety of different time scales.
+    If binwidths is not supplied, a logarithmic series from 1 ms to
+    the stimulus length is used.
+    """
+    step = 0.5
+    from numpy import arange, log, exp
+    rrange = tl.range
+    if onset==None:
+        onset = rrange[0]
+    if offset==None:
+        offset = rrange[1]
+    if binwidths==None:
+        stimlen = offset - onset
+        r = arange(0, log(stimlen)+step, step)
+        binwidths = exp(r)
+
+    out = binwidths.copy()
+    for i in range(binwidths.size):
+        out[i] = statfun(tl, onset, offset, binwidths[i])
+
+    return out
+    
 
 def toestat_rs(file, stim_times, background_times, binwidth=10):
     """
@@ -85,25 +189,6 @@ def toestat_motifs(tls, motif_db, binsize=10., silence=(-1000.,0.), poststim=200
         mnames.append(motif)
 
     return mnames, out
-
-def meanrate(tl, rrange, maxrep=None, dt=1000):
-    """
-    Computes the mean firing rate (i.e. spikes per unit time) over a time period.
-    Returns a vector of doubles, one for each repeat.
-    """
-    from numpy import zeros, sum
-    out = zeros(tl.nrepeats)
-    delta = float(rrange[1] - rrange[0]) / dt 
-    if maxrep != None:
-        maxrep = min(maxrep, tl.nrepeats)
-    else:
-        maxrep = tl.nrepeats
-
-    for i in range(0,maxrep):
-        rep = tl.unit(0).events[i]
-        out[i] = sum( (rep >= rrange[0]) & (rep < rrange[1])) / delta
-
-    return out
 
 def instrate(tl, rrange, maxrep=None, dt=1000):
     """
