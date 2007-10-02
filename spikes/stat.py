@@ -350,3 +350,211 @@ def splitmotifs(mlist):
         iatom += 1
 
     return out
+
+def kernfun(name, bandwidth, spacing):
+    """
+    Computes the values of a kernel function of type NAME with
+    bandwidth BANDWIDTH and returns them in an array W.  The values
+    are those on a grid with spacing SPACING>0.  The corresponding
+    grid points are returned as NAME is a string specifying the name
+    of the kernel.  If not specified or input as an empty string, the
+    square window function will be used.  NAME can be one of the
+    following strings:
+
+	- 'gaussian' or 'normal'
+	- 'exponential'
+	- 'uniform', or 'box' (='square')
+	- 'triangle'
+	- 'epanech' (Epanechnikov kernel)
+	- 'biweight' or 'quartic'
+	- 'triweight'
+	- 'cosinus'
+	- 'hamming'
+	- 'hanning'
+
+    Returns (W,G).
+
+    From matlab code by Zhiyi Chi
+    """
+    from numpy import ones, exp, absolute, arange, minimum, maximum, \
+         cos, pi, sum, floor
+    
+    from scipy.signal import get_window
+    
+    D = bandwidth
+    if name in ('normal', 'gaussian'):
+      D = 3.75*bandwidth
+    elif name == 'exponential':
+      D = 4.75*bandwidth
+
+    # How many grid points in half of the support
+    N = floor(D/spacing)
+
+    # Get the grid of the support scaled by [bandwidth]
+    G = (arange(1, 2*N+2)-1-N)*spacing
+    #G=((1:2*N+1)-1-N)*spacing
+
+    # Different types of kernels.  For kernel function F, W consists of
+    # F(x/bandwidth), for x on the grid.  The integral of F(x/bandwidth) is
+    # 1/bandwidht*INTEGRAL(F), and can be approximated by SUM(W)*[spacing].
+    xv =  G/bandwidth
+
+    if name in ('square', 'uniform', 'box'):
+        W = ones(2*N+1)
+    elif name in ('gaussian', 'normal'):
+        W = exp(-xv * xv/2)
+    elif name == 'exponential':
+        xv = minimum(xv,0)
+        W = absolute(xv) * exp(xv)
+    elif name == 'triangle':
+        W = maximum(0, 1 - abs(xv))
+    elif name == 'epanech':
+        W = maximum(0, 1 - xv * xv)
+    elif name in ('biweight', 'quartic'):
+        W = maximum(0, 1 - xv * xv)**2
+    elif name == 'triweight':
+        W = maximum(0, 1 - xv * xv)**3
+    elif name == 'cosinus':
+        W = cos(pi*xv/2) * (absolute(xv)<=1)
+    elif name == 'hamming':
+        W = get_window('hamming', 1+2*N)
+    elif name == 'hanning':
+        W = get_window('hanning', 1+2*N)
+    else:
+        raise NameError, 'Selected kernel function %s not defined.' % name
+
+    # Normalize the weights
+    W = W/(sum(W)*spacing)
+
+    return W,G
+    
+
+def kernrates(tl, kernresol, bandwidth, kernel='square',
+              onset=None, offset=None, gridspacing=None):
+    from numpy import arange
+
+    if onset==None:
+        onset = tl.range[0]
+    if offset==None:
+        offset = tl.range[1]
+
+    kwts,kgrid = kernfun(kernel, bandwidth, kernresol)
+
+    rmat = vp_pttnmatch(tl, kwts, kernresol, onset+kgrid[0], offset+kgrid[0],
+                             gridspacing)
+
+    grid = arange(onset, offset, gridspacing)
+    return rmat, grid
+    
+
+def vp_pttnmatch(events, kern, kernresol, ton=None, toff=None, stepsize=None):
+    """
+    Convolves a series of points S on time with a function F on [0 A], i.e:
+
+    g(x) = SUM   F(s-x)
+          s in S
+
+    Inputs:
+    events - a list of numpy ndarrays (real, 1D)
+    kern - the convolution function, input as a lookup table (real, 1D)
+    kernresol - specifies the temporal resolution of fun
+    ton - the starting time; if None, defaults to the first time in events
+    toff - the stop time; if None, defaults to the last time in events
+    stepsize - defaults to resol
+
+    Outputs:
+    M - a matrix storing the values of g(x) on a grid, with as many columns
+        as there are elements in events, and (toff-ton)*stepsize rows
+    S - the time points of the grid for g(x)
+
+    """
+    from numpy import ndarray, ceil, zeros
+
+    mn = 0
+    mx = 0
+    for ev in events:
+        assert isinstance(ev, ndarray), "Argument <events> must be a list of numpy ndarrays"
+        mn = min(mn, ev.min())
+        mx = max(mx, ev.max())
+
+    assert isinstance(kern, ndarray) and kern.ndim==1, "Argument <kern> must be a 1D ndarray"
+    assert kernresol > 0, "Argument <kernresol> must be a positive real number."
+
+    # determine stop and start times
+    if ton==None:
+        ton = mn
+    if toff==None:
+        toff = mx
+    if stepsize==None:
+        stepsize = kernresol
+
+    gridsize = ceil((toff - ton) / stepsize)
+    rmat = zeros((gridsize, len(events)))
+    for i in range(len(events)):
+        rmat[:,i] = discreteconv(events[i], kern, kernresol, ton, toff, stepsize)
+
+    return rmat
+
+
+def discreteconv(points, kern, kernresol, ton, toff, stepsize):
+    """
+    Computes discrete convolution of a time series with a kernel
+    """
+    from numpy import ceil, zeros
+    from scipy import weave
+
+    gridsize = ceil((toff - ton) / stepsize)
+    out = zeros(gridsize)
+
+    code = """
+    #line 505 "stat.py"
+    int PN = *Npoints;
+    int WN = *Nkern;
+    int NT = (int)gridsize;
+    double W_dur = WN*kernresol;
+    double Onset = ton;
+    double Offset = toff;
+
+    for (int ipt = 0; ipt < PN; ipt++) {
+            double cur_point = points[ipt];
+
+            // check that the time is within the analysis window
+            if (cur_point < Onset || cur_point > Offset)
+                    continue;
+
+            // compute time relative to the initial point of the grid
+            cur_point -= Onset;
+
+            // find the nearest grid point to the left of the current point
+            int dt = (int)floor( cur_point / stepsize);
+
+            // If function f is tranlated to the time grid point, the relative
+            // location of the current point in the support of the function f
+            double rel_loc = cur_point - stepsize * (double)dt;
+
+            while (rel_loc <= W_dur && dt >= 0) {
+
+
+                    /* Use linear interpolation to compute the change to each time
+                       grid point */
+
+                    /* Among the grid points for function [f], find the right most
+                       one to the left to the current point.
+                    */
+                    double dR = rel_loc / kernresol;
+                    int  drel_loc = (int)floor(dR);
+                    if (dt < NT && drel_loc < WN ) {
+                            double dx = dR - drel_loc;
+                            out[dt] += (1.0 - dx) * kern[drel_loc];
+                            if ( drel_loc < WN - 1) 
+                                    out[dt] += dx * kern[drel_loc+1];
+                    }
+                    dt --;
+                    rel_loc += stepsize;
+            }
+    }
+    """
+
+    weave.inline(code, ['points', 'kern', 'kernresol', 'ton', 'toff', 'stepsize',
+                        'gridsize', 'out'])
+    return out
