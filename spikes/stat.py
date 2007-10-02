@@ -70,7 +70,8 @@ def histomat(tl, onset=None, offset=None, binwidth=10.):
 
 def covar(tl, onset=None, offset=None, binwidth=10.):
     """
-    Computes the mean fano factor for all bins with nonzero firing rate
+    Computes the mean coefficient of variance (sd/mean)
+    for all bins with nonzero firing rate.
     """
     from numpy import sqrt
     
@@ -78,8 +79,8 @@ def covar(tl, onset=None, offset=None, binwidth=10.):
     m = z.mean(0)
     v = z.var(0) * z.shape[0] / (z.shape[0]-1)  # unbiased, please
     ind = m > 0
-    ff = sqrt(v[ind]) / m[ind]
-    return ff.mean()
+    cv = sqrt(v[ind]) / m[ind]
+    return cv.mean()
 
 def varfac(tl, onset=None, offset=None, binwidth=10.):
     """
@@ -88,30 +89,6 @@ def varfac(tl, onset=None, offset=None, binwidth=10.):
     """
     z = histomat(tl, onset, offset, binwidth)
     return z.mean(0).var() / z.var(0).mean()
-
-def stat_timescale(tl, statfun=varfac, onset=None, offset=None, binwidths=None, step=0.5):
-    """
-    Computes a statistic at a variety of different time scales.
-    If binwidths is not supplied, a logarithmic series from 1 ms to
-    the stimulus length is used.
-    """
-    step = 0.5
-    from numpy import arange, log, exp
-    rrange = tl.range
-    if onset==None:
-        onset = rrange[0]
-    if offset==None:
-        offset = rrange[1]
-    if binwidths==None:
-        stimlen = offset - onset
-        r = arange(0, log(stimlen)+step, step)
-        binwidths = exp(r)
-
-    out = binwidths.copy()
-    for i in range(binwidths.size):
-        out[i] = statfun(tl, onset, offset, binwidths[i])
-
-    return out
     
 
 def toestat_rs(file, stim_times, background_times, binwidth=10):
@@ -431,6 +408,24 @@ def kernfun(name, bandwidth, spacing):
 
 def kernrates(tl, kernresol, bandwidth, kernel='square',
               onset=None, offset=None, gridspacing=None):
+    """
+    Estimate the rate of a point process by convolving event
+    times with a kernel.
+
+    Inputs:
+    tl - a dlab.toelis object
+    kernresol - the resolution of the kernel
+    bandwidth - the bandwidth of the kernel
+    kernel - the type of kernel to use. See kernfun for details
+    onset - only include times after this value, if set
+    offset - only include times before this value, if set
+    gridspacing - the resolution of the output. Defaults to kernresol
+
+    Outputs: (rmat,grid)
+    rmat - rate matrix. One column per repeat in tl, one row for each time point
+    grid - the time points for rmat (1D vector
+    """
+    
     from numpy import arange
 
     if onset==None:
