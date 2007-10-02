@@ -341,6 +341,10 @@ def splitmotifs(mlist):
             elif next=='REC':
                 out.append("%sR" % mname)
                 iatom += 1
+            elif next in ('mn','ps'):
+                # modulated noise and phase-scrambled
+                out.append("%s(%s)" % (mname, next))
+                iatom += 1
             else:
                 out.append(mname)
         iatom += 1
