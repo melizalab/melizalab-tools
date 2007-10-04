@@ -309,7 +309,93 @@ class texplotter(object):
             shutil.move('texplotter.pdf', filename)
         finally:
             os.chdir(pwd)
-            
+
+
+def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
+                bottom=0.1, top = 0.9, **kwargs):
+    """
+    Generates a series of plots neighboring each other horizontally and with common
+    y offset and height values.
+
+    kwargs - passed to axes command
+    """
+    from pylab import axes
+    
+    ax = []
+    xwidth = (xstop - xstart - spacing * (nplots-1))/ nplots
+    xpos = xstart
+    yheight = top - bottom
+    for j in range(nplots):
+        rect = [xpos, bottom, xwidth, yheight]
+        a = fig.add_axes(rect, **kwargs)
+        xpos += xwidth + spacing
+        ax.append(a)
+
+    return ax
+
+def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
+                left=0.1, right=0.9, **kwargs):
+    """
+    Generates a series of plots neighboring each other vertically and with common
+    x offset and height values.
+
+    kwargs - passed to axes command
+    """
+    from pylab import axes
+    
+    ax = []
+    yheight = (ystop - ystart - spacing * (nplots-1))/ nplots
+    ypos = ystart
+    xwidth = right - left
+    for j in range(nplots):
+        rect = [left, ypos, xwidth, yheight]
+        a = fig.add_axes(rect, **kwargs)
+        ypos += yheight + spacing
+        ax.append(a)
+
+    return ax
+
+def setframe(ax, lines=1100):
+    """
+    Set which borders of the axis are visible.  Note that subsequent calls
+    to plot usually change these settings.
+
+    lines - either a list of 4 values or a number with 4 digits. The values
+            set which lines are visible: [left bottom right top]
+
+    Example: setaxislines(ax, 1100) sets only the bottom and top axes visible
+    """
+    from matplotlib.lines import Line2D
+
+    if isinstance(lines, int):
+        lines = '%04d' % lines
+    if isinstance(lines, str):
+        lines = [int(x) for x in lines]
+
+    ax.set_frame_on(0)
+    # Specify a line in axes coords to represent the left and bottom axes.
+    val = 0#0.00001
+    if lines[0]:
+        ax.add_line(Line2D([val, val], [0, 1], transform=ax.transAxes, c='k'))
+        ax.yaxis.set_ticks_position('left')
+    if lines[1]:
+        ax.add_line(Line2D([0, 1], [val, val], transform=ax.transAxes, c='k'))
+        ax.xaxis.set_ticks_position('bottom')
+    if lines[2]:
+        ax.add_line(Line2D([0, 1], [1-val, 1-val], transform=ax.transAxes, c='k'))
+        ax.yaxis.set_ticks_position('right')        
+    if lines[3]:
+        ax.add_line(Line2D([1-val, 1-val], [1, 0], transform=ax.transAxes, c='k'))
+        ax.xaxis.set_ticks_position('top')
+
+    if lines[0] and lines[2]:
+        ax.yaxis.set_ticks_position('both')
+    if not (lines[0] or lines[2]):
+        ax.yaxis.set_visible(0)
+    if lines[1] and lines[3]:
+        ax.yaxis.set_ticks_position('both')
+    if not (lines[1] or lines[3]):
+        ax.xaxis.set_visible(0)
 
 if __name__=="__main__":
 
