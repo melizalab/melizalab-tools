@@ -42,8 +42,8 @@ def plotresps(basename, motifname, motif_db,
 
     tls = stat.aggregate(motif_db, motifname, basename, dir, motif_pos)
     ptitle = plottitle if plottitle!=None else "%s - %s" % (basename, motifname)
-    shifted = [x for x in tls.keys() if x.find('t')!=-1]
-    
+    shifted = [x for x in tls.keys() if x.find('t')!=-1 or x.find('g',2)!=-1]
+ 
     if len(shifted)>1:
         tls_shifted = dict([(x,tls.pop(x)) for x in shifted])
         return [_plotresps(tls, motifname, motif_db, padding, featmap, ptitle, maxreps),
