@@ -114,10 +114,17 @@ def dcontour(*args, **kwargs):
     DCONTOUR(I) plots the unique levels in I
     DCONTOUR(X,Y,I) - X,Y specify the (x,y) coordinates of the points in Z
 
-    Note that arbitrary labels aren't supported very well at present
-    so we can't get labels
+    Optional arguments:
+
+    smooth - specify a float or 2-ple of floats, which are used to gaussian filter
+             each data level prior to contouring (which gives smoother contour lines)
+             
+    Other keyword arguments are passed to contour()
     """
-    from pylab import contour, hold
+    from pylab import contour
+    from scipy.ndimage import gaussian_filter
+
+    smooth = kwargs.get('smooth', None)
     
     I = args[0]
     if len(args) > 1:
@@ -127,26 +134,31 @@ def dcontour(*args, **kwargs):
     
     labels = nx.unique(I[I>-1])
 
-    hold(True)
     h = []
-    cc = colorcycle
+
     for i in labels:
-        hh = contour(X, Y, I==i,1, colors=colorcycle(i))
+        if smooth!=None:
+            data = gaussian_filter((I==i).astype('d'), smooth)
+        else:
+            data = I==i
+        hh = contour(X, Y, data,1, colors=colorcycle(i), hold=1, **kwargs)
         h.append(hh)
 
-    hold(False)
     return h
+
+_manycolors = ['b','g','r','#00eeee','m','y',
+               'teal',  'maroon', 'olive', 'orange', 'steelblue', 'darkviolet',
+               ]
     
-def colorcycle(ind=None):
+def colorcycle(ind=None, colors=_manycolors):
     """
     Returns the color cycle, or a color cycle, for manually advancing
     line colors.
     """
-    cc = ['b','g','r','c','m','y']
     if ind != None:
-        return cc[ind % len(cc)]
+        return colors[ind % len(colors)]
     else:
-        return cc
+        return colors
     
 def cmap_discretize(cmap, N):
     """
