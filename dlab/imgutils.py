@@ -95,7 +95,8 @@ def gausskern(sigma):
     from dlab.linalg import outer
 
     w = [gaussian(int(x*4), x) for x in sigma]
-    return outer(*w)
+    x = outer(*w)
+    return x / x.max()
 
 def xcorr2(a2,b2):
     """ 2D cross correlation (unnormalized) """
