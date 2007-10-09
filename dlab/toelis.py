@@ -162,6 +162,12 @@ class toelis(object):
         id = self.index[:,unit]
         return toelis(data=[self.events[i] for i in id])
 
+    def repeats(self, repeats):
+        """
+        Retrieve particular repeats from the toelis object (as a new toelis)
+        """
+        id = self.index[repeats,:]
+        return toelis(data=[self.events[i] for i in id])
 
     def __serializeunit(self, unit):
         """
@@ -205,25 +211,26 @@ class toelis(object):
             fp.close()
     # end writefile
 
-    def rasterpoints(self, unit=0):
+    def rasterpoints(self, unit=0, reps=None):
         """
         Rasterizes the data from a unit as a collection of x,y points,
         with the x position determined by the event time and the y position
-        determined by the repeat index. Returns a tuple of lists, (x,y)
+        determined by the repeat index. Returns a tuple of arrays, (x,y)
+
+        unit - control which unit gets rasterized
+        reps - control which repeats get included (slice or range)
         """
-        x = []
-        y = []
-        repnum = 0
-        for ri in self.index[:,unit]:
-            nevents = len(self.events[ri])
-            y.extend([repnum for i in range(nevents)])
-            x.extend(self.events[ri])
-            repnum += 1
-        return (x,y)
+        x = self.unit(unit).events
+        if reps != None:
+            x = x[reps]
+        
+        y = n.concatenate([n.ones(x[i].shape) * i for i in range(len(x))])
+        x = n.concatenate(x)
+        return x,y
 
 
     def histogram(self, onset=None, offset=None,
-                  unit=0, repeats=None, binsize=20., normalize=False):
+                  binsize=20., normalize=False):
         """
         Converts the response data to a frequency histogram, i.e.
         the number of events in a time bin. Returns a tuple
@@ -232,16 +239,10 @@ class toelis(object):
         Optional arguments:
         <onset> - only events after <onset> are included
         <offset> - only events before <offset> are included
-        <unit> - the unit to compute the histogram of (default 0)
-        <repeats> - restrict analysis to the given repeats (list or slice)
         <binsize> - the size of the bins in ms (default 20.)
         <normalize> - if True, return spikes/sec, otherwise total spike counts
         """
-        if repeats==None:
-            repeats = slice(None)
-            
-        data = [self.events[ri] for ri in self.index[repeats,unit]]
-        bins, freq = histogram(data, onset=onset, offset=offset, binsize=binsize)
+        bins, freq = histogram(self.events, onset=onset, offset=offset, binsize=binsize)
         if normalize:
             freq =  freq.astype('d') / (len(data) * binsize)
             
