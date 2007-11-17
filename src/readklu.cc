@@ -1,14 +1,8 @@
-#include <boost/python/module.hpp>
-#include <boost/python/def.hpp>
-#include <boost/python/list.hpp>
-#include <boost/python/extract.hpp>
-#include <boost/python/overloads.hpp>
-#include <boost/python/args.hpp>
+#include <Python.h>
 #include <cstdio>
 #include <vector>
 #include <set>
 #include <map>
-using namespace boost::python;
 using std::vector;
 using std::set;
 using std::map;
@@ -33,7 +27,7 @@ getclusters(FILE* cfp, set<int> &clusters)
 }
 
 static void
-readklu(FILE* cfp, FILE* ffp, const list& atimes, map<int, vector<vector<long> > > &uvec) 
+readklu(FILE* cfp, FILE* ffp, const vector<long>& atimes, map<int, vector<vector<long> > > &uvec) 
 {
 
 	int rp = 0;
@@ -60,7 +54,7 @@ readklu(FILE* cfp, FILE* ffp, const list& atimes, map<int, vector<vector<long> >
 	//printf("Events: %ld\n", nlines);
 	//printf("Valid clusters: %d\n", (int)clusters.size());
 	// allocate storage
-	int nepisodes = len(atimes);
+	int nepisodes = atimes.size();
 	uvec.clear();
 	//printf("Episodes: %d\n", nepisodes);
 	for (set<int>::const_iterator it = clusters.begin(); it != clusters.end(); it++) {
@@ -71,8 +65,8 @@ readklu(FILE* cfp, FILE* ffp, const list& atimes, map<int, vector<vector<long> >
 	// now iterate through the two files concurrently
 	// while matching times to the episode times
 	int episode = 0;
-	long et = extract<long>(atimes[episode]);
-	long nt = extract<long>(atimes[episode+1]);
+	long et = atimes[episode];
+	long nt = atimes[episode+1];
 	long atime;
 	//printf("Start time: %ld\n", et);
 	//printf("Episode %d: ", episode);
@@ -92,7 +86,7 @@ readklu(FILE* cfp, FILE* ffp, const list& atimes, map<int, vector<vector<long> >
 				//printf("\nEpisode %d: ", episode);
  				et = nt;
 				if (episode+1 < nepisodes) 
-					nt = extract<long>(atimes[episode+1]);
+					nt = atimes[episode+1];
 				else
 					nt = -1;
  			}
@@ -103,38 +97,73 @@ readklu(FILE* cfp, FILE* ffp, const list& atimes, map<int, vector<vector<long> >
 
 }
 
-// a wrapper for getclusters
-list rk_getclusters(const std::string& cname) 
+static PyObject*
+readklu_getclusters(PyObject* self, PyObject* args)
 {
-	
+	const char *cname;
+	if (!PyArg_ParseTuple(args, "s", &cname))
+		return NULL;
 	FILE *cfp;
-	if ((cfp = fopen(cname.c_str(), "rt"))==NULL)
-		throw std::ios_base::failure("Could not open file " + cname);
-
+	if ((cfp = fopen(cname, "rt"))==NULL) {
+		PyErr_SetString(PyExc_IOError, "Unable to open file");
+		return NULL;
+	}
+	
 	set<int> clusters;
 	getclusters(cfp, clusters);
-
 	fclose(cfp);
-	list out;
-	for (set<int>::const_iterator it = clusters.begin(); it != clusters.end(); it++)
-		out.append(*it);
+
+	// construct a list of the clusters
+	PyObject* out = PyList_New(clusters.size());
+	int i = 0;
+	for (set<int>::const_iterator it = clusters.begin(); it != clusters.end(); it++, i++)
+		PyList_SetItem(out, i, PyInt_FromLong((long)*it));
 
 	return out;
 }
 
- 
-list rk_readclusters(const std::string& fname, const std::string& cname,
-		     const list& atimes, float samplerate=20.0)
+static PyObject*
+readklu_readclusters(PyObject* self, PyObject* args)
 {
-	
+	const char *fname, *cname;
+	PyObject *abstimes, *iterator, *item;
+	float samplerate = 20.0;
+	vector<long> atimes;
+
+	if (!PyArg_ParseTuple(args, "ssO|f", &fname, &cname, &abstimes, &samplerate))
+		return NULL;
+	iterator = PyObject_GetIter(abstimes);
+	if (iterator == NULL) {
+		PyErr_SetString(PyExc_TypeError, "abstimes must be a sequence");
+		return NULL;
+	}
+
+	// open the files
 	FILE *cfp, *ffp;
-	
-	// open the filenames
-	if ((cfp = fopen(cname.c_str(), "rt"))==NULL)
-		throw std::ios_base::failure("Could not open file " + cname);
-	if ((ffp = fopen(fname.c_str(), "rt"))==NULL)
-		throw std::ios_base::failure("Could not open file " + fname);
-				
+	if ((cfp = fopen(cname, "rt"))==NULL) {
+		PyErr_Format(PyExc_IOError, "Unable to open file %s", cname);
+		return NULL;
+	}
+	if ((ffp = fopen(fname, "rt"))==NULL) {
+		PyErr_Format(PyExc_IOError, "Unable to open file %s", fname);
+		return NULL;
+	}
+
+	// convert atimes to a vector
+	while ((item = PyIter_Next(iterator))) {
+		long atime = PyInt_AsLong(item);
+		if (atime < 0) break;  // negative numbers are bad, or indicate non-integers
+		atimes.push_back(atime);
+		Py_DECREF(item);
+	}
+	Py_DECREF(iterator);
+
+	if (PyErr_Occurred()) {
+		PyErr_SetString(PyExc_TypeError, "Elements of abstimes must be positive integers");
+		return NULL;
+	}
+
+	// run the cluster grouping function
 	map<int, vector<vector<long> > > uvec;
 	readklu(cfp, ffp, atimes, uvec);
 
@@ -142,32 +171,41 @@ list rk_readclusters(const std::string& fname, const std::string& cname,
 	fclose(ffp);
 
 	// convert output to python lists
-	list ulist;
+	PyObject *ulist, *rlist, *events;
+	ulist = PyList_New(0);
+
 	for (map<int, vector<vector<long> > >::const_iterator it = uvec.begin();
 	     it != uvec.end(); it++) {
 		int unit = it->first;
 		//printf("cluster %d.\n", unit);
 		int nreps = uvec[unit].size();
-		list rlist;
+		rlist = PyList_New(nreps);
 		for (int j = 0; j < nreps; j++) {
-			list events;
 			int nevents = uvec[unit][j].size();
+			events = PyList_New(nevents);
 			for (int k = 0; k < nevents; k++)
-				events.append(uvec[unit][j][k] / samplerate);
-			rlist.append(events);
+				PyList_SetItem(events, k, PyFloat_FromDouble(uvec[unit][j][k] / samplerate));
+			PyList_SetItem(rlist, j, events);  // takes reference to events
 		}
-		ulist.append(rlist);
+		PyList_Append(ulist, rlist);   // does not decref rlist
+		Py_DECREF(rlist);
 	}
 	
 	return ulist;
 }
 
-BOOST_PYTHON_FUNCTION_OVERLOADS(rk_readclusters_overloads, rk_readclusters, 3, 4)
+static PyMethodDef readklu_methods[] = {
+    {"getclusters",  readklu_getclusters, METH_VARARGS,
+     "Return a list of the clusters defined in the clu file."},
+    {"readclusters",  readklu_readclusters, METH_VARARGS,
+     "Return the cluster assignments of all the events in the clu file which are also in abstimes."},
+    {NULL, NULL, 0, NULL}        /* Sentinel */
+};
 
-BOOST_PYTHON_MODULE(_readklu)
+extern "C" {
+PyMODINIT_FUNC
+init_readklu(void)
 {
-	def("getclusters", rk_getclusters);
-	def("readclusters", rk_readclusters, rk_readclusters_overloads(
-		    args("samplerate")));
+    (void) Py_InitModule("_readklu", readklu_methods);
 }
-		
+}
