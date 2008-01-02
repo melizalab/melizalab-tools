@@ -265,7 +265,7 @@ def writestats(file, cells, stats):
 
 if __name__=="__main__":
 
-    basedir = '/z1/users/dmeliza/acute_data'
+    basedir = os.path.join(os.environ['HOME'], 'z1/acute_data')
     cellinfo = os.path.join(basedir, 'analysis/celldata/CMM.info')
     siteinfo = os.path.join(basedir, 'analysis/celldata/site.info')
 
