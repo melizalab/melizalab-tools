@@ -18,12 +18,11 @@ from motifdb import db
 from spikes import stat
 from scipy.ndimage import gaussian_filter1d
 
-def rate_est(tl, onset=None, offset=None, binsize=1., bandwidth=5., repeats=None):
+def rate_est(tl, onset=None, offset=None, binsize=1., bandwidth=5.):
     # cheapy rate estimater
     b,v = tl.histogram(binsize=binsize,normalize=True,
                        onset=onset,
-                       offset=offset,
-                       repeats=repeats)
+                       offset=offset)
     return gaussian_filter1d(v.astype('f')*1000, bandwidth),b    
 
 def ctable(motif, basename, motif_db,
@@ -137,7 +136,7 @@ if __name__=="__main__":
         from bin.plotresps import plotresps
 
 
-    print "bird\tcell\tmotif\treps\tCC\tCC.ex\tCC.rec\tmean.inh\tphasic"
+    print "bird\tcell\tmotif\treps\tCC\tCC.ex\tCC.rec\tCC.mn\tCC.ps\tmean.inh\tphasic"
     for line in fp:
         if line.startswith('#') or len(line.strip())==0: continue
         fields = line.split()
