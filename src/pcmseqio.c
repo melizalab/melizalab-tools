@@ -55,6 +55,31 @@ pcmfile_nentries(PcmfileObject* self, void *closure)
 }
 
 static PyObject*
+pcmfile_timestamp(PcmfileObject* self, void *closure)
+{
+	struct pcmstat s;
+	pcm_stat(self->pfp, &s);
+	return Py_BuildValue("i", s.timestamp);
+}
+
+static int
+pcmfile_settimestamp(PcmfileObject* self, PyObject *value, void *closure)
+{
+	int timestamp;
+	if (value == NULL) {
+		PyErr_SetString(PyExc_TypeError, "Cannot delete the timestamp attribute");
+		return -1;
+	}
+
+	timestamp = (int)PyInt_AsLong(value);
+	if (timestamp <= 0) {
+		PyErr_SetString(PyExc_TypeError, "Timestamp must be a positive integer");
+		return -1;
+	}
+	return pcm_ctl(self->pfp, PCMIOSETTIME, (int*)&timestamp);
+}
+
+static PyObject*
 pcmfile_samplerate(PcmfileObject* self, void *closure)
 {
 	struct pcmstat s;
@@ -67,7 +92,7 @@ pcmfile_setsamplerate(PcmfileObject* self, PyObject *value, void *closure)
 {
 	int srate;
 	if (value == NULL) {
-		PyErr_SetString(PyExc_TypeError, "Cannot delete the first attribute");
+		PyErr_SetString(PyExc_TypeError, "Cannot delete the samplerate attribute");
 		return -1;
 	}
 
@@ -153,6 +178,8 @@ static PyGetSetDef pcmfile_getseters[]={
 	{"framerate", (getter)pcmfile_samplerate, (setter)pcmfile_setsamplerate, 
 	 "The sample rate of the current entry", 0},
 	{"nframes", (getter)pcmfile_nsamples, 0, "The number of samples in the current entry",0},
+	{"timestamp", (getter)pcmfile_timestamp, (setter)pcmfile_settimestamp, 
+	 "The timestamp of the current entry",0},
 	{"entry", (getter)pcmfile_entry, 0, "The current entry",0},
 	{NULL}
 };
