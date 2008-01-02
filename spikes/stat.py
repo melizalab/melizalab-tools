@@ -469,8 +469,9 @@ def vp_pttnmatch(events, kern, kernresol, ton=None, toff=None, stepsize=None):
     mx = 0
     for ev in events:
         assert isinstance(ev, ndarray), "Argument <events> must be a list of numpy ndarrays"
-        mn = min(mn, ev.min())
-        mx = max(mx, ev.max())
+        if ev.size > 0:
+            mn = min(mn, ev.min())
+            mx = max(mx, ev.max())
 
     assert isinstance(kern, ndarray) and kern.ndim==1, "Argument <kern> must be a 1D ndarray"
     assert kernresol > 0, "Argument <kernresol> must be a positive real number."
