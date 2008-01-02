@@ -244,7 +244,7 @@ class toelis(object):
         """
         bins, freq = histogram(self.events, onset=onset, offset=offset, binsize=binsize)
         if normalize:
-            freq =  freq.astype('d') / (len(data) * binsize)
+            freq =  freq.astype('d') / (self.nrepeats * binsize)
             
         return bins, freq
 
