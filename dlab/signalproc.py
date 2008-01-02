@@ -360,7 +360,7 @@ def dpss(npoints, mtm_p):
     # generate diagonals
     d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
     ee = nx.concatenate(([0], nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2))
-    v = tridieig(d, ee, npoints-ntapers, npoints)
+    v = tridieig(d, ee, npoints-ntapers, npoints-1)
     v = v[::-1]
 
     # compute the eigenvectors

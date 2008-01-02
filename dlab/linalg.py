@@ -209,7 +209,7 @@ def tridieig(D,SD,k1,k2,tol=0.0):
     assert D.ndim==1 and SD.ndim==1, "Inputs must be vectors"
     assert D.size == SD.size, "Inputs must have the same length"
     assert k1 < k2, "K2 must be greater than K1"
-    assert k1 <= D.size and k2 <= D.size, "K1 and K2 must be <= N"
+    assert k2 < D.size, "K1 and K2 must be <= N"
 
     N = D.size
     SD[0] = 0
@@ -282,15 +282,29 @@ def tridieig(D,SD,k1,k2,tol=0.0):
                        'tol','k1','k2','beta'],
                  type_converters=weave.converters.blitz)
 
-    return x[k1:k2]
+    return x[k1:k2+1]
 
 if __name__=="__main__":
 
 
-    N = 200
+    print "Testing covariance function:"
+    N = 1000
+    M = 10
     S = nx.randn(N)
     X = nx.column_stack((S, nx.randn(N), S + nx.randn(N)/5))
-
     A1 = nx.cov(X,rowvar=0)
     A2 = cov(X,rowvar=0)
 
+    print "Testing tridieig functions:"
+    
+    npoints = 256
+    mtm_p = 3.5
+    W = float(mtm_p)/npoints
+    ntapers = int(min(round(2*npoints*W),npoints))
+    d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
+    ee = nx.concatenate(([0], nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2))
+    v = tridieig(d, ee, npoints-ntapers, npoints-1)
+    v = v[::-1]
+    t = nx.arange(0.,npoints)/(npoints-1)*nx.pi
+    e = nx.sin(1.*t)
+    E = tridisolve(ee, d-v[0], e)
