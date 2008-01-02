@@ -26,7 +26,7 @@ def drawoffscreen(f):
         return y
     return wrapper
 
-
+@drawoffscreen
 def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     """
     Draws a raster plot of a set of point sequences. These can be defined
@@ -35,23 +35,29 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     the containing list.
 
     X - either an array or a list of arrays
-    Y - the y offsets of the points in X, if X is an array
+    Y - the y offsets of the points in X, if X is an array; can also
+        be an integer, in which case the rasters will be plotted starting
+        at Y
     start - only plot events after this value
     stop - only plot events before this value
     **kwargs - additional arguments to plot
 
     With huge numbers of repeats the line length gets extremely small.
     """
-    from pylab import plot, gca, axis
-
-
-    if y == None:
-        # if y is none, x needs to be a sequence of arrays
-        y = nx.concatenate([nx.ones(x[z].shape) * z for z in range(len(x))])
-        x = nx.concatenate(x)
+    from pylab import gca, plot
 
     if len(x)==0:
         return None
+
+    if isinstance(y, nx.ndarray):
+        assert x.size == y.size, "X and Y must be the same length"
+    else:
+        if y == None or y < 0:
+            y = 0
+        Y = range(y, y+len(x))
+
+        y = nx.concatenate([nx.ones(x[i].shape) * Y[i] for i in range(len(Y))])
+        x = nx.concatenate(x)
 
     # filter events
     if start != None:
@@ -79,10 +85,10 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     # is it possible to make this dynamic?
     p = plot(x,y,'|',**kwargs)
     a = gca()
-    ht = a.get_window_extent().height()
+    #ht = a.get_window_extent().height()
     #setp(p,'markersize',ht/((maxy-miny)*1.3))
     
-    axis((minx, maxx, min(y) - 0.5, max(y) + 0.5))
+    a.axis((minx, maxx, min(y) - 0.5, max(y) + 0.5))
 
     return p
 
@@ -148,6 +154,7 @@ def dcontour(*args, **kwargs):
 
 _manycolors = ['b','g','r','#00eeee','m','y',
                'teal',  'maroon', 'olive', 'orange', 'steelblue', 'darkviolet',
+               'burlywood','darkgreen','sienna','crimson',
                ]
     
 def colorcycle(ind=None, colors=_manycolors):
@@ -246,8 +253,8 @@ class texplotter(object):
         The default margins and plotdims will plot 8 figures per page.
         """
 
-        matplotlib.use('PS')  # useful if running from a script; otherwise the plots
-                              # will be displayed in an interactive session
+        #matplotlib.use('PS')  # useful if running from a script; otherwise the plots
+        #                      # will be displayed in an interactive session
         if parameters!=None:
             self._defparams.update(parameters)
         matplotlib.rcParams.update(self._defparams)
@@ -408,6 +415,22 @@ def setframe(ax, lines=1100):
         ax.yaxis.set_ticks_position('both')
     if not (lines[1] or lines[3]):
         ax.xaxis.set_visible(0)
+
+## def sync_clim(fig):
+##     """
+##     Adjusts the clim property of all the images under fig.
+##     """
+##     im = fig.images
+##     for ax in fig.axes:
+##         im.extend(ax.images)
+
+##     clim = [x.get_clim() for x in im]
+##     newclim = (min([x[0] for x in clim]),
+##                max([x[1] for x in clim]))
+##     [x.set_clim(newclim) for x in im]
+
+##     return newclim
+
 
 if __name__=="__main__":
 
