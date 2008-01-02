@@ -348,7 +348,7 @@ def dpss(npoints, mtm_p):
     e - 2D array of eigenvectors, shape (npoints, n)
     """
     from scipy.linalg import norm
-    from tridiag import dgtsv, dstemr
+    from linalg import tridisolve, tridieig
 
     if mtm_p >= npoints * 2:
         raise ValueError, "mtm_p may only be as large as npoints/2"
@@ -359,10 +359,9 @@ def dpss(npoints, mtm_p):
 
     # generate diagonals
     d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
-    ee = nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2
-
-    v = dstemr(d, nx.concatenate((ee, [0])), npoints-ntapers+1, npoints)[1]
-    v = nx.flipud(v[0:ntapers])
+    ee = nx.concatenate(([0], nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2))
+    v = tridieig(d, ee, npoints-ntapers, npoints)
+    v = v[::-1]
 
     # compute the eigenvectors
     E = nx.zeros((npoints,ntapers), dtype='d')
@@ -370,9 +369,9 @@ def dpss(npoints, mtm_p):
 
     for j in range(ntapers):
         e = nx.sin((j+1.)*t)
-        e = dgtsv(ee,d-v[j],ee,e)[0]
-        e = dgtsv(ee,d-v[j],ee,e/norm(e))[0]
-        e = dgtsv(ee,d-v[j],ee,e/norm(e))[0]
+        e = tridisolve(ee, d-v[j], e)
+        e = tridisolve(ee, d-v[j], e/norm(e))
+        e = tridisolve(ee, d-v[j], e/norm(e))
         E[:,j] = e/norm(e)
 
     d = E.mean(0)

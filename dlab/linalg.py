@@ -7,6 +7,7 @@ Some statistics and linear algebra functions
 import scipy as nx
 from scipy.linalg import get_blas_funcs
 from datautils import autovectorized
+from scipy import weave
 
 def gemm(a,b,alpha=1.,**kwargs):
     """
@@ -135,6 +136,153 @@ def squareform(A, dir=None):
 
     return Z
 
+def tridisolve(e, d, b):
+    """
+    Solve a tridiagonal system of equations.
+    TRIDISOLVE(e,d,b) is the solution to the system
+         A*X = B
+     where A is an N-by-N symmetric, real, tridiagonal matrix given by
+         A = diag(E,-1) + diag(D,0) + diag(E,1)
+
+    D - 1D vector of length N
+    E - 1D vector of length N (first element is ignored)
+    B - 1D vector of length N
+    
+    raises an exception when A is singular
+    returns X, a 1D vector of length N
+    """
+
+    assert e.ndim == 1 and d.ndim == 1, "Inputs must be vectors"
+    assert e.size == d.size, "Inputs must have the same length"
+        
+    # copy input values
+    dd = d.copy()
+    x = b.copy()
+
+    code = """
+        # line 164 "linalg.py"
+        const double eps = std::numeric_limits<double>::epsilon();
+        int N = dd.size();
+        
+    	for (int j = 0; j < N-1; j++) {
+		double mu = e(j+1)/dd(j);
+		dd(j+1) = dd(j+1) - e(j+1)*mu;
+		x(j+1)  = x(j+1) -  x(j)*mu;
+	}
+
+	if (fabs(dd(N-1)) < eps) {
+		return_val = -1;
+	}
+	else {
+	        x(N-1) = x(N-1)/dd(N-1);
+
+	        for (int j=N-2; j >= 0; j--) {
+		       x(j) = (x(j) - e(j+1)*x(j+1))/dd(j);
+	        }
+                return_val = 0;
+        }
+        """
+
+    rV = weave.inline(code,['dd','e','x'],
+                      type_converters=weave.converters.blitz)
+
+    if rV < 0:
+        raise ValueError, "Unable to solve singular matrix"
+    return x
+
+def tridieig(D,SD,k1,k2,tol=0.0):
+    """
+    Compute eigenvalues of a tridiagonal matrix. Tridiag matrix is defined by
+    two vectors of length N and N-1 (D and E):
+        A = diag(E,-1) + diag(D,0) + diag(E,1)
+
+    @param D  - diagonal of the tridiagonal matrix
+    @param SD - superdiagonal of the matrix. superdiag must be the same
+	        length as diag, but the first element is ignored
+    @param k1 - the minimum index of the eigenvalue to return
+    @param k2 - the maximum index (inclusive) of the eigenvalue to return
+    @param tol - set tolerance for solution (default determine automatically)
+
+    @returns a vector with the eigenvalues between k1 and k2 (inclusive)
+    """
+
+    assert D.ndim==1 and SD.ndim==1, "Inputs must be vectors"
+    assert D.size == SD.size, "Inputs must have the same length"
+    assert k1 < k2, "K2 must be greater than K1"
+    assert k1 <= D.size and k2 <= D.size, "K1 and K2 must be <= N"
+
+    N = D.size
+    SD[0] = 0
+    beta = SD * SD;
+    Xmin = min(D[-1] - abs(SD[-1]),
+               min(D[:-1] - nx.absolute(SD[:-1]) - nx.absolute(SD[1:])))
+    Xmax = max(D[-1] - abs(SD[-1]),
+               max(D[:-1] + nx.absolute(SD[:-1]) + nx.absolute(SD[1:])))
+
+
+    x = nx.zeros(N)
+    wu = nx.zeros(N)
+    
+    code = """
+        # line 227 "linalg.py"
+        const double eps = std::numeric_limits<double>::epsilon();
+        double xmax = Xmax;
+        double xmin = Xmin;
+        double eps2 = tol * fmax(xmax,-xmin);
+        double eps1 = (tol <=0) ? eps2 : tol;
+        eps2 = 0.5 * eps1 + 7 * eps2;
+
+    	for (int i = k1; i <= k2; i++) {
+		x(i) = xmax;
+		wu(i) = xmin;
+	}
+
+	int z = 0;
+	double x0 = xmax;
+
+	for (int k = k2; k >= k1; k--) {
+		double xu = xmin;
+		for (int i = k; i >= k1; i--) {
+			if (xu < wu(i)) {
+				xu = wu(i);
+				break;
+			}
+		}
+		if (x0 > x(k)) x0 = x(k);
+		while (1) {
+			double x1 = (xu + x0)/2;
+			if (x0 - xu <= 2*eps*(fabs(xu)+fabs(x0)) + eps1) break;
+
+			z++;
+			int a = -1;
+			double q = 1;
+			for (int i = 0; i < N; i++) {
+				double s = (q == 0) ? fabs(SD(i))/eps : beta(i)/q;
+				q = D(i) - x1 - s;
+				if (q < 0) a++;
+			}
+			if (a < k) {
+				xu = x1;
+				if (a < k1) {
+					wu(k1) = x1;
+				}
+				else {
+					wu(a+1) = x1;
+					if (x(a) > x1) x(a) = x1;
+				}
+			}
+			else 
+				x0 = x1;
+		}
+		x(k) = (x0 + xu)/2;
+	}
+        """
+
+    weave.inline(code,['x','wu','D','SD','N','Xmax','Xmin',
+                       'tol','k1','k2','beta'],
+                 type_converters=weave.converters.blitz)
+
+    return x[k1:k2]
 
 if __name__=="__main__":
 
