@@ -126,14 +126,8 @@ class toelis(object):
         """
         The range of event times in the toelis.
         """
-        minx = 0
-        maxx = 0
-        for el in self:
-            if el.size:
-                minx = min(minx, el.min())
-                maxx = max(maxx, el.max())
-            
-        return minx, maxx
+        allevents = n.concatenate(self)
+        return allevents.min(), allevents.max()
 
     def tondarray(self):
         """
