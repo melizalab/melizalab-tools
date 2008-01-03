@@ -256,3 +256,11 @@ def histogram(data, onset=None, offset=None, binsize=20.):
     N = nx.concatenate([N, [len(d)]])
     freq = N[1:]-N[:-1]
     return bins[:-2], freq[:-2]
+
+def nextpow2(n):
+    """
+    Returns the first integer P such that 2^P >= abs(N)
+    """
+    if n==0.0:
+        return 0
+    return int(nx.ceil(nx.log2(abs(n))));
