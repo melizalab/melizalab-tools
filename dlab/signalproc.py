@@ -373,23 +373,14 @@ def mtfft(S, **kwargs):
     nfft = max(2**(nextpow2(N)+pad), N)
     f,findx = getfgrid(Fs,nfft,fpass)
 
-    tapers = kwargs.get('tapers', 5)
-    if isinstance(tapers, nx.ndarray):
-        if tapers.shape[0] != N:
-            raise ValueError, "Number of points in tapers differs from window size"
-    else:
-        mtm_p = kwargs.get('mtm_p', 3)
-        # make tapers
-        v,e = dpss(N, mtm_p, tapers)
-        # normalize so that each taper square integrates to 1
-        tapers = e * nx.sqrt(Fs)
+    tapers = dpsschk(N, **kwargs)
 
     ntapers = tapers.shape[1]
     # "outer product" of data with tapers
-    S.shape = (S.shape + (1,))
-    tapers.shape = (tapers.shape[0], 1, tapers.shape[1])
-    S = nx.tile(S, (1,1,ntapers))
-    tapers = nx.tile(tapers, (1,C,1))
+    S.shape = (S.shape[0], 1, S.shape[1])
+    tapers.shape = (tapers.shape + (1,))
+    S = nx.tile(S, (1,ntapers,1))
+    tapers = nx.tile(tapers, (1,1,C))
     S = S * tapers
     J = sfft.fft(S, nfft, axis=0)/Fs
     J = J[findx,:,:]
@@ -473,6 +464,36 @@ def dpss(npoints, mtm_p, k=None):
 
     return V,E
 
+def dpsschk(npoints, tapers=5, **kwargs):
+    """
+    Generates tapers or checks that pregenerated tapers have the right size.
+
+    npoints - the number of data points in the taper
+    tapers  - if this is a vector, checks that tapers.shape[0]==npoints
+              if it's an integer, calls dpss() to generate that many tapers
+
+    mtm_p -   if tapers are generated, sets the time-bandwidth parameter
+              Must be large enough that 2*mtm_p > tapers + 1
+    Fs    -   sampling rate of the tapers. Used to normalize taper power
+              Default 1.0
+    """
+
+    if isinstance(tapers, nx.ndarray):
+        if tapers.shape[0] != npoints:
+            raise ValueError, "Number of points in tapers differs from window size"
+        return tapers.copy()
+    else:
+        mtm_p = kwargs.get('mtm_p', 3)
+        if mtm_p * 2 <= tapers:
+            raise ValueError, "Number of tapers must be no larger than 2*mtm_p-1"
+        
+        # make tapers
+        v,e = dpss(npoints, mtm_p, tapers)
+        # normalize so that each taper square integrates to 1
+        Fs = kwargs.get('Fs',1.)
+        tapers = e * nx.sqrt(Fs)
+
+        return tapers
 
 def sincresample(S, npoints, shift=0):
     """
