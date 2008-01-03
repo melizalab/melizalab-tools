@@ -334,14 +334,17 @@ def mtm_adapt(Sk,V,sigpow):
     
 
  
-def dpss(npoints, mtm_p):
+def dpss(npoints, mtm_p, k=None):
     """
     Computes the discrete prolate spherical sequences used in the
     multitaper method power spectrum calculations.
 
-    npoints - the number of points in the window
-    mtm_p - the time-bandwidth product. Must be an integer or half-integer
-            (typical choices are 2, 5/2, 3, 7/2, or 4)
+    npoints   the number of points in the window
+    mtm_p     the time-bandwidth product. Must be an integer or half-integer
+              (typical choices are 2, 5/2, 3, 7/2, or 4)
+    k         If a scalar, returns the 1:k DPSS vectors
+              If a 2-ple, returns the k[0]:k[1] DPSS vectors
+              Default is to return all vectors
 
     returns:
     v - 2D array of eigenvalues, length n = (mtm_p * 2 - 1)
@@ -354,35 +357,41 @@ def dpss(npoints, mtm_p):
         raise ValueError, "mtm_p may only be as large as npoints/2"
 
     W = float(mtm_p)/npoints
-    ntapers = int(min(round(2*npoints*W),npoints))
-    ntapers = max(ntapers,1)
+    
+    if k==None:
+        k = int(min(round(2*npoints*W),npoints))
+        k = max(k,1)
+    if not nx.iterable(k):
+        k = [1, k]
 
     # generate diagonals
     d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
     ee = nx.concatenate(([0], nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2))
-    v = tridieig(d, ee, npoints-ntapers, npoints-1)
+    v = tridieig(d, ee, npoints-k[1], npoints-k[0])
     v = v[::-1]
+    ntapers = v.size
 
     # compute the eigenvectors
     E = nx.zeros((npoints,ntapers), dtype='d')
     t = nx.arange(0.,npoints)/(npoints-1)*nx.pi
 
     for j in range(ntapers):
-        e = nx.sin((j+1.)*t)
+        e = nx.sin((j+k[0])*t)
         e = tridisolve(ee, d-v[j], e)
         e = tridisolve(ee, d-v[j], e/norm(e))
         e = tridisolve(ee, d-v[j], e/norm(e))
         E[:,j] = e/norm(e)
 
     d = E.mean(0)
-
-    for j in range(ntapers):
+    for j in range(k[0],k[1]+1):
+        i = j-k[0]
         if j % 2 == 1:
-            if E[2,j]<0.: 
-                # anti-symmetric dpss
-                E[:,j] = -E[:,j]
-        elif d[j]<0.:
-            E[:,j] = -E[:,j]
+            # j is odd: symmetric dpss
+            if d[i]<0.:
+                E[:,i] = -E[:,i]            
+        elif E[2,i]<0.: 
+            # anti-symmetric dpss
+            E[:,i] = -E[:,i]
             
     # calculate eigenvalues
     s = nx.concatenate(([2*W], 4*W*nx.sinc(2*W*nx.arange(1,npoints,dtype='d'))))
@@ -392,12 +401,12 @@ def dpss(npoints, mtm_p):
     q = (sfft.ifft(fwd * rev,axis=0)).real[0:npoints,:]
     #q = nx.asmatrix(q)
 
-    V = gemm(q.transpose(),nx.flipud(s))
+    V = gemm(q, nx.flipud(s), trans_a=1)
     V = nx.minimum(V,1)
     V = nx.maximum(V,0)
     V.shape = (ntapers,)
 
-    return (V,E)
+    return V,E
 
 def sincresample(S, npoints, shift=0):
     """
