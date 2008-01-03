@@ -11,6 +11,8 @@ import scipy as nx
 import scipy.fftpack as sfft
 from scipy import weave
 from linalg import outer,gemm
+from datautils import nextpow2
+
 
 def stft(S, **kwargs):
     """
@@ -333,7 +335,70 @@ def mtm_adapt(Sk,V,sigpow):
     return S
     
 
- 
+def mtfft(S, **kwargs):
+    """
+    Compute the multi-taper fourier transform of a signal
+
+	[J,f]=mtfft(S, **kwargs)
+	Input: 
+	      S         continuous data in column-major format (matrix or vector)
+        Optional keyword arguments:
+              tapers    precalculated tapers from dpss, or the number of tapers to use
+                        Default 5
+              mtm_p     time-bandwidth parameter for dpss (ignored if tapers is precalced)
+                        Default 3
+              pad       padding factor for the FFT:
+	                   -1 corresponds to no padding,
+                           0 corresponds to padding to the next highest power of 2 etc.
+                           e.g. For N = 500, if PAD = -1, we do not pad; if PAD = 0, we pad the FFT
+                           to 512 points, if pad=1, we pad to 1024 points etc.
+                           Defaults to 0.
+              Fs        sampling frequency. Default 1
+              fpass     frequency band to be used in the calculation in the form
+                        [fmin fmax]
+                        Default all frequencies between 0 and Fs/2
+
+	Output:
+	      J       (complex spectrum with dimensions freq x chan x tapers)
+              f       (frequency vector)
+    """
+    Fs = kwargs.get('Fs',1)
+    fpass = kwargs.get('fpass',(0,Fs/2.))
+    pad = kwargs.get('pad', 0)
+    Sdim = S.ndim
+
+    if Sdim==1:
+        S.shape = (S.size,1)
+    N, C = S.shape
+    nfft = max(2**(nextpow2(N)+pad), N)
+    f,findx = getfgrid(Fs,nfft,fpass)
+
+    tapers = kwargs.get('tapers', 5)
+    if isinstance(tapers, nx.ndarray):
+        if tapers.shape[0] != N:
+            raise ValueError, "Number of points in tapers differs from window size"
+    else:
+        mtm_p = kwargs.get('mtm_p', 3)
+        # make tapers
+        v,e = dpss(N, mtm_p, tapers)
+        # normalize so that each taper square integrates to 1
+        tapers = e * nx.sqrt(Fs)
+
+    ntapers = tapers.shape[1]
+    # "outer product" of data with tapers
+    S.shape = (S.shape + (1,))
+    tapers.shape = (tapers.shape[0], 1, tapers.shape[1])
+    S = nx.tile(S, (1,1,ntapers))
+    tapers = nx.tile(tapers, (1,C,1))
+    S = S * tapers
+    J = sfft.fft(S, nfft, axis=0)/Fs
+    J = J[findx,:,:]
+    if Sdim==1:
+        J = nx.squeeze(J)
+        
+    return J, f
+    
+    
 def dpss(npoints, mtm_p, k=None):
     """
     Computes the discrete prolate spherical sequences used in the
@@ -407,6 +472,7 @@ def dpss(npoints, mtm_p, k=None):
     V.shape = (ntapers,)
 
     return V,E
+
 
 def sincresample(S, npoints, shift=0):
     """
