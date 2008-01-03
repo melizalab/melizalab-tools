@@ -129,6 +129,24 @@ class toelis(object):
         allevents = n.concatenate(self)
         return allevents.min(), allevents.max()
 
+    def subrange(self, onset=None, offset=None, adjust=False):
+        """
+        Returns a new toelis object only containing events between onset and offset (inclusive).
+        Default values are -Inf and +Inf.
+
+        If <adjust> is True, set times relative to onset
+        If <adjust> is a scalar, set times relative to <adjust>
+        Default is to leave the times alone
+        """
+        mintime,maxtime = self.range
+        if onset==None: onset = mintime
+        if offset==None: offset = maxtime
+        if adjust==True:
+            adjust = onset
+        elif adjust==False:
+            adjust = 0
+        return toelis([x[((x>=onset) & (x<=offset))] - adjust for x in self])
+
     def tondarray(self):
         """
         Ensures that all the event lists are ndarray objects
