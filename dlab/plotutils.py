@@ -27,7 +27,8 @@ def drawoffscreen(f):
     return wrapper
 
 @drawoffscreen
-def plot_raster(x, y=None, start=None, stop=None, **kwargs):
+def plot_raster(x, y=None, start=None, stop=None, ax=None,
+                autoscale=False, **kwargs):
     """
     Draws a raster plot of a set of point sequences. These can be defined
     as a set of x,y pairs, or as a list of lists of x values; in the latter
@@ -40,11 +41,13 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
         at Y
     start - only plot events after this value
     stop - only plot events before this value
+    ax - plot to a specified axis, or if None (default), to the current axis
+    autoscale - if true (default False), scale marks to match axis size
     **kwargs - additional arguments to plot
 
     With huge numbers of repeats the line length gets extremely small.
     """
-    from pylab import gca, plot
+    from pylab import gca
 
     if len(x)==0:
         return None
@@ -81,16 +84,19 @@ def plot_raster(x, y=None, start=None, stop=None, **kwargs):
     miny = y.min()
     maxy = y.max()
 
-    # some voodoo for figuring out how big to make the markers
-    # is it possible to make this dynamic?
-    p = plot(x,y,'|',**kwargs)
-    a = gca()
-    #ht = a.get_window_extent().height()
-    #setp(p,'markersize',ht/((maxy-miny)*1.3))
-    
-    a.axis((minx, maxx, min(y) - 0.5, max(y) + 0.5))
+    if ax==None:
+        ax = gca()
 
-    return p
+    plots = ax.plot(x,y,'|',**kwargs)
+
+    if autoscale:
+        ht = ax.get_window_extent().height()
+        for p in plots: p.set_markersize(ht/((maxy-miny)*1.3))
+    
+    
+    ax.axis((minx, maxx, min(y) - 0.5, max(y) + 0.5))
+
+    return plots
 
 def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
     """
