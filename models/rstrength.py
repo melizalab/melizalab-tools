@@ -31,23 +31,24 @@ from motifdb import db
 from sys import stderr
 from scipy.stats import randint, stats
 
-binsize = 10.
+binsize = 15.
 poststim = 100.
 silence = (-1000,0)
 nboot = 1000
 alpha = 0.05
 
-def _var_boot(tl, rrange, binsize, maxreps, nboot):
+
+def var_boot(tl, rrange, binsize, maxreps, nboot):
     out = nx.zeros(nboot)
     for i in range(nboot):
         repind = randint.rvs(tl.nrepeats, size=maxreps)
-        data = [tl.events[x] for x in repind if x != i]
+        data = [tl.events[x] for x in repind] ## if x != i]
         freq = histogram(data, onset=rrange[0], offset=rrange[1], binsize=binsize)[1]
-        out[i] = freq.var()
+        out[i] = freq.var() * (maxreps / (maxreps - 1.))
 
     return out
 
-def rstrength_ci(tls, rrange, srange, binsize=10., nboot=100, alpha=0.05):
+def rstrength_ci(tls, rrange, srange, nboot=100, alpha=0.05):
     """
     Computes response strength with confidence intervals for toelis
     data using bootstrap statistics.  Returns the median and alpha/2
@@ -65,20 +66,20 @@ def rstrength_ci(tls, rrange, srange, binsize=10., nboot=100, alpha=0.05):
               a ratio this should be at least 1000 to be reasonably stable
     """
 
-    maxreps = max([tl.nrepeats for tl in tls.values()])
+    maxreps = min([tl.nrepeats for tl in tls.values()])
 
     # calcuate variance of silence
     tlcombined = toelis.toelis(nrepeats=0)
     for tl in tls.values():
         tlcombined.extend(tl)
 
-    silvar = _var_boot(tlcombined, srange, binsize, maxreps, nboot)
+    silvar = var_boot(tlcombined, srange, binsize, maxreps, nboot)
     msilvar = stats.median(silvar)
 
     # calculate variance of responses
     rs = {}
     for stim, tl in tls.items():
-        respvar = _var_boot(tl, rrange[stim], binsize, maxreps, nboot)
+        respvar = var_boot(tl, rrange[stim], binsize, maxreps, nboot)
         rstren  = respvar / msilvar
         rs[stim] = (stats.median(rstren),
                     stats.scoreatpercentile(rstren, alpha/2. * 100))
@@ -120,9 +121,68 @@ def zscores(tls, rranges, srange):
         
     return out
 
+def rsivsi(tls, rranges, binwidth=10., nboot=100):
+    """
+    Calculates two response indices, one based on the mean firing rate and the other
+    on the variance.  Mean and variance for the spontaneous activity are computed from
+    all repeats of the stimulus, randomly sampled.
+    """
+    from scipy.stats import ttest_ind, wilcoxon, median
+    from scipy.stats.distributions import f
+    
+    tlcombined = toelis.toelis(nrepeats=0)
+    for tl in tls.values():
+        tlcombined.extend(tl)
+
+    out = {}
+    for stim, tl in tls.items():
+        rrange = rranges[stim]
+        fresp = 1. * histogram(tl, onset=rrange[0], offset=rrange[1], binsize=binwidth)[1] / tl.nrepeats      
+        fspon = 1. * histogram(tlcombined, onset=-rrange[1], offset=0, binsize=binwidth)[1] / tlcombined.nrepeats
+        svar_resp = var_boot(tl, rrange, binwidth, tl.nrepeats, nboot)
+                    #fresp.var() * (fresp.size/(fresp.size - 1.))
+        svar_spon = var_boot(tlcombined, (-rrange[1],0), binwidth, tl.nrepeats, nboot)
+                    #fspon.var() * (fspon.size/(fspon.size - 1.))
+        # compute significance with wilcoxon signed rank
+        msvar_resp = median(svar_resp)
+        msvar_spon = median(svar_spon)
+        frat = max(msvar_resp, msvar_spon) / min(msvar_resp, msvar_spon)
+        pf = 1 - f.cdf([frat], fresp.size, fspon.size)[0]
+        pw = wilcoxon(svar_resp, svar_spon)[1]
+        
+        out[stim] = (fresp.mean() - fspon.mean(),
+                     ttest_ind(fresp, fspon)[1],
+                     median(svar_resp) - median(svar_spon),
+                     pf)
+
+    return out
+                     
+
+
+def cvscore(tls, rranges, srange, binwidth=100.):
+
+    # calcuate CV of spontaneous
+    tlcombined = toelis.toelis(nrepeats=0)
+    for tl in tls.values():
+        tlcombined.extend(tl)
+
+    cvspont = stat.covar(tlcombined,srange[0],srange[1],binwidth)
+
+    out = {}
+    for stim, tl in tls.items():
+        cvresp = stat.covar(tl, rranges[stim][0], rranges[stim][1], binwidth)
+        if nx.isnan(cvresp):
+            out[stim] = 0.0
+        else:
+            out[stim] = cvspont - cvresp  # 1/ ffresp - 1 / ffspont 
+
+    return out
+    
+    
+
 _statfmt = "%s\t%s\t%s\t%d\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f\t%3.3f"
-_hdr = "bird\tcell\tmotif\tnreps\tRS\tRS.l\tspon.m\tresp.m\tz.resp\tresp.on\tresp.off"
-_statfxn = rstrength_ci
+_hdr = "bird\tcell\tmotif\tnreps\tRS\tRS.l\tspon.m\tresp.m\tphasic\tresp.on\tresp.off"
+
 
 def singstats(dir, motif_db, bird="", **kwargs):
     """
@@ -130,6 +190,7 @@ def singstats(dir, motif_db, bird="", **kwargs):
     were played singly to the animal, and the corresponding toe_lis files
     have names of the form <basename>_<motif>.toe_lis
     """
+
     m = motif_db
     files = os.listdir(dir)
     basename = dirbase(dir)
@@ -140,6 +201,7 @@ def singstats(dir, motif_db, bird="", **kwargs):
     # load all files first
     tls = {}
     rrange = {}
+    phasic = {}
     for file in files:
         # assume the file starts with basename
         if file.startswith(basename) and file.endswith(ext):
@@ -147,20 +209,20 @@ def singstats(dir, motif_db, bird="", **kwargs):
             if fname in motifs:
                 tls[fname] = toelis.readfile(os.path.join(dir, file))
                 rrange[fname] = (0., m.get_motif(fname)['length'] + poststim)
+                phasic[fname] = stat.toestat_phasic(os.path.join(dir, file), *rrange[fname])[0]
 
     if len(tls) == 0:
         print >> stderr, "Skipping %s/%s: No single motif toe_lis data." % (bird, basename)
         return
     
     # get stats
-    bstats = _statfxn(tls, rrange, silence, binsize, nboot, alpha)
-    zsc = zscores(tls, rrange, silence)
+    bstats = rstrength_ci(tls, rrange, silence, nboot, alpha)
     
     for motif, tl in tls.items():
         tlstats = stat.toestat(tl, rrange[motif], silence, binsize)
         print _statfmt \
               % ((bird, basename, motif, tl.nrepeats) +
-                 bstats[motif] + tlstats[3:4] + tlstats[1:2] + (zsc[motif],) + rrange[motif])
+                 bstats[motif] + tlstats[3:4] + tlstats[1:2] + (phasic[motif],) + rrange[motif])
 
 def aggstats(dir, motif_db, bird="", **kwargs):
     """
@@ -183,7 +245,7 @@ def aggstats(dir, motif_db, bird="", **kwargs):
         print >> stderr, "Skipping %s/%s: Unable to aggregate toe_lis data." % (bird, basename)
         return        
     # pass the event lists and time ranges to the stats function
-    bstats =  _statfxn(tls, rrange, silence, binsize, nboot, alpha)
+    bstats =  rstrength_ci(tls, rrange, silence, nboot, alpha)
     # print them out
     for motif, tl in tls.items():
         tlstats = stat.toestat(tl, rrange[motif], silence, binsize)
