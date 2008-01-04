@@ -477,51 +477,82 @@ def discreteconv(points, kern, kernresol, ton, toff, stepsize):
     return out
 
 
+
 if __name__=="__main__":
 
-    import os
+    import os,sys
     from dlab import toelis
 
-    options = {'trialave': 1,
-               'fpass': [0, 0.2]}
+    def selfcoh(tl, onset, offset, fpass=[0,0.2]):
+        nreps = tl.nrepeats
+        tl_ref = tl.repeats(nx.arange(0,nreps,step=2)).subrange(onset, offset, adjust=True)
+        tl_comp = tl.repeats(nx.arange(1,nreps,step=2))
+        r_comp = kernrates(tl_comp,1,1,'gaussian',onset,offset)[0].mean(1)
+        C,phi,S12,S1,S2,f = coherencycpt(r_comp, tl_ref, trialave=1, fpass=fpass)
+        return C,f,tl_ref
+
+    def crosscoh(tl_ref, tl_comp, onset, offset, fpass=[0,0.2]):
+        r_comp = kernrates(tl_comp,1,1,'gaussian',onset,offset)[0].mean(1)
+        C,phi,S12,S1,S2,f = coherencycpt(r_comp, tl_ref, trialave=1, fpass=fpass)
+        return C,f
+
+    info = lambda(x): -nx.log2(1-x).sum()
+
 
     example = {'basedir' : os.path.join(os.environ['HOME'], 'z1/acute_data/st319/20070812'),
                'cell':'cell_14_1_2',
                'motif': 'Bn'}
-    example = {'basedir' : os.path.join(os.environ['HOME'], 'z1/acute_data/st319/20070808'),
-               'cell':'cell_6_1_1',
-               'motif': 'C2'}
+##     example = {'basedir' : os.path.join(os.environ['HOME'], 'z1/acute_data/st319/20070808'),
+##                'cell':'cell_6_1_1',
+##                'motif': 'C2'}
+
+    print sys.argv
+    if len(sys.argv) > 2:
+        print "Infomax values for %s / %s " %  tuple(sys.argv[1:3])
+        basefile = '%s_%s.toe_lis' % tuple(sys.argv[1:3])
+        reconfile= '%s_%s_0.toe_lis' % tuple(sys.argv[1:3])
+    else:
+        print "Infomax values for %(cell)s / %(motif)s " % example
+        basefile = os.path.join(example['basedir'], example['cell'],
+                                '%(cell)s_%(motif)s.toe_lis' % example)
+        reconfile= os.path.join(example['basedir'], example['cell'],
+                                '%(cell)s_%(motif)s_0.toe_lis' % example)
+
+    tl_base = toelis.readfile(basefile)
+    C_spont = selfcoh(tl_base, -1000, 0 )[0]
+    C_stim,f,tl_ref = selfcoh(tl_base, 0, 1000)
+
+    print "I(spont) = %3.4f" % info(C_spont)
+    print "I(stim) = %3.4f" % info(C_stim)
     
+    if os.path.exists(reconfile):
+        tl_recon = toelis.readfile(reconfile)
+        C_recon = crosscoh(tl_ref, tl_recon, 0, 1000)[0]
+        print "I(recon) = %3.4f" % info(C_recon)
 
-    tl_base = toelis.readfile(os.path.join(example['basedir'], example['cell'],
-                                           '%(cell)s_%(motif)s.toe_lis' % example))
-    tl_recon = toelis.readfile(os.path.join(example['basedir'], example['cell'],
-                                           '%(cell)s_%(motif)s_0.toe_lis' % example))
 
-    # in order to compare coherence between stimuli they need to have roughly
-    # the same number of repeats, because of the positive bias
-    #maxreps = min(tl_base.nrepeats, tl_recon.nrepeats)
-    #tl_base = tl_base.repeats(slice(0,maxreps))
-    #tl_recon = tl_recon.repeats(slice(0,maxreps))
 
-    r_stim = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',0,1000)[0].mean(1)
-    r_recon = kernrates(tl_recon,1,1,'gaussian',0,1000)[0].mean(1)    
-    r_base = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',-1000,0)[0].mean(1)
-    C_stim,phi,S12,S1,S2,f = coherencycpt(r_stim,
-                                          tl_base.repeats(slice(10,None)).subrange(0,1000),
-                                          **options)
-    C_recon,phi,S12,S1,S2,f = coherencycpt(r_recon,
-                                           tl_base.repeats(slice(10,None)).subrange(0,1000),
-                                           **options)
+
+##     # in order to compare coherence between stimuli they need to have roughly
+##     # the same number of repeats, because of the positive bias
+##     #maxreps = min(tl_base.nrepeats, tl_recon.nrepeats)
+##     #tl_base = tl_base.repeats(slice(0,maxreps))
+##     #tl_recon = tl_recon.repeats(slice(0,maxreps))
+
+##     r_stim = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',0,1000)[0].mean(1)
+##     r_recon = kernrates(tl_recon,1,1,'gaussian',0,1000)[0].mean(1)    
+##     r_base = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',-1000,0)[0].mean(1)
+##     C_stim,phi,S12,S1,S2,f = coherencycpt(r_stim,
+##                                           tl_base.repeats(slice(10,None)).subrange(0,1000),
+##                                           **options)
+##     C_recon,phi,S12,S1,S2,f = coherencycpt(r_recon,
+##                                            tl_base.repeats(slice(10,None)).subrange(0,1000),
+##                                            **options)
     
-    C_base,phi,S12,S1,S2,f = coherencycpt(r_base,
-                                          tl_base.repeats(slice(10,None)).subrange(-1000,0,adjust=True),
-                                          **options)
+##     C_base,phi,S12,S1,S2,f = coherencycpt(r_base,
+##                                           tl_base.repeats(slice(10,None)).subrange(-1000,0,adjust=True),
+##                                           **options)
 
-    info = lambda(x): -nx.log2(1-x).sum()
         
 
-    print "Infomax values for %(cell)s / %(motif)s " % example
-    print "I(baseline) = %3.4f" % info(C_base)
-    print "I(stim) = %3.4f" % info(C_stim)
-    print "I(recon) = %3.4f" % info(C_recon)
+
