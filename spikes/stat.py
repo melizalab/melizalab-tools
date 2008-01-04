@@ -89,7 +89,24 @@ def varfac(tl, onset=None, offset=None, binwidth=10.):
     """
     z = histomat(tl, onset, offset, binwidth)
     return z.mean(0).var() / z.var(0).mean()
-    
+
+def toestat_phasic(file, onset, offset):
+    """
+    Computes the phasic response index, (D - sum(min(x_i,x_{i+1})))/D
+    where D is the duration of the analysis interval times the number
+    of repeats.
+
+    Note that a repeat with less than 2 events will have an PRI of 1.0
+    """
+    cmd = "%s -range %f %f -stat %s -isiphasic" % (_tstat, onset, offset, file)
+    fp = os.popen(cmd)
+    out = []
+    for line in fp:
+        fields = line.split()
+        out.append(float(fields[-1]))
+    return out
+
+        
 
 def toestat_rs(file, stim_times, background_times, binwidth=10):
     """
