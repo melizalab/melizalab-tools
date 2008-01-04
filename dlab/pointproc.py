@@ -482,13 +482,46 @@ if __name__=="__main__":
     import os
     from dlab import toelis
 
-    tl = toelis.readfile(os.path.join(os.environ['HOME'],
-                                      'z1/acute_data/st319/20070812/cell_14_1_2',
-                                      'cell_14_1_2_Bn.toe_lis'))
+    options = {'trialave': 1,
+               'fpass': [0, 0.2]}
 
-    C_stim,phi,S12,S1,S2,f = coherencycpt(tl.histogram(binsize=1,onset=0,offset=1000)[1],
-                                          tl.subrange(0,1000),
-                                          trialave=1)
-    C_base,phi,S12,S1,S2,f = coherencycpt(tl.histogram(binsize=1,onset=-1000,offset=0)[1],
-                                          tl.subrange(-1000,0,adjust=True),
-                                          trialave=1)
+    example = {'basedir' : os.path.join(os.environ['HOME'], 'z1/acute_data/st319/20070812'),
+               'cell':'cell_14_1_2',
+               'motif': 'Bn'}
+    example = {'basedir' : os.path.join(os.environ['HOME'], 'z1/acute_data/st319/20070808'),
+               'cell':'cell_6_1_1',
+               'motif': 'C2'}
+    
+
+    tl_base = toelis.readfile(os.path.join(example['basedir'], example['cell'],
+                                           '%(cell)s_%(motif)s.toe_lis' % example))
+    tl_recon = toelis.readfile(os.path.join(example['basedir'], example['cell'],
+                                           '%(cell)s_%(motif)s_0.toe_lis' % example))
+
+    # in order to compare coherence between stimuli they need to have roughly
+    # the same number of repeats, because of the positive bias
+    #maxreps = min(tl_base.nrepeats, tl_recon.nrepeats)
+    #tl_base = tl_base.repeats(slice(0,maxreps))
+    #tl_recon = tl_recon.repeats(slice(0,maxreps))
+
+    r_stim = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',0,1000)[0].mean(1)
+    r_recon = kernrates(tl_recon,1,1,'gaussian',0,1000)[0].mean(1)    
+    r_base = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',-1000,0)[0].mean(1)
+    C_stim,phi,S12,S1,S2,f = coherencycpt(r_stim,
+                                          tl_base.repeats(slice(10,None)).subrange(0,1000),
+                                          **options)
+    C_recon,phi,S12,S1,S2,f = coherencycpt(r_recon,
+                                           tl_base.repeats(slice(10,None)).subrange(0,1000),
+                                           **options)
+    
+    C_base,phi,S12,S1,S2,f = coherencycpt(r_base,
+                                          tl_base.repeats(slice(10,None)).subrange(-1000,0,adjust=True),
+                                          **options)
+
+    info = lambda(x): -nx.log2(1-x).sum()
+        
+
+    print "Infomax values for %(cell)s / %(motif)s " % example
+    print "I(baseline) = %3.4f" % info(C_base)
+    print "I(stim) = %3.4f" % info(C_stim)
+    print "I(recon) = %3.4f" % info(C_recon)
