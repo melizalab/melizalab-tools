@@ -90,6 +90,28 @@ def varfac(tl, onset=None, offset=None, binwidth=10.):
     z = histomat(tl, onset, offset, binwidth)
     return z.mean(0).var() / z.var(0).mean()
 
+def cohpower(tl, rrange=None, **kwargs):
+    """
+    Computes the coherent power in a time series.  The complex spectra
+    are averaged across trials, which effectively scales the power density
+    by the alignment between trials.  This probably introduces some bias.
+
+    **kwargs are passed to pointproc.mtfftpt
+
+    Returns:
+    S - coherent power at each frequency
+    f - frequency bins
+    """
+    from dlab.pointproc import mtfftpt
+
+    if rrange==None: rrange = tl.range
+    kwargs['tgrid'] = rrange
+    
+    J,Msp,Nsp,f = mtfftpt(tl, **kwargs)
+    S = J.mean(2)  # average across trials in complex domain
+    # average across power estimates for each taper
+    return (S.conj() * S).real.mean(1), f
+
 def toestat_phasic(file, onset, offset):
     """
     Computes the phasic response index, (D - sum(min(x_i,x_{i+1})))/D
