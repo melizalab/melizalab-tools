@@ -27,7 +27,7 @@ def drawoffscreen(f):
     return wrapper
 
 @drawoffscreen
-def plot_raster(x, y=None, start=None, stop=None, ax=None,
+def plot_raster(X, Y=0, start=None, stop=None, ax=None,
                 autoscale=False, **kwargs):
     """
     Draws a raster plot of a set of point sequences. These can be defined
@@ -35,32 +35,33 @@ def plot_raster(x, y=None, start=None, stop=None, ax=None,
     case the y offset of the x values is taken from the position within
     the containing list.
 
-    X - either an array or a list of arrays
-    Y - the y offsets of the points in X, if X is an array; can also
-        be an integer, in which case the rasters will be plotted starting
-        at Y
+    X - a list of arrays
+    Y - an optional offset for the entries in X.  For a scalar, the rasters
+        will be plotted started at Y; for a vector (length the same as X) each
+        entry in X will be plotted at that Y offset.
     start - only plot events after this value
     stop - only plot events before this value
     ax - plot to a specified axis, or if None (default), to the current axis
     autoscale - if true (default False), scale marks to match axis size
     **kwargs - additional arguments to plot
 
-    With huge numbers of repeats the line length gets extremely small.
     """
     from pylab import gca
 
-    if len(x)==0:
+    nreps = len(X)
+    if nreps == 0:
+        # fail gracefully if X is empty
         return None
 
-    if isinstance(y, nx.ndarray):
-        assert x.size == y.size, "X and Y must be the same length"
-    else:
-        if y == None or y < 0:
-            y = 0
-        Y = range(y, y+len(x))
+    if Y == None or Y < 0:
+        Y = 0
+    if isinstance(Y, int):
+        Y = range(Y, Y+nreps)
 
-        y = nx.concatenate([nx.ones(x[i].shape) * Y[i] for i in range(len(Y))])
-        x = nx.concatenate(x)
+    assert len(X) == len(Y), "X and Y must be the same length"
+
+    y = nx.concatenate([nx.ones(X[i].shape) * Y[i] for i in range(nreps)])
+    x = nx.concatenate(X)
 
     # filter events
     if start != None:
@@ -77,15 +78,16 @@ def plot_raster(x, y=None, start=None, stop=None, ax=None,
     else:
         maxx = x.max()
     
-
-    if len(x) != len(y):
-        raise IndexError, "X and Y arrays must be the same length"
-
-    miny = y.min()
-    maxy = y.max()
-
     if ax==None:
         ax = gca()
+
+    # if the filter eliminates all the events, fail gracefully
+    if x.size == 0:
+        ax.axis((minx, maxx, - 0.5, nreps + 0.5))
+        return
+    
+    miny = min(Y)
+    maxy = max(Y)
 
     plots = ax.plot(x,y,'|',**kwargs)
 
@@ -93,8 +95,7 @@ def plot_raster(x, y=None, start=None, stop=None, ax=None,
         ht = ax.get_window_extent().height()
         for p in plots: p.set_markersize(ht/((maxy-miny)*1.3))
     
-    
-    ax.axis((minx, maxx, min(y) - 0.5, max(y) + 0.5))
+    ax.axis((minx, maxx, miny - 0.5, maxy + 0.5))
 
     return plots
 
