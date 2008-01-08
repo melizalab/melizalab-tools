@@ -13,15 +13,16 @@ implementations of multitaper spectrograms.
 import numpy as nx
 import scipy.fftpack as sfft
 from scipy.interpolate import interp1d
-from signalproc import getfgrid, dpsschk, mtfft
+from signalproc import getfgrid, dpsschk, mtfft, mtcoherence
 from datautils import nextpow2
 from linalg import outer, gemm
+import toelis
 
-def coherencycpt(S, tl, **kwargs):
+def coherencecpt(S, tl, **kwargs):
     """
-    Compute the coherency between a continuous process and a point process.
+    Compute the coherence between a continuous process and a point process.
 
-    [C,phi,S12,S1,S2,f] = coherencycpt(S, tl1, **kwargs)
+    [C,phi,S12,S1,S2,f] = coherencecpt(S, tl1, **kwargs)
     Input:
               S         continuous data set
               tl        iterable of vectors with event times
@@ -96,6 +97,82 @@ def coherencycpt(S, tl, **kwargs):
     phi = nx.angle(C12)
 
     return C,phi,S12,S1,S2,f
+
+def meancoherence(tl, **kwargs):
+    """
+    Computes the expected value of the coherence of a noisy point
+    process with its mean rate.  Algorithm from Hsu, Borst, and
+    Theunissen (2004).  This is an unbiased estimator, in constrast to
+    computing the mean coherence between the point processes and the
+    estimated mean.
+    
+    """
+    M = tl.nrepeats
+    dt = 1./ kwargs.get('Fs',1)
+    mintime, maxtime = kwargs.get('tgrid',tl.range)
+
+    # compute mean PSTHs of half the repeats
+    b,r1 = tl.repeats(nx.arange(0,M,2)).histogram(binsize=dt, onset=mintime, offset=maxtime)
+    b,r2 = tl.repeats(nx.arange(1,M,2)).histogram(binsize=dt, onset=mintime, offset=maxtime)
+
+    N = b.size
+    kwargs['tapers'] = dpsschk(N, **kwargs)
+
+    y_RR,f = mtcoherence(r1,r2,**kwargs)
+    y_RR = (y_RR.conj() * y_RR).real
+    Z = nx.sqrt(1./y_RR)
+    y_AR = 1./ (.5 * (-M + M * Z) + 1)
+
+    return y_AR, y_RR, f
+
+def coherenceratio(S, tl, **kwargs):
+    """
+    Computes the expected coherence ratio between a point process tl
+    and a continuous function S.  This implements the algorithm of
+    Hsu, Borst, and Theunissen (2004), in which the self-coherence
+    is first computed by splitting the point process trials into two groups.
+
+    [C_SR, C_MR, f] = coherenceratio(S, tl, **kwargs)
+    Input:
+              S         continuous data set, or toelis data
+                        If toelis data, this is converted to a PSTH at the binrate specified in options
+              tl        iterable of vectors with event times
+
+    See module help for optional options
+    """
+    dt = 1./kwargs.get('Fs',1)
+
+    if isinstance(S, toelis.toelis):
+        mintime,maxtime = kwargs.get('tgrid',S.range)
+        S = S.histogram(binsize=dt, onset=mintime, offset=maxtime)[1]
+        #S = kernrates(S,dt,dt/2,'gaussian',mintime,maxtime)[0].mean(1)
+        
+    S = S.squeeze()
+    assert S.ndim==1, "Signal must be a row or column vector"
+
+    N = S.size
+    M = tl.nrepeats
+
+    mintime, maxtime = kwargs.get('tgrid',(0,N*dt))
+    kwargs['tgrid'] = (mintime, maxtime)  # set this so meancoherence will work
+
+    b,rall = tl.histogram(binsize=dt, onset=mintime, offset=maxtime)
+
+    assert rall.size == N, "Signal dimensions are not consistent with Fs and onset/offset parameters"
+
+    kwargs['tapers'] = dpsschk(N, **kwargs)
+
+    y_AR, y_RR, f = meancoherence(tl, **kwargs)
+
+
+    Z = nx.sqrt(1./y_RR)
+    y_BRhat,f = mtcoherence(S, rall, **kwargs)
+    y_BRhat = (y_BRhat.conj() * y_BRhat).real
+    y_BR = (1. + Z) / (-M + M * Z + 2) * y_BRhat
+    
+    return y_BR, y_AR, f
+    
+    
 
 def mtspectrumpt(tl, **kwargs):
     """
@@ -481,19 +558,19 @@ def discreteconv(points, kern, kernresol, ton, toff, stepsize):
 if __name__=="__main__":
 
     import os,sys
-    from dlab import toelis
+    _fpass = [0,0.1]
 
-    def selfcoh(tl, onset, offset, fpass=[0,0.2]):
+    def selfcoh(tl, onset, offset, fpass=_fpass):
         nreps = tl.nrepeats
         tl_ref = tl.repeats(nx.arange(0,nreps,step=2)).subrange(onset, offset, adjust=True)
         tl_comp = tl.repeats(nx.arange(1,nreps,step=2))
         r_comp = kernrates(tl_comp,1,1,'gaussian',onset,offset)[0].mean(1)
-        C,phi,S12,S1,S2,f = coherencycpt(r_comp, tl_ref, trialave=1, fpass=fpass)
+        C,phi,S12,S1,S2,f = coherencecpt(r_comp, tl_ref, trialave=1, fpass=fpass)
         return C,f,tl_ref
 
-    def crosscoh(tl_ref, tl_comp, onset, offset, fpass=[0,0.2]):
+    def crosscoh(tl_ref, tl_comp, onset, offset, fpass=_fpass):
         r_comp = kernrates(tl_comp,1,1,'gaussian',onset,offset)[0].mean(1)
-        C,phi,S12,S1,S2,f = coherencycpt(r_comp, tl_ref, trialave=1, fpass=fpass)
+        C,phi,S12,S1,S2,f = coherencecpt(r_comp, tl_ref, trialave=1, fpass=fpass)
         return C,f
 
     info = lambda(x): -nx.log2(1-x).sum()
@@ -519,40 +596,18 @@ if __name__=="__main__":
                                 '%(cell)s_%(motif)s_0.toe_lis' % example)
 
     tl_base = toelis.readfile(basefile)
-    C_spont = selfcoh(tl_base, -1000, 0 )[0]
-    C_stim,f,tl_ref = selfcoh(tl_base, 0, 1000)
+    C_spont = meancoherence(tl_base, tgrid=[-1000,0], fpass=_fpass)[0]
+    C_stim = meancoherence(tl_base, tgrid=[0,1000], fpass=_fpass)[0]
+    #C_spont = selfcoh(tl_base, -1000, 0 )[0]
+    #C_stim,f,tl_ref = selfcoh(tl_base, 0, 1000)
 
     print "I(spont) = %3.4f" % info(C_spont)
     print "I(stim) = %3.4f" % info(C_stim)
     
     if os.path.exists(reconfile):
         tl_recon = toelis.readfile(reconfile)
-        C_recon = crosscoh(tl_ref, tl_recon, 0, 1000)[0]
+        #C_recon = crosscoh(tl_ref, tl_recon, 0, 1000)[0]
+        C_recon = coherenceratio(tl_recon, tl_base, tgrid=[0,1000], fpass=_fpass)[0]
         print "I(recon) = %3.4f" % info(C_recon)
-
-
-
-
-##     # in order to compare coherence between stimuli they need to have roughly
-##     # the same number of repeats, because of the positive bias
-##     #maxreps = min(tl_base.nrepeats, tl_recon.nrepeats)
-##     #tl_base = tl_base.repeats(slice(0,maxreps))
-##     #tl_recon = tl_recon.repeats(slice(0,maxreps))
-
-##     r_stim = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',0,1000)[0].mean(1)
-##     r_recon = kernrates(tl_recon,1,1,'gaussian',0,1000)[0].mean(1)    
-##     r_base = kernrates(tl_base.repeats(slice(0,10)),1,1,'gaussian',-1000,0)[0].mean(1)
-##     C_stim,phi,S12,S1,S2,f = coherencycpt(r_stim,
-##                                           tl_base.repeats(slice(10,None)).subrange(0,1000),
-##                                           **options)
-##     C_recon,phi,S12,S1,S2,f = coherencycpt(r_recon,
-##                                            tl_base.repeats(slice(10,None)).subrange(0,1000),
-##                                            **options)
-    
-##     C_base,phi,S12,S1,S2,f = coherencycpt(r_base,
-##                                           tl_base.repeats(slice(10,None)).subrange(-1000,0,adjust=True),
-##                                           **options)
-
-        
-
+        print "Coherence ratio: %3.4f" % (C_recon.mean() / C_stim.mean())
 
