@@ -368,7 +368,8 @@ def mtfft(S, **kwargs):
     Sdim = S.ndim
 
     if Sdim==1:
-        S.shape = (S.size,1)
+        S = S.reshape(S.size,1)
+        
     N, C = S.shape
     nfft = max(2**(nextpow2(N)+pad), N)
     f,findx = getfgrid(Fs,nfft,fpass)
@@ -377,8 +378,8 @@ def mtfft(S, **kwargs):
 
     ntapers = tapers.shape[1]
     # "outer product" of data with tapers
-    S.shape = (S.shape[0], 1, S.shape[1])
-    tapers.shape = (tapers.shape + (1,))
+    S = S.reshape((N, 1, C))
+    tapers = tapers.reshape(tapers.shape + (1,))
     S = nx.tile(S, (1,ntapers,1))
     tapers = nx.tile(tapers, (1,1,C))
     S = S * tapers
@@ -389,7 +390,57 @@ def mtfft(S, **kwargs):
         
     return J, f
     
+def mtcoherence(S1, S2, **kwargs):
+    """
+    Compute the multi-taper coherence between two continous signals.
+
+	[J,f]=mtfft(S1, **kwargs)
+	Input: 
+	      S1         continuous data in column-major format (matrix or vector)
+              S2
+        Optional keyword arguments:
+              tapers    precalculated tapers from dpss, or the number of tapers to use
+                        Default 5
+              mtm_p     time-bandwidth parameter for dpss (ignored if tapers is precalced)
+                        Default 3
+              pad       padding factor for the FFT:
+	                   -1 corresponds to no padding,
+                           0 corresponds to padding to the next highest power of 2 etc.
+                           e.g. For N = 500, if PAD = -1, we do not pad; if PAD = 0, we pad the FFT
+                           to 512 points, if pad=1, we pad to 1024 points etc.
+                           Defaults to 0.
+              Fs        sampling frequency. Default 1
+              fpass     frequency band to be used in the calculation in the form
+                        [fmin fmax]
+                        Default all frequencies between 0 and Fs/2
+              trialave  average coherence between S1 and S2 across trials (columns)
+                        Default False
+
+	Output:
+	      C       (complex spectrum with dimensions freq x chan x tapers)
+              f       (frequency vector)
+    """
+    Fs = kwargs.get('Fs',1)
+    fpass = kwargs.get('fpass',(0,Fs/2.))
+    pad = kwargs.get('pad', 0)
+
+    assert S1.shape == S2.shape, "Signals need to have the same dimensions"
+
+    N = S1.shape[0]
+    kwargs['tapers'] = dpsschk(N, **kwargs)    
+
+    J1,f = mtfft(nx.squeeze(S1), **kwargs)
+    J2,f = mtfft(nx.squeeze(S2), **kwargs)
+    S12 = nx.squeeze(nx.mean(J1.conj() * J2,1))
+    S1 =  nx.squeeze(nx.mean(J1.conj() * J1,1))
+    S2 =  nx.squeeze(nx.mean(J2.conj() * J2,1))
+    if kwargs.get('trialave',False):
+        S12 = S12.mean(1)
+        S1 = S1.mean(1)
+        S2 = S1.mean(1)
     
+    return S12 / nx.sqrt(S1 * S2),f
+
 def dpss(npoints, mtm_p, k=None):
     """
     Computes the discrete prolate spherical sequences used in the
