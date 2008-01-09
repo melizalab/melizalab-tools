@@ -127,6 +127,7 @@ class toelis(object):
         The range of event times in the toelis.
         """
         allevents = n.concatenate(self)
+        if allevents.size == 0: return None,None
         return allevents.min(), allevents.max()
 
     def subrange(self, onset=None, offset=None, adjust=False):
