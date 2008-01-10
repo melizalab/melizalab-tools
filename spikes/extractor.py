@@ -8,7 +8,7 @@ import scipy as nx
 
 from dlab import _pcmseqio, linalg
 from scipy import weave, io
-from scipy.linalg import svd, get_blas_funcs
+from scipy.linalg import svd
 
 _dtype = nx.int16
 
@@ -89,7 +89,7 @@ def extract_spikes(S, events, **kwargs):
     time is extracted.  Returns a 3D array, (sample, event, channel)
 
     Optional arguments:
-    <dc> - subtract off this value from spike waveforms (i.e. to correct for DC offset)
+    <window> - specify the (total) size of the spike window (default 30 ms)
     """
 
     window = kwargs.get('window',30)
@@ -99,10 +99,9 @@ def extract_spikes(S, events, **kwargs):
 
     for i in range(nevents):
         toe = events[i]
+        if toe + window > nsamples or toe - window < 0: continue
         spikes[i,:,:] = S[toe-window:toe+window,:]
 
-##     if kwargs.has_key('dc'):
-##         spikes -= kwargs['dc']
     return spikes
 
 def get_pcs(spikes, **kwargs):
@@ -126,14 +125,12 @@ def get_pcs(spikes, **kwargs):
 
     for i in range(nchans):
         if observations >= nevents:
-            cm = linalg.cov(spikes[:,:,i], rowvar=0)
+            u,s,v = svd(spikes[:,:,i],full_matrices=0)
         else:
             ind = nx.random.random_integers(0,nevents-1,size=observations)
-            cm = linalg.cov(spikes[ind,:,i], rowvar=0)
+            u,s,v = svd(spikes[ind,:,i],full_matrices=0)
 
-        u,s,v = svd(cm)
-
-        dims[:,:,i] = u[:,:ndims]
+        dims[:,:,i] = v[:ndims,:].T
 
     return dims
 
