@@ -191,7 +191,6 @@ def extractspikes(elog, channels, **kwargs):
                 pass
             else:
                 # okay, keep the data
-                #print "%d/%d -> %s (%d)" % (eptime, enttime, entry['filebase'], entry['entry'])
                 fp = fcache[entry['filebase']]
                 fp.seek(entry['entry'])
                 S = fp.read()
@@ -282,14 +281,13 @@ def extractfeatures(spikes, events=None, **kwargs):
 def groupstimuli(elog, **kwargs):
     """
     Groups event lists by stimulus. munit_events is a dictionary
-    of toelis objects indexed by the abstime of the relevant entry.
-    These entries are used to look up the associated stimulus,
-    and the toelis objects for each stimulus are grouped as multiple
-    repeats.
+    of toelis objects indexed by the name of the stimulus that was
+    played during the episode when the events occurred.
 
     Optional arguments:
     range - a slice or index array indicating which episodes to keep
     units - a slice or index array indicating which units to analyze
+    byepisode - if true, index toelis object by episode number instead of stimulus
     """
 
     # load stimulus times
@@ -300,18 +298,28 @@ def groupstimuli(elog, **kwargs):
     nunits = len(events)
     eprange = kwargs.get('range',slice(None))
     episodes = stimtable[eprange]
-    
-    stimuli = nx.unique(episodes['name'])
-    tls = dict([(x, toelis.toelis(nunits=nunits, nrepeats=0)) for x in stimuli])
+
+    byepisode = kwargs.get('byepisode',False)
+
+    if byepisode:
+        idx = nx.arange(stimtable.shape[0])[eprange]
+    else:
+        idx = nx.unique(episodes['name'])
+        
+    tls = dict([(x, toelis.toelis(nunits=nunits, nrepeats=0)) for x in idx])
 
     for i in range(len(episodes)):
-        stim = episodes[i]['name']
+        if byepisode:
+            ind = idx[i]
+        else:
+            ind = episodes[i]['name']
         offset = (episodes[i]['abstime'] - episodes[i]['entrytime']) / msr
         tl = toelis.toelis([unit[i] for unit in events], nunits=nunits)
         tl.offset(-offset)
-        tls[stim].extend(tl)
+        tls[ind].extend(tl)
                 
     return tls
+
 
 def readevents(elog, units=None):
     """
@@ -337,10 +345,10 @@ def readevents(elog, units=None):
 
     allunits = []
     for group in range(len(cnames)):
-        print "Electrode group %d/%d..." % (group+1, len(cnames))
         fname = "%s.fet.%d" % (basename, group+1)
         cname = "%s.clu.%d" % (basename, group+1)
         episodes = _readklu.readclusters(fname, cname, atimes)
+        print "Electrode group %d/%d... %s" % (group+1, len(cnames), range(len(allunits),len(allunits)+len(episodes)))
         allunits.extend(episodes)
 
     if units==None:
