@@ -17,7 +17,6 @@ from scipy import io
 from scipy.stats import randint
 from spikes import _readklu, extractor
 from dlab import _pcmseqio, explog
-#from dlab.plotutils import drawoffscreen
 from dlab.datautils import filecache
 
 
@@ -134,7 +133,7 @@ def extractspikes(elog, channel, spiketimes, filebase='.', window=50):
         spikes.append(extractor.extract_spikes(S, events - atime0, window=window))
 
     allspikes = nx.concatenate(spikes, axis=0)
-    allspikes,kept_events = extractor.realign(allspikes, downsamp=True)
+    allspikes,kept_events = extractor.realign(allspikes, downsamp=False)
     return allspikes.squeeze()
 
 def getspikes(basedir, elog, bird, date, pen, site, chan, unit):
@@ -162,7 +161,12 @@ def plotspikes(S, nspikes=50):
     peakind = subset.mean(1).argmax()
     nsamp = S.shape[1]
     # try to guess the (up)sampled rate based on the # of samples
-    dt = 1./ 20
+    if nsamp < 100:
+        dt = 1./ 20
+    elif nsamp < 200:
+        dt = 1./ 40
+    else:
+        dt = 1./ 60
     #if nsamp < 60:
     #    dt = 1./ 20
     #else:
@@ -195,8 +199,7 @@ def readspikes(spikefile):
 
 def spikestats(spikes):
     from dlab.signalproc import fftresample
-    from dlab.linalg import cov, gemm
-    from scipy.linalg import svd
+    from dlab.linalg import pcasvd
     # fix inverted spikes
     inverted = nx.sign(spikes.argmin(0) - spikes.argmax(0))
     spikes *= inverted
@@ -239,9 +242,7 @@ def spikestats(spikes):
         troughwidth[i] = (spike <= trough[i]/2).sum()
 
     # do some fancy pca crap
-    cm = cov(shifted)
-    u,s,v = svd(cm)
-    B = gemm(shifted.T, u[:,:3])
+    B = pcasvd(shifted, 3)[0]
     
     return {'spike': shifted,
             'peak': peak,
@@ -300,7 +301,8 @@ if __name__=="__main__":
 
         bird, date, rost, lat, pen, site, depth, area, unit, quality, thresh, chan = fields[:12]
         cellpath = os.path.join("st" + bird, date, "cell_%s_%s_%s" % (pen, site, unit))
-        elogname = os.path.join("st" + bird, date, "st%s.explog.h5" % bird)
+        elogname = os.path.join(basedir, "st" + bird, date, "st%s.explog.h5" % bird)
+        print "Analyzing %s..." % cellpath
 ##         elogname = glob.glob(os.path.join("st" + bird, date, "st%s*.explog.h5" % bird))
 ##         if len(elogname)==0:
 ##             print "Can't find explog file for %s/%s/site_%s_%s, skipping" % (bird, date, pen, site)
