@@ -66,6 +66,7 @@ def extractgroups(elog, base, channelgroups, **kwargs):
     Optional arguments:
     kkwik - if true, runs KlustaKwik on the .clu and .fet files
     invert - if true, inverts the signal prior to spike detection
+    nfeats - the number of principal components to use in the feature file (default 3)
     """
 
     xmlhdr = """<parameters creator="pyklusters" version="1.0" >
@@ -119,17 +120,18 @@ def extractgroups(elog, base, channelgroups, **kwargs):
         xmlfp.write("<peakSampleIndex>%d</peakSampleIndex>\n" % (nsamp/2))
         print "Wrote spikes to %s.spk.%d" % (base, group)
 
-        feats = extractfeatures(spikes, events)
+        nfeats = kwargs.get('nfeats',3)
+        feats = extractfeatures(spikes, events, ndim=nfeats)
         writefeats("%s.fet.%d" % (base, group), feats,
                       cfile="%s.clu.%d" % (base, group))
-        nfeats = (feats.shape[1] - 1) / len(channels)
+        totfeats = (feats.shape[1] - 1) / len(channels)
         xmlfp.write("<nFeatures>%d</nFeatures>\n" % nfeats)
         xmlfp.write("</group>\n")
         print "Wrote features to %s.fet.%d" % (base, group)
 
         if kwargs.get('kkwik',False):
             cmd = "KlustaKwik %s %d -UseFeatures %s &" % \
-                  (base, group, "".join(['1']*nfeats)+'0')
+                  (base, group, "".join(['1']*nfeats+['0']*(totfeats-nfeats))+'0')
             os.system(cmd)
         group += 1
 
@@ -267,8 +269,7 @@ def extractfeatures(spikes, events=None, **kwargs):
     events - dictionary of event times (relative to episode start), indexed
              by the starting time of the episode
     """
-    pcs = get_pcs(spikes, **kwargs)
-    proj = get_projections(spikes, pcs, **kwargs)
+    proj = get_projections(spikes, **kwargs)
     nevents,nchans,nfeats = proj.shape
     proj.shape = (nevents, nchans*nfeats)
 

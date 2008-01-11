@@ -8,7 +8,7 @@ import scipy as nx
 
 from dlab import _pcmseqio, linalg
 from scipy import weave, io
-from scipy.linalg import svd
+
 
 _dtype = nx.int16
 
@@ -104,49 +104,22 @@ def extract_spikes(S, events, **kwargs):
 
     return spikes
 
-def get_pcs(spikes, **kwargs):
-    """
-    Performs a dimensional reduction of spike data by estimating
-    the principal components of the spike set.
 
-    optional arguments:
-
-    observations - the number of spikes to use in calculating the pcs
-                   (default all of them)
-    ndims - the number of dimensions to compute projections along
-            (default 3)
-
-    """
-
-    ndims = kwargs.get('ndims',3)
-    nevents,nsamp,nchans = spikes.shape
-    dims = nx.zeros((nsamp,ndims,nchans),'d')
-    observations = kwargs.get('observations', nevents)
-
-    for i in range(nchans):
-        if observations >= nevents:
-            u,s,v = svd(spikes[:,:,i],full_matrices=0)
-        else:
-            ind = nx.random.random_integers(0,nevents-1,size=observations)
-            u,s,v = svd(spikes[ind,:,i],full_matrices=0)
-
-        dims[:,:,i] = v[:ndims,:].T
-
-    return dims
-
-
-def get_projections(spikes, features, **kwargs):
+def get_projections(spikes, **kwargs):
     """
     Calculates the projections of the spikes onto the features
     Returns a 3D array, (events, dims, chans)
 
+    spikes - 3D array, dimensions (events, values, channels)
+
+    Optional Arguments:
+    ndims - the number of principal components to use in calculating projections
+            (default 3)    
     peaktrough - if true, include peak and trough calculations as features
     """
-    nsamp,ndims,nchans = features.shape
-    nevents,nsamp1,nchans1 = spikes.shape
 
-    assert nsamp==nsamp1
-    assert nchans==nchans1
+    nevents,nsamp,nchans = spikes.shape
+    ndims = kwargs.get('ndims',3)
 
     if kwargs.get('peaktrough',True):
         nfeats = ndims + 3
@@ -154,8 +127,9 @@ def get_projections(spikes, features, **kwargs):
         nfeats = ndims
         
     proj = nx.zeros((nevents,nchans,nfeats),'d')
+
     for i in range(nchans):
-        proj[:,i,:ndims] = linalg.gemm(spikes[:,:,i], features[:,:,i])
+        proj[:,i,:ndims] = linalg.pcasvd(spikes[:,:,i], ndims)[0]
 
     if kwargs.get('peaktrough',True):
         # spikes should be aligned
@@ -281,7 +255,7 @@ def realign(spikes, **kwargs):
     stop  = upsamp.shape[1]-shift.max()
     shape[ax] = stop - start
 
-    shifted = nx.zeros(shape, dtype=spikes.dtype)
+    shifted = nx.zeros(shape, dtype=upsamp.dtype)
     for i in range(upsamp.shape[0]):
         d = upsamp[i,start+shift[i]:stop+shift[i]]
         shifted[i] = d
@@ -289,9 +263,9 @@ def realign(spikes, **kwargs):
     if kwargs.get('downsamp',False):
         npoints = (stop - start) / resamp_rate
         dnsamp = fftresample(shifted, npoints, axis=1)
-        return dnsamp.astype(spikes.dtype),goodpeaks
+        return dnsamp,goodpeaks
     else:
-        return shifted.astype(spikes.dtype),goodpeaks
+        return shifted,goodpeaks
     
 
 def signalstats(pcmfiles):
@@ -347,11 +321,12 @@ def combine_channels(fp, entry):
 
 if __name__=="__main__":
 
-    basedir = '/giga1/users/dmeliza/acute_data/20070602/site_8_1/'
-    pattern = "st317_%d_20070602a.pcm_seq2"
+    import os
+    basedir = '/z1/users/dmeliza/acute_data/st323/20071212/site_5_6'
+    pattern = "st323_%d_20071212o.pcm_seq2"
     
     #pcmfiles = [basedir + pattern % d for d in range(1,17)]
-    pcmfiles = [basedir + pattern % d for d in range(5,8)]
+    pcmfiles = [os.path.join(basedir, pattern % d) for d in range(9,10)]
 
     # open files
     print "---> Open test files"
@@ -369,8 +344,5 @@ if __name__=="__main__":
     print "---> Aligning spikes..."
     rspikes,kept_events = realign(spikes, downsamp=False)
     
-    print "---> Computing features..."
-    pcs = get_pcs(rspikes, ndims=3)
-    
-    print "---> Calculating projections..."
-    proj = get_projections(rspikes, pcs)
+    print "---> Calculating feature projections..."
+    proj = get_projections(rspikes, ndims=3)
