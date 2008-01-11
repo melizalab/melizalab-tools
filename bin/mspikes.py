@@ -19,15 +19,16 @@ mspikes --stats -p <pen> -s <site>  <explog.h5>
         RMS power of the signal.  For multi-channel acquisitions,
         plots the mean across all channels.
 
-mspikes --inspect -p <pen> -s <site> [--chan=""] [-u [--unit=""]] <explog.h5>
+mspikes --inspect -p <pen> -s <site> [--chan=""] [--units=<clufile>] <explog.h5>
 
         view the raw waveform of the signal, plotted in units relative
         to the RMS power of the signal. Useful in determining what
         threshold value(s) to set in extraction. Restrict the set of
-        channels plotted (default all) with --chan.  If spike times
-        have already been extracted, and the --unit(s) argument is
-        given, plots the unit events as dots overlaid on the
-        waveforms.
+        channels plotted (default all) with --chan.
+
+        The units argument, which only works for single channels, causes
+        a .clu.n file to be read in, and the units are plotted as events
+        overlaid on the waveforms.
 
 mspikes --extract -p <pen> -s <site> [--chan=""] [-i] [-r <rms_thresh> | -a <abs_thresh>]
          [-t <max_rms>] [-f 3] [-w 20] [--kkwik] <explog.h5>
@@ -78,7 +79,7 @@ options = {
     'sort_raw' : True
     }
 
-###
+###  SCRIPT: PARSE ARGUMENTS
 if __name__=="__main__":
 
     if len(sys.argv)<2:
@@ -86,28 +87,31 @@ if __name__=="__main__":
         sys.exit(-1)
 
 
-    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:e:w:ihlu",
+    opts, args = getopt.getopt(sys.argv[1:], "p:s:r:a:f:o:t:e:w:ihl",
                                ["sort","stats","inspect","extract",
-                                "chan=","unit=","help","kkwik"])
+                                "chan=","units=","help","kkwik"])
 
     opts = dict(opts)
     if opts.has_key('-h') or opts.has_key('--help'):
             print __doc__
             sys.exit(-1)
-###
-# wait to load the heavyweight modules
+
+### FUNCTIONS
+# (we waited to load the heavyweight modules)
+import numpy as nx
 from spikes import klusters, extractor
 from dlab.datautils import filecache
 from dlab.signalproc import signalstats
+from dlab.plotutils import colorcycle, drawoffscreen
 from dlab import explog, _pcmseqio
-import scipy as nx
-import pylab as P
+from pylab import figure, setp, connect, show
 
 # cache handles to files
 _fcache = filecache()
 _fcache.handler = _pcmseqio.pcmfile
 
-def plotentry(k, entry, channels=None, units=False, ax=None):
+@drawoffscreen
+def plotentry(k, entry, channels=None, eventlist=None, fig=None):
     atime = k.getentrytimes(entry)
     stim = k.getstimulus(atime)['name']
     files = k.getfiles(atime)
@@ -120,38 +124,73 @@ def plotentry(k, entry, channels=None, units=False, ax=None):
     if channels==None:
         channels = files['channel'].tolist()
 
-    P.ioff()
     nplots = len(channels)
     # clear the figure and create subplots if needed
-    if ax==None or len(ax) != nplots:
-        P.clf()
+    if fig==None:
+        fig = figure()
+    
+    ax = fig.get_axes()
+
+    if len(ax) != nplots:
+        fig.clf()
         ax = []
         for i in range(nplots):
-            ax.append(P.subplot(nplots,1,i+1))
+            ax.append(fig.add_subplot(nplots,1,i+1))
+        fig.subplots_adjust(hspace=0.)
 
     for i in range(nplots):
-        s = pfp[i].read()
+        s = pfp[channels[i]].read()
         t = nx.linspace(0,s.shape[0]/k.samplerate,s.shape[0])        
         mu,rms = signalstats(s)
-        ax[i].plot(t,(s - mu)/rms,'k')
+        y = (s - mu)/rms
+
+        ax[i].cla()
+        ax[i].hold(True)
+        ax[i].plot(t,y,'k')
         ax[i].set_ylabel("%d" % channels[i])
+        if eventlist!=None:
+            plotevents(ax[i], t, y, entry, eventlist)
 
     # fiddle with the plots a little to make them pretty
     for i in range(len(ax)-1):
-        P.setp(ax[i].get_xticklabels(),visible=False)
+        setp(ax[i].get_xticklabels(),visible=False)
 
     ax[0].set_title('site_%d_%d (%d) %s' % (k.site + (entry,stim)))
     ax[-1].set_xlabel('Time (ms)')
-    P.draw()
-    return ax
-    
+    return fig
 
-####
+def plotevents(ax, t, y, entry, eventlist):
+    #from scipy.interpolate import interp1d
+
+    #lookup = interp1d(t,y)
+    for j in range(len(eventlist)):
+        idx = nx.asarray(eventlist[j][entry],dtype='i')
+        times = t[idx]
+        values = y[idx]
+        p = ax.plot(times, values,'o')
+        p[0].set_markerfacecolor(colorcycle(j))
+
+def extractevents(unitfile, elog, Fs=1.0):
+    # this might fail if the clu file has a funny name
+    ffields = unitfile.split('.')
+    assert len(ffields) > 2, "The specified cluster file '%s' does not have the right format" % unitfile
+    cfile = ".".join(ffields[:-2] + ["clu",ffields[-1]])
+    ffile = ".".join(ffields[:-2] + ["fet",ffields[-1]])
+    assert os.path.exists(cfile), "The specified cluster file '%s' does not exist" % cfile
+    assert os.path.exists(ffile), "The specified feature file '%s' does not exist" % ffile
+    
+    atimes = elog.getentrytimes().tolist()
+    atimes.sort()
+    return klusters._readklu.readclusters(ffile, cfile, atimes, Fs)
+
+
+####  SCRIPT
 if __name__=="__main__":
 
 
     k = None    # the explog/site object
 
+    ### SORT:
     if opts.has_key('--sort'):
         # sort mode parses the explog file
         assert len(args) > 0
@@ -168,97 +207,102 @@ if __name__=="__main__":
         k = explog.readexplog(infile, outfile, options['sort_raw'])
         print "Parsed explog: %d episodes, %d stimuli, and %d channels" % \
               (k.totentries, k.totstimuli, k.nchannels)
+        sys.exit(0)
         
 
+    ### all other modes require pen and site
+    if opts.has_key('-p'):
+        pen = int(opts['-p'])
     else:
-        # all other modes require pen and site
-        if opts.has_key('-p'):
-            pen = int(opts['-p'])
+        print "Error: must specify pen/site"
+        sys.exit(-1)
+    if opts.has_key('-s'):
+        site = int(opts['-s'])
+    else:
+        print "Error: must specify pen/site"
+        sys.exit(-1)       
+
+    infile = args[0]
+    if not infile.endswith('.h5'):
+        print "Error: must use parsed explog (.h5) for this option"
+        sys.exit(-1)
+
+    # open the kluster.site object
+    k = explog.explog(infile)
+    k.site = (pen,site)
+
+
+    ### STATS:
+    if opts.has_key('--stats'):
+        # stats mode computes statistics for the site
+        m,rms,t = klusters.sitestats(k)
+        if rms.ndim > 1:
+            rms = rms.mean(1)
+        # plot them
+        fig = figure()
+        ax = fig.add_subplot(111)
+        ax.plot(rms,'o')
+        ax.set_xlabel('Entry')
+        ax.set_ylabel('RMS')
+        show()
+
+
+    ### INSPECT:
+    elif opts.has_key('--inspect'):
+        # this is faster in aplot, but the results are scaled by rms here
+        if opts.has_key('--chan'):
+            exec "chans = [%s]" % opts['--chan']
         else:
-            print "Error: must specify pen/site"
-            sys.exit(-1)
-        if opts.has_key('-s'):
-            site = int(opts['-s'])
+            chans = None
+
+        if chans != None and len(chans)==1 and opts.has_key('--units'):
+            events = extractevents(opts['--units'], k)
         else:
-            print "Error: must specify pen/site"
-            sys.exit(-1)       
+            events = None
 
-        infile = args[0]
-        if not infile.endswith('.h5'):
-            print "Error: must use parsed explog (.h5) for this option"
-            sys.exit(-1)
+        def keypress(event):
+            if event.key in ('+', '='):
+                keypress.currententry += 1
+                plotentry(k, keypress.currententry, channels=chans, eventlist=events, fig=fig)
+            elif event.key in ('-', '_'):
+                keypress.currententry -= 1
+                plotentry(k, keypress.currententry, channels=chans, eventlist=events, fig=fig)
 
-        # open the kluster.site object
-        #k = klusters.site(infile,pen,site)
-        k = explog.explog(infile)
-        k.site = (pen,site)
-        
-        # now check for the other modes
-        if opts.has_key('--stats'):
-            # stats mode computes statistics for the site
-            m,rms,t = klusters.sitestats(k)
-            if rms.ndim > 1:
-                rms = rms.mean(1)
-            # plot them
-            P.plot(rms,'o')
-            P.xlabel('Entry')
-            P.ylabel('RMS')
-            P.show()
+        keypress.currententry = int(opts.get('-e','0'))
+        fig = plotentry(k, keypress.currententry, channels=chans, eventlist=events)
+        connect('key_press_event',keypress)
+        show()
 
-        elif opts.has_key('--inspect'):
-            # this is faster in aplot, but the results are scaled by rms here
-            if opts.has_key('--chan'):
-                exec "chans = [%s]" % opts['--chan']
-            else:
-                chans = None
+    ### EXTRACT
+    elif opts.has_key('--extract'):
 
-            def keypress(event):
-                if event.key in ('+', '='):
-                    keypress.currententry += 1
-                    plotentry(k, keypress.currententry, channels=chans, ax=ax)
-                elif event.key in ('-', '_'):
-                    keypress.currententry -= 1
-                    plotentry(k, keypress.currententry, channels=chans, ax=ax)
-                
-            keypress.currententry = int(opts.get('-e','0'))
-            ax = plotentry(k, keypress.currententry, channels=chans)
-            P.gcf().subplots_adjust(hspace=0.)
-            P.connect('key_press_event',keypress)
-            P.show()
+        for o,a in opts.items():
+            if o == '-r':
+                exec "thresh = [%s]" % a
+                options['rms_thresh'] = thresh
+            elif o == '-a':
+                exec "thresh = [%s]" % a            
+                options['abs_thresh'] = thresh
+            elif o == '-t':
+                options['max_rms'] = float(a)
+            elif o == '-f':
+                options['nfeats'] = int(a)
+            elif o == '-w':
+                options['window'] = int(a)
+            elif o == '--kkwik':
+                options['kkwik'] = True
+            elif o == '--chan':
+                exec "chans = [%s]" % a
+                options['channels'] = chans
+            elif o == '-i':
+                options['invert'] = True
 
-        elif opts.has_key('--extract'):
+        if options.has_key('rms_thresh') and len(options['rms_thresh'])==1:
+            options['rms_thresh'] *= len(options['channels'])
+        if options.has_key('abs_thresh') and len(options['abs_thresh'])==1:
+            options['abs_thresh'] *= len(options['channels'])
 
-            for o,a in opts.items():
-                if o == '-r':
-                    exec "thresh = [%s]" % a
-                    options['rms_thresh'] = thresh
-                elif o == '-a':
-                    exec "thresh = [%s]" % a            
-                    options['abs_thresh'] = thresh
-                elif o == '-t':
-                    options['max_rms'] = float(a)
-                elif o == '-f':
-                    options['nfeats'] = int(a)
-                elif o == '-w':
-                    options['window'] = int(a)
-                elif o == '--kkwik':
-                    options['kkwik'] = True
-                elif o == '--chan':
-                    exec "chans = [%s]" % a
-                    options['channels'] = chans
-                elif o == '-i':
-                    options['invert'] = True
+        changroups = options.pop('channels')
+        klusters.extractgroups(k, 'site_%d_%d' % k.site, changroups, **options)
 
-            if options.has_key('rms_thresh') and len(options['rms_thresh'])==1:
-                options['rms_thresh'] *= len(options['channels'])
-            if options.has_key('abs_thresh') and len(options['abs_thresh'])==1:
-                options['abs_thresh'] *= len(options['channels'])
-
-            changroups = options.pop('channels')
-            klusters.extractgroups(k, 'site_%d_%d' % k.site, changroups, **options)
-            #k.extractgroups('site_%d_%d' % k.site, changroups, **options)
-            
-
-    # cleanup removes an annoying message
-    del(k)
 
