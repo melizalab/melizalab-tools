@@ -5,7 +5,7 @@ Some statistics and linear algebra functions
 
 """
 import scipy as nx
-from scipy.linalg import get_blas_funcs
+from scipy.linalg import get_blas_funcs, svd
 from datautils import autovectorized
 from scipy import weave
 
@@ -81,6 +81,17 @@ def cov(m, y=None, rowvar=1, bias=0):
         return gemm(X, X.conj(), alpha=1/fact, trans_b=1).squeeze()
     else:
         return gemm(X, X.conj(), alpha=1/fact, trans_a=1).squeeze()
+
+def pcasvd(data, output_dim=None):
+    """
+    Computes principal components of data using singular value decomposition.
+    Data is centered prior to running svd.
+    """
+    if output_dim==None: output_dim = data.shape[1]
+    data = data - data.mean(0)
+    u,s,v = svd(data, full_matrices=0)
+    v = v[:output_dim,:]
+    return gemm(data, v, trans_b=1), v
 
 def squareform(A, dir=None):
     """
