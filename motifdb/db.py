@@ -281,6 +281,12 @@ class motifdb(object):
         id = self.__getmotifid(symbol)
         return getunique(self.h5.root.entities.motifs, 'name', id)
 
+    def get_symbol(self, motifid):
+        """
+        Reverse lookup of symbol from motif id.
+        """
+        return getunique(self._stimset, 'motif', motifid)['symbol'].tostring()
+
     def get_basemotif(self, symbol):
         """
         Attempts to look up which motif is the base motif for a symbol.
