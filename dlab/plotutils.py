@@ -243,6 +243,8 @@ class texplotter(object):
                            'xtick.labelsize': 8,
                            'ytick.labelsize': 8,
                            'text.usetex': False}
+    _latex_cmd = "latex %s > /dev/null"
+    _pdf_cmd = "dvipdf -dAutoRotatePages=/None %s"
 
     def __init__(self, parameters=None, leavetempdir=False):
         """
@@ -260,8 +262,6 @@ class texplotter(object):
         The default margins and plotdims will plot 8 figures per page.
         """
 
-        #matplotlib.use('PS')  # useful if running from a script; otherwise the plots
-        #                      # will be displayed in an interactive session
         if parameters!=None:
             self._defparams.update(parameters)
         matplotlib.rcParams.update(self._defparams)
@@ -328,9 +328,9 @@ class texplotter(object):
         if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
         try:
             os.chdir(self._tdir)
-            os.system('latex texplotter.tex > /dev/null')
+            os.system(_latex_cmd % 'texplotter.tex')
             if not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
-            os.system('dvipdf -dAutoRotatePages=/None texplotter.dvi')
+            os.system(_pdf_cmd % 'texplotter.dvi')
             if not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
             shutil.move('texplotter.pdf', filename)
         finally:
@@ -338,11 +338,22 @@ class texplotter(object):
 
 
 def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
-                bottom=0.1, top = 0.9, **kwargs):
+                bottom=0.1, top = 0.9, plotw=None, **kwargs):
     """
     Generates a series of plots neighboring each other horizontally and with common
     y offset and height values.
 
+    fig - the figure in which to create the plots
+    nplots - the number of plots to create
+    xstart - the left margin of the first plot
+    xstop - the right margin of the last plot
+    spacing - the amount of space between plots
+    bottom - the bottom margin of the row of plots
+    top - the top margin of the row of plots
+    plotw - specify the width of each plot. By default plots are evenly spaced, but
+            if a list of factors is supplied the plots will be adjusted in width. Note
+            that if the total adds up to more than <nplots> the plots will exceed the
+            boundaries specified by xstart and xstop
     kwargs - passed to axes command
     """
     from pylab import axes
@@ -351,20 +362,25 @@ def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
     xwidth = (xstop - xstart - spacing * (nplots-1))/ nplots
     xpos = xstart
     yheight = top - bottom
+    if plotw==None: plotw = nx.ones(nplots)
+    
     for j in range(nplots):
-        rect = [xpos, bottom, xwidth, yheight]
+        xw = xwidth * plotw[j]
+        rect = [xpos, bottom, xw, yheight]
         a = fig.add_axes(rect, **kwargs)
-        xpos += xwidth + spacing
+        xpos += xw + spacing
         ax.append(a)
 
     return ax
 
 def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
-                left=0.1, right=0.9, **kwargs):
+                left=0.1, right=0.9, plotw=None, **kwargs):
     """
     Generates a series of plots neighboring each other vertically and with common
     x offset and height values.
 
+    plotw - if not None, needs to be a vector of length nplots; the width of each
+            plot will be changed by this factor.  Make sure they add up to less than nplots.
     kwargs - passed to axes command
     """
     from pylab import axes
@@ -373,10 +389,13 @@ def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
     yheight = (ystop - ystart - spacing * (nplots-1))/ nplots
     ypos = ystart
     xwidth = right - left
+    if plotw==None: plotw = nx.ones(nplots)
+    
     for j in range(nplots):
-        rect = [left, ypos, xwidth, yheight]
+        yh = yheight * plotw[j]
+        rect = [left, ypos, xwidth, yh]
         a = fig.add_axes(rect, **kwargs)
-        ypos += yheight + spacing
+        ypos += yh + spacing
         ax.append(a)
 
     return ax
@@ -416,12 +435,10 @@ def setframe(ax, lines=1100):
 
     if lines[0] and lines[2]:
         ax.yaxis.set_ticks_position('both')
-    if not (lines[0] or lines[2]):
-        ax.yaxis.set_visible(0)
+    ax.yaxis.set_visible(lines[0] or lines[2])
     if lines[1] and lines[3]:
         ax.yaxis.set_ticks_position('both')
-    if not (lines[1] or lines[3]):
-        ax.xaxis.set_visible(0)
+    ax.xaxis.set_visible(lines[1] or lines[3])
 
 ## def sync_clim(fig):
 ##     """
