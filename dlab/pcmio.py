@@ -5,7 +5,7 @@ Module with functions for reading pcm data from a variety of files,
 including wav, pcm, and pcm_seq2
 """
 
-from scipy.io import fread,fwrite
+import numpy as nx
 from scipy import dtype, fromstring
 from os.path import splitext, exists
 import _pcmseqio
@@ -140,12 +140,12 @@ class _pcmfile(_sndfile):
         if mem_type==None:
             mem_type = self._dtype.char
             
-        return fread(self.fp, length, self._dtype.char, mem_type)
+        return nx.fromfile(self.fp, dtype=self._dtype, count=length)
 
     def write(self, data):
 
         self.fp.seek(0,2)
-        fwrite(self.fp, len(data), data, self._dtype.char)
+        data.astype(self._dtype).tofile(self.fp, sep="")
 
     def close(self):
         self.fp.close()
