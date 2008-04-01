@@ -149,12 +149,13 @@ def dcontour(*args, **kwargs):
 
     h = []
 
+    kwargs['hold'] = 1
     for i in labels:
         if smooth!=None:
             data = gaussian_filter((I==i).astype('d'), smooth)
         else:
             data = I==i
-        hh = contour(X, Y, data,1, colors=colorcycle(i), hold=1, **kwargs)
+        hh = contour(X, Y, data,1, colors=colorcycle(i), **kwargs)
         h.append(hh)
 
     return h
@@ -328,9 +329,9 @@ class texplotter(object):
         if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
         try:
             os.chdir(self._tdir)
-            os.system(_latex_cmd % 'texplotter.tex')
+            os.system(self._latex_cmd % 'texplotter.tex')
             if not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
-            os.system(_pdf_cmd % 'texplotter.dvi')
+            os.system(self._pdf_cmd % 'texplotter.dvi')
             if not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
             shutil.move('texplotter.pdf', filename)
         finally:
