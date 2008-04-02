@@ -198,14 +198,14 @@ def readspikes(spikefile):
     return cells, out
 
 def spikestats(spikes):
-    from dlab.signalproc import fftresample
+    #from dlab.signalproc import fftresample
     from dlab.linalg import pcasvd
     # fix inverted spikes
     inverted = nx.sign(spikes.argmin(0) - spikes.argmax(0))
     spikes *= inverted
 
     # upsample spikes and realign first
-    spikes = fftresample(spikes, spikes.shape[0]*3, axis=0)
+    #spikes = fftresample(spikes, spikes.shape[0]*3, axis=0)
     peaks  = spikes.argmax(0)
     shift  = (peaks - nx.median(peaks)).astype('i')    
     shape = list(spikes.shape)
@@ -242,7 +242,7 @@ def spikestats(spikes):
         troughwidth[i] = (spike <= trough[i]/2).sum()
 
     # do some fancy pca crap
-    B = pcasvd(shifted, 3)[0]
+    B = pcasvd(shifted.T, 3)[0]
     
     return {'spike': shifted,
             'peak': peak,
@@ -264,6 +264,23 @@ def writestats(file, cells, stats):
                                                    
     fp.close()
 
+def shortname(x):
+    bird,loc,cell = x.split('/')
+    return "%s_%s" % (bird, cell)
+
+def writespikeshapes(file, cells, stats):
+    shortcells = [shortname(x) for x in cells]
+    S = stats['spike']
+    nsamp = S.shape[0]
+    peakind = S[:,0].argmax()  # same for all cells
+    dt = 1./ 60  # also the same
+    S = nx.column_stack((nx.linspace(-peakind * dt, (nsamp - peakind) * dt, num=nsamp), S))
+    fp = open(file, 'wt')
+    fp.write('time\t' + '\t'.join(shortcells) + '\n')
+    nx.savetxt(fp, S, fmt='%3.4g', delimiter='\t')
+    fp.close()
+
+
 if __name__=="__main__":
 
     basedir = os.path.join(os.environ['HOME'], 'z1/acute_data')
@@ -273,7 +290,7 @@ if __name__=="__main__":
     import matplotlib
     matplotlib.use('PS')
     from dlab.plotutils import texplotter
-    ctp = texplotter()
+    ctp = texplotter(leavetempdir=False)
     from pylab import xlabel, title, figure
 
     # use a filecache for the explog files
@@ -330,3 +347,11 @@ if __name__=="__main__":
 
 
         ctp.writepdf('spikeshapes.pdf')
+
+
+    outfp.close()
+    # finally, load the meanspikes file and calculate statistics
+    cells, spikes = readspikes('meanspikes.txt')
+    sstats = spikestats(spikes)
+    writestats('spikestats.tbl', cells, sstats)
+    writespikeshapes('spikeshapes.tbl', cells, sstats)
