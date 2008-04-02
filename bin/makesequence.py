@@ -12,6 +12,8 @@ makesequence.py [-m motifdb] [-g 100] <motif1> <motif2> <motif3> ...
           -m <filename>  use a different motifdb
           -g <float>     insert a gap of <float> ms before each motif
                          Default 100 ms, ignored for single motifs
+          -r <ms>        Apply a <ms> linear ramp to onsets and offsets
+                         Default 2
           -f <batch>     reads in a batch file and generates sequences
                          for each line
 
@@ -23,11 +25,12 @@ from motifdb import db, combiner
 from dlab import pcmio
 
 _file_delim = '_'
+_ramp_ms = 2.0
 
 def sequence(sequencer, seq):
 
     outfile = _file_delim.join(seq) + ".pcm"
-    signal  = sequencer.getsignal(seq)
+    signal  = sequencer.getsignal(seq, ramp_transients=_ramp_ms)
     fp = pcmio.sndfile(outfile,'w')
     fp.write(signal)
     fp.close()
@@ -56,7 +59,7 @@ if __name__=="__main__":
         sys.exit(-1)
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "m:g:f:h", ["help"])
+        opts, args = getopt.getopt(sys.argv[1:], "m:g:f:r:h", ["help"])
     except getopt.GetoptError, e:
         print "Error: %s" % e
         sys.exit(-1)
@@ -68,6 +71,8 @@ if __name__=="__main__":
             prepend = float(a)
         elif o == '-f':
             batch = a
+        elif o == '-r':
+            _ramp_ms = float(a)
         elif o in ('-h', '--help'):
             print __doc__
             sys.exit(-1)
