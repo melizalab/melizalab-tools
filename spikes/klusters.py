@@ -198,7 +198,7 @@ def extractspikes(elog, channels, **kwargs):
                 S = fp.read()
                 #mu,rms = signalstats(S)
                 if invert:
-                    S *= -S
+                    S *= -1
                 sig.append(S)
                 stats.append(signalstats(S))
             # advance the file iterator
@@ -237,7 +237,7 @@ def writespikes(outfile, spikes):
     Writes spikes to kluster's .spk.n files
     """
     fp = open(outfile,'wb')
-    io.fwrite(fp, spikes.size, spikes.astype('int16').squeeze())
+    spikes.astype('int16').squeeze().tofile(fp, sep="")
     fp.close()
 
 def writefeats(outfile, feats, **kwargs):
@@ -251,7 +251,7 @@ def writefeats(outfile, feats, **kwargs):
     """
     fp = open(outfile,'wt')
     fp.write("%d\n" % feats.shape[1])
-    io.write_array(fp, feats.astype('i'))
+    nx.savetxt(fp, feats, "%i")
     fp.close()
     if kwargs.get('cfile',None):
         fp = open(kwargs.get('cfile'),'wt')
@@ -289,35 +289,53 @@ def groupstimuli(elog, **kwargs):
     range - a slice or index array indicating which episodes to keep
     units - a slice or index array indicating which units to analyze
     byepisode - if true, index toelis object by episode number instead of stimulus
+    nostim_name - if None, drop entries with no stimulus. If a string, assign
+                  entries with no stimulus to this key. Default 'nostim'
     """
 
     # load stimulus times
     stimtable = elog._gettable('stimuli')
+    eptable = elog._gettable('entries')
+    
     msr = float(elog.samplerate)
+    
     # load event times
     events = readevents(elog, kwargs.get('units',None))
     nunits = len(events)
+
+    # create an index into the episodes
     eprange = kwargs.get('range',slice(None))
-    episodes = stimtable[eprange]
+    epnums = nx.arange(eptable.shape[0])[eprange]
 
     byepisode = kwargs.get('byepisode',False)
+    nostim_name = kwargs.get('nostim_name','nostim')
 
-    if byepisode:
-        idx = nx.arange(stimtable.shape[0])[eprange]
-    else:
-        idx = nx.unique(episodes['name'])
-        
-    tls = dict([(x, toelis.toelis(nunits=nunits, nrepeats=0)) for x in idx])
+    tls = {}
 
-    for i in range(len(episodes)):
+    for epnum in epnums:
+        stim = elog.getstimulus(eptable[epnum]['abstime'])
+        # figure out the key
         if byepisode:
-            ind = idx[i]
+            ind = epnum
+        elif stim.size > 0:
+            ind = stim[0]['name']
+        elif nostim_name != None:
+            ind = nostim_name
         else:
-            ind = episodes[i]['name']
-        offset = (episodes[i]['abstime'] - episodes[i]['entrytime']) / msr
-        tl = toelis.toelis([unit[i] for unit in events], nunits=nunits)
-        tl.offset(-offset)
-        tls[ind].extend(tl)
+            continue
+
+        tl = toelis.toelis([unit[epnum] for unit in events], nunits=nunits)
+        
+        # figure out the offset
+        if stim.size > 0:
+            offset = (stim[0]['abstime'] - stim[0]['entrytime']) / msr
+            tl.offset(-offset)
+
+        # create the toelis if it doesn't exist
+        if tls.has_key(ind):
+            tls[ind].extend(tl)
+        else:
+            tls[ind] = tl
                 
     return tls
 
@@ -338,7 +356,7 @@ def readevents(elog, units=None):
 
     basename = "site_%d_%d" % elog.site
     cnames = glob("%s.clu.*" % basename)
-    assert len(cnames) > 0, "No event data for %s."
+    assert len(cnames) > 0, "No event data for %s." % basename
 
     # _readklu.readclusters expects a list of sorted ints
     atimes = elog.getentrytimes().tolist()
