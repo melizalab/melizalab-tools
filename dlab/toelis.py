@@ -32,10 +32,14 @@ class toelis(object):
 
         """
 
-        if data!=None:
+        if isinstance(data, self.__class__):
+            # copy constructor (shallow)
+            self.events = data.events
+            self.index = data.index.copy()
+        elif data != None:
             for item in data:
                 if n.isscalar(item):
-                    raise ValueError, "Input data must be a list"
+                    raise ValueError, "Input data must be a list of lists"
 
             nitems = len(data)
             self.index = n.arange(nitems)
@@ -161,6 +165,8 @@ class toelis(object):
         toelis is treated as more repeats, but set <dim> to 1 to treat them as additional
         units.
         """
+        if not isinstance(newlis, self.__class__):
+            raise ValueError, "Toelis objects can only be extended with other toelis objects."
         if not self.index.shape[(1 - dim)]==newlis.index.shape[(1 - dim)]:
             raise ValueError, "Dimensions do not match for merging along dim %d " % dim
 
@@ -262,16 +268,6 @@ class toelis(object):
         return bins, freq
 
 # end toelis
-
-def aggregate(tls, dim=0):
-    """
-    Combines a list of toelis objects into a single toelis by aggregating
-    along a dimension (default repeats)
-    """
-    tll = toelis(tls[0].events)
-    for i in range(1,len(tls)):
-        tll.extend(tls[i])
-    return tll
 
 def readfile(filename):
     """
