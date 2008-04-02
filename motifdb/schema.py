@@ -105,18 +105,23 @@ class Motif(_recobj):
         # parse string names into dictionary
         if isinstance(obj, str):
             (name, ext) = os.path.splitext(obj)
-            m = self._motif_file_re.match(name)
-            if not m:
-                raise ValueError, "Unable to determine metadata from motif name"
             obj = {
                 'name' : name,
-                'bird' : int(m.group('bird')),
-                'entry' : int(m.group('entry')),
-                'onset' : float(m.group('onset')),
-                'length' : float(m.group('offset')) - float(m.group('onset')),
+                'bird' : 0,
+                'entry': 0,
+                'onset' : 0,
+                'length' : -1,
                 'type' : ext[1:],
                 'Fs' : self._default_Fs
                 }
+            m = self._motif_file_re.match(name)
+            if m:
+                obj.update({
+                    'bird' : int(m.group('bird')),
+                    'entry' : int(m.group('entry')),
+                    'onset' : float(m.group('onset')),
+                    'length' : float(m.group('offset')) - float(m.group('onset')),
+                    })
 
         _recobj.__init__(self, obj)
 
