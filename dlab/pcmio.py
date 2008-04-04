@@ -8,7 +8,7 @@ including wav, pcm, and pcm_seq2
 import numpy as nx
 from scipy import dtype, fromstring
 from os.path import splitext, exists
-import _pcmseqio
+from mspikes import _pcmseqio
 import wave
 
 class _sndfile(object):

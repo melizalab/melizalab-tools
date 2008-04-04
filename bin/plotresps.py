@@ -26,7 +26,8 @@ CDM, 1/2007
 
 import numpy as nx
 from motifdb import db
-from dlab import toelis, plotutils
+from mspikes import toelis
+from dlab import plotutils
 from spikes import stat
 from scipy.ndimage import gaussian_filter1d
 

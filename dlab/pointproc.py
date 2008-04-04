@@ -16,7 +16,7 @@ from scipy.interpolate import interp1d
 from signalproc import getfgrid, dpsschk, mtfft, mtcoherence
 from datautils import nextpow2
 from linalg import outer, gemm
-import toelis
+from mspikes import toelis
 
 def coherencecpt(S, tl, **kwargs):
     """

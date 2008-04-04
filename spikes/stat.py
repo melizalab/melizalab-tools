@@ -5,7 +5,7 @@ Compute statistics on event list data
 """
 
 import os
-from dlab import toelis
+from mspikes import toelis
 
 _tstat = "toestat"
 

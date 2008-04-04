@@ -13,7 +13,7 @@ tplot.py [flags] <files>
 """
 
 from Gnuplot import Gnuplot,Data
-from dlab import toelis
+from mspikes import toelis
 
 def plotraster(events, g=None, unit=0, pointtype=7, pointsize=0.8, pointcolor=0):
     """

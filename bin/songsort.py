@@ -21,7 +21,8 @@ written to a new pcm_seq2 file, and the questionable episodes to another.
 
 import os, sys, pdb
 import numpy as nx
-from dlab import explog, _pcmseqio, datautils
+from dlab import datautils
+from mspikes import explog, _pcmseqio
 
 song_min_length = 15. # seconds
 max_out_size = 400
