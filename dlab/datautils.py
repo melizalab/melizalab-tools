@@ -264,3 +264,35 @@ def nextpow2(n):
     if n==0.0:
         return 0
     return int(nx.ceil(nx.log2(abs(n))));
+
+
+def mergedicts(dicts, collect=list, fun='append', **kwargs):
+    """
+    For an iterable collection of dict objects, generate a single
+    merged dictionary in which items indexed by the same key in multiple
+    dictionaries are collected under a single key.
+
+    By default, the items are collected in lists; this can be
+    overridden by specifying the collect argument as the constructor
+    of some other collection object.
+
+    The fun argument determines what function is used to add each item
+    to the collection.  By default this is append; if the component
+    dictionaries contain items that are already in lists then 'extend'
+    is more appropriate.  The argument can be a function or a string
+    (which is used to look up an attribute on <collect>)
+
+    Additional arguments are passed to the collection constructor.
+
+    """
+    # look up the function first
+    if isinstance(fun, basestring):
+        fun = getattr(collect, fun)
+
+    # first generate a master list of keys
+    keys = set([k for d in dicts for k in d.keys()])
+    merged = dict([(k, collect(**kwargs)) for k in keys])
+    for d in dicts:
+        for k,x in d.items():
+            fun(merged[k], x)
+    return merged
