@@ -118,14 +118,13 @@ def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
     xticks(x+width/2, lbl.tolist())
     
     
-@drawoffscreen
-def dcontour(*args, **kwargs):
+def dcontour(ax, *args, **kwargs):
     """
     Discrete contour function. Given a matrix I with a discrete number
     of unique levels, plots a contour at each unique level.
     
-    DCONTOUR(I) plots the unique levels in I
-    DCONTOUR(X,Y,I) - X,Y specify the (x,y) coordinates of the points in Z
+    DCONTOUR(axes, I) plots the unique levels in I
+    DCONTOUR(axes, X,Y,I) - X,Y specify the (x,y) coordinates of the points in Z
 
     Optional arguments:
 
@@ -134,7 +133,6 @@ def dcontour(*args, **kwargs):
              
     Other keyword arguments are passed to contour()
     """
-    from pylab import contour
     from scipy.ndimage import gaussian_filter
 
     smooth = kwargs.get('smooth', None)
@@ -155,7 +153,7 @@ def dcontour(*args, **kwargs):
             data = gaussian_filter((I==i).astype('d'), smooth)
         else:
             data = I==i
-        hh = contour(X, Y, data,1, colors=colorcycle(i), **kwargs)
+        hh = ax.contour(X, Y, data,1, colors=colorcycle(i), **kwargs)
         h.append(hh)
 
     return h
