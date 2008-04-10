@@ -438,61 +438,6 @@ class motifdb(object):
             length = features.length * features.Fs / 1000
 
         return datautils.offset_add(offsets, data, length)
-
-    def plot_motif(self, symbol, featmap=None, **kwargs):
-        """
-        Plots a motif with its features. Uses matplotlib.
-        """
-        from pylab import figure, ylabel, xlabel, getp, twinx, \
-             setp, plot, title, show, imshow, cm, text, isinteractive, draw, ion, ioff
-        from dlab.signalproc import spectro
-        from dlab.plotutils import dcontour
-        from dlab.pcmio import sndfile
-        from numpy import unique, log10
-        from scipy.ndimage import center_of_mass        
-
-        # generate the spectrogram
-        sig = sndfile(self.get_motif_data(symbol)).read()
-        (PSD, T, F) = spectro(sig, **kwargs)
-
-        # set up the axes and plot PSD
-        extent = (T[0], T[-1], F[0], F[-1])
-        imshow(log10(PSD[:,:-1]), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
-        draw()
-
-        # plot annotation if needed
-        if featmap != None:
-            # load the featmap
-            try:
-                features = self.get_featmap_data(symbol, featmap)
-            except IndexError:
-                return
-            # convert to masked array
-            if len(T) > features.shape[1]: T.resize(features.shape[1])
-            if len(F) > features.shape[0]: F.resize(features.shape[0])
-            dcontour(features, T, F, hold=1)  # this will barf if the feature file has the wrong resolution
-
-            # locate the centroid of each feature and label it
-            retio = isinteractive()
-            if retio: ioff()
-            for fnum in unique(features[features>-1]):
-                y,x = center_of_mass(features==fnum)
-                text(T[int(x)], F[int(y)], "%d" % fnum, color='w', fontsize=20)            
-
-            draw()
-            if retio: ion()
-
-    def plot_feature(self, symbol, featmap, feature, nfft=320, shift=10):
-        from pylab import  imshow, cm, draw
-        from dlab.signalproc import spectro
-        from numpy import log10
-
-        sig = self.get_feature_data(symbol, featmap, feature)
-        (PSD, T, F) = spectro(sig, NFFT=nfft, shift=shift)
-        extent = (T[0], T[-1], F[0], F[-1])
-        imshow(log10(PSD+0.1), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto',
-               interpolation='nearest')
-        draw()
         
 # end motifdb class
 
