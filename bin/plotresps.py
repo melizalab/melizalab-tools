@@ -26,7 +26,7 @@ CDM, 1/2007
 
 import numpy as nx
 from motifdb import db
-from mspikes import toelis
+from motifdb.plotter import plot_motif
 from dlab import plotutils
 from spikes import stat
 from scipy.ndimage import gaussian_filter1d
@@ -74,7 +74,7 @@ def _plotresps(tls, motifname, motif_db, padding, featmap, plottitle, maxreps):
     else:
         axpos = (0.1, 0.1 + 0.8 / nplots, 0.8, 0.8 / nplots)
     ax.append(fig.add_axes(axpos, **axprops))
-    motif_db.plot_motif(motifname, featmap)
+    plot_motif(ax[0], motif_db, motifname, featmap)
 
     title(plottitle)
     # pad out the display
@@ -118,7 +118,8 @@ def plotoverlay(basename, motifname, motif_db, dir='.',
     tls = stat.aggregate(m, motifname, basename, dir, motif_pos)
 
     fig = figure()
-    m.plot_motif(motifname)
+    ax = fig.add_subplot(111)
+    plot_motif(ax, m, motifname)
     ylabel('Frequency (Hz)')
     xlim = getp(gca(), 'xlim')
 
