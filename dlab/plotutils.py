@@ -6,9 +6,9 @@ module with useful plotting functions
 CDM, 1/2007
  
 """
-from datautils import *
 import numpy as nx
 import matplotlib
+from matplotlib import cm
 import tempfile, shutil, os
 import functools
 
@@ -26,7 +26,6 @@ def drawoffscreen(f):
         return y
     return wrapper
 
-@drawoffscreen
 def plot_raster(X, Y=0, start=None, stop=None, ax=None,
                 autoscale=False, **kwargs):
     """
@@ -211,7 +210,7 @@ def cmap_discretize(cmap, N):
     # Return colormap object.
     return LinearSegmentedColormap('colormap',cdict,1024)
 
-def cimap(data, cmap=matplotlib.cm.hsv, thresh=0.2):
+def cimap(data, cmap=cm.hsv, thresh=0.2):
     """
     Plot complex data using the RGB space for the phase and the
     alpha for the magnitude
@@ -242,7 +241,7 @@ class texplotter(object):
                            'xtick.labelsize': 8,
                            'ytick.labelsize': 8,
                            'text.usetex': False}
-    _latex_cmd = "latex %s > /dev/null"
+    _latex_cmd = "latex -halt-on-error -interaction=nonstopmode %s > /dev/null"
     _pdf_cmd = "dvipdf -dAutoRotatePages=/None %s"
 
     def __init__(self, parameters=None, leavetempdir=False):
@@ -297,6 +296,19 @@ class texplotter(object):
     def pagebreak(self):
         """ Insert a pagebreak in the file """
         self.figures.append(None)
+
+    def inserttext(self, text):
+        """
+        Insert text (which can be latex code) into the document.
+
+        Text is inserted as-is into the latex code for the document. Note that
+        in normal strings (non-raw) the backslash character has to be escaped.
+        Non-text objects are rejected silently.  Use this function with caution
+        or you may render the latex unparseable.
+        
+        """
+        if isinstance(text, basestring):
+            self.figures.append(text)
         
     def writepdf(self, filename, margins=(0.5, 0.9)):
         """
@@ -316,9 +328,11 @@ class texplotter(object):
         for fig in self.figures:
             if fig==None:
                 fp.write('\\clearpage\n')
-            else:
+            elif isinstance(fig, list):
                 figname, plotdims = fig
                 fp.write('\\includegraphics[width=%fin,height=%fin]{%s}\n' % (plotdims +  (figname,)))
+            elif isinstance(fig, basestring):
+                fp.write(fig)
 
         fp.write('\\end{center}\n\\end{document}\n')
         fp.close()
