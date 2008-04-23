@@ -20,11 +20,14 @@ featset = 0
 # where to look up the feature locations in feature noise
 featloc_tables = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/feattables')
 
+def readftable(stimname, mdb, Fs=20.):
 
-def readftable(filename, mdb, Fs=20.):
-
+    filename = os.path.join(featloc_tables, stimname + '.tbl')
+    if not os.path.exists(filename):
+        raise ValueError, "No feature table defined for %s" % stimname
+    rows = []
+        
     with open(filename,'rt') as fp:
-        rows = []
         for line in fp:
             motif,feature,offset = line.split()[:3]
             flen = mdb.get_feature(motif,featset,int(feature))['dim'][0]
@@ -70,28 +73,7 @@ def ftabletomatrix(ftable, binsize=50, nlags=1, tmax=None, meancol=False):
     return M.tocsr(),nx.asarray(F),T
     
 
-def splittoelis(tl, feattbl, postpad=None, abslen=600):
-    """
-    Run through a toelis and split it into features.
-
-    Data is assigned to feature toelis based on feature onset.
-    In postpad mode, all the events up to the end of the feature plus postpad are kept
-    In abslen mode, all the events up to abslen after the onset are kept
-    """
-
-    tls = {}
-    if not nx.isscalar(postpad) and not nx.isscalar(abslen):
-        raise ValueError, "Either the postpad or abslen arguments must be a positive scalar"
-    for row in feattbl:
-        key = "%(motif)s_%(feature)d" % row
-        if nx.isscalar(postpad):
-            tls[key] = tl.subrange(row['fstart'], row['fstart']+row['flen']+postpad, adjust=True)
-        else:
-            tls[key] = tl.subrange(row['fstart'], row['fstart']+abslen, adjust=True)
-
-    return tls
-
-def loadresponses(song, **kwargs):
+def loadresponses(song, pattern='*%s*feats*.toe_lis', **kwargs):
     """
     Loads all the feature noise responses associated with a song
     (e.g. C0_densefeats_000.toe_lis)
@@ -100,7 +82,7 @@ def loadresponses(song, **kwargs):
     dir - search for files in this directory
     """
     
-    glb = os.path.join(kwargs.get('dir',''), '*%s*feats*.toe_lis' % song)
+    glb = os.path.join(kwargs.get('dir',''), pattern % song)
     files = glob.glob(glb)
     tls = {}
     for file in files:
@@ -110,11 +92,10 @@ def loadresponses(song, **kwargs):
 
     return tls
 
-def resprate(tl, binsize):
-    #b,f = tl.histogram(binsize=binsize, onset=0)
-    #return f
-    r,g = kernrates(tl, 2, 15, 'gaussian', onset=0, gridspacing=binsize)
-    return r.mean(1) * 1000
+def resprate(tl, binsize, onset=None, offset=None):
+    r,g = kernrates(tl, 2, binsize/2., 'gaussian', onset=onset, offset=offset,
+                    gridspacing=binsize)
+    return r.mean(1) * 1000, g
 
 def make_additive_model(S, mdb, **kwargs):
     """
@@ -159,9 +140,9 @@ def make_additive_model(S, mdb, **kwargs):
     R = []
     MM = []
     for stim, tl in rtls.items():
-        ftable = readftable(os.path.join(featloc_tables, stim + '.tbl'), mdb)
+        ftable = readftable(stim, mdb)
         tmax = tl.range[1]
-        f = resprate(tl, binsize)
+        f = resprate(tl, binsize, onset=0, offset=tmax)[0]
         M,F,T = ftabletomatrix(ftable, binsize=binsize,
                                nlags=nlags, tmax=tmax, meancol=meancol)
         R.append(f)
@@ -180,6 +161,8 @@ def fit_additive_model(X,Y, **kwargs):
     bmat - solution in matrix form, with each column corresponding to a feature
            (not returned if kwargs is missing meanresp and nlags arguments)
     """
+    assert X.shape[0]==Y.size, "Design matrix must have same number of rows as Y"
+    
     CSS = X.T * X
     CSR = X.T * Y
     B = sparse.linalg.spsolve(CSS, CSR)
