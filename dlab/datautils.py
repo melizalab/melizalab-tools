@@ -282,6 +282,10 @@ def mergedicts(dicts, collect=list, fun='append', **kwargs):
     is more appropriate.  The argument can be a function or a string
     (which is used to look up an attribute on <collect>)
 
+    The order of objects in the original iterable is preserved, so long
+    as the collection object and function preserve the order in which
+    components are added.
+
     Additional arguments are passed to the collection constructor.
 
     """
