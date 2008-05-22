@@ -6,4 +6,4 @@ analyzing data.
 """
 
 __all__ = ['datautils', 'episode', 'imgutils','pcmio', 'plotutils',
-           'signalproc', 'toelis']
+           'signalproc', 'labelio']
