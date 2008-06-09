@@ -14,7 +14,7 @@ import numpy as nx
 import scipy.fftpack as sfft
 from scipy.interpolate import interp1d
 from signalproc import getfgrid, dpsschk, mtfft, mtcoherence
-from datautils import nextpow2
+from datautils import nextpow2, histogram
 from linalg import outer, gemm
 from mspikes import toelis
 
@@ -112,8 +112,8 @@ def meancoherence(tl, **kwargs):
     mintime, maxtime = kwargs.get('tgrid',tl.range)
 
     # compute mean PSTHs of half the repeats
-    b,r1 = tl.repeats(nx.arange(0,M,2)).histogram(binsize=dt, onset=mintime, offset=maxtime)
-    b,r2 = tl.repeats(nx.arange(1,M,2)).histogram(binsize=dt, onset=mintime, offset=maxtime)
+    b,r1 = histogram(tl.repeats(nx.arange(0,M,2)), binsize=dt, onset=mintime, offset=maxtime)
+    b,r2 = histogram(tl.repeats(nx.arange(1,M,2)), binsize=dt, onset=mintime, offset=maxtime)
 
     N = b.size
     kwargs['tapers'] = dpsschk(N, **kwargs)
@@ -144,7 +144,7 @@ def coherenceratio(S, tl, **kwargs):
 
     if isinstance(S, toelis.toelis):
         mintime,maxtime = kwargs.get('tgrid',S.range)
-        S = S.histogram(binsize=dt, onset=mintime, offset=maxtime)[1]
+        S = histogram(S, binsize=dt, onset=mintime, offset=maxtime)[1]
         #S = kernrates(S,dt,dt/2,'gaussian',mintime,maxtime)[0].mean(1)
         
     S = S.squeeze()
@@ -156,7 +156,7 @@ def coherenceratio(S, tl, **kwargs):
     mintime, maxtime = kwargs.get('tgrid',(0,N*dt))
     kwargs['tgrid'] = (mintime, maxtime)  # set this so meancoherence will work
 
-    b,rall = tl.histogram(binsize=dt, onset=mintime, offset=maxtime)
+    b,rall = histogram(tl, binsize=dt, onset=mintime, offset=maxtime)
 
     assert rall.size == N, "Signal dimensions are not consistent with Fs and onset/offset parameters"
 
