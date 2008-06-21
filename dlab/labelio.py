@@ -38,6 +38,9 @@ class labelset(object):
         elif isinstance(data, nx.recarray):
             self.importrecarray(data)
 
+    #####################
+    # Add events methods
+
     def addepoch(self, start, stop, label):
         """
         Appends an epoch to the event list.
@@ -57,11 +60,23 @@ class labelset(object):
         """
         self.addepoch(time, time, label)
 
+    #######################
+    # Properties
+
     def __len__(self):
         return len(self.epochs)
 
     def __repr__(self):
         return "<labelset object with %d events>" % len(self)
+
+    @property
+    def range(self):
+        """ The earliest and latest defined times. """
+        tbl = self.torecarray()
+        return (tbl['start'].min(), tbl['stop'].max())
+
+    #######################
+    # Import methods
 
     def importlol(self, data):
         """
@@ -80,6 +95,9 @@ class labelset(object):
         """
         for item in data:
             self.addepoch(item['start'],item['stop'],item['label'])
+
+    #######################
+    # Export methods
 
     def torecarray(self):
         """
@@ -132,7 +150,7 @@ def readfile(filename):
                 else:
                     print "Error in line %d: -0 line not followed by -1 line." % linenum
             else:
-                lblset.addevent(time, label)
+                lblset.addevent(float(time), label)
 
         return lblset
                 
