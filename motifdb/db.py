@@ -415,6 +415,32 @@ class motifdb(object):
 
         return self.get_feature_data(fields[0], int(fields2[0]), int(fields2[1]))        
 
+    def get_length(self, symbols):
+        """
+        Convenience method for looking up the temporal duration of one
+        or more objects. If <symbols> is a string, returns a single
+        number; if it's a list, returns a dictionary indexed by the
+        names of the motifs.
+        """
+        if isinstance(symbols,str):
+            symbols = [symbols]
+
+        lengths = {}
+        for symbol in symbols:
+            fields = symbol.split('_')
+            if len(fields)==1:
+                data = self.get(symbol)
+                lengths[symbol] = data['length']
+            else:
+                fields2 = fields[1].split('.')
+                if len(fields2)==1:
+                    raise ValueError, "Feature maps don't have a defined length"
+                data = self.getfeature(fields[0], int(fields2[0]), int(fields2[1]))
+                lengths[symbol] = data['dim'][0]
+
+        if len(lengths)==1:
+            lengths = lengths.values()[0]
+        return lengths
 
     def reconstruct(self, features):
         """
