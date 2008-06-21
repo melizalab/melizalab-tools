@@ -9,10 +9,11 @@ CDM, 1/2007
 
 import scipy as nx
 import scipy.fftpack as sfft
-from scipy import weave
+from scipy import weave, stats
 from linalg import outer,gemm
 from datautils import nextpow2
 
+_default_mtm_p = 3.5
 
 def stft(S, **kwargs):
     """
@@ -227,7 +228,7 @@ def mtmspec(signal, **kwargs):
           Imaging Data', Biophys J 76 (1999), pp 691-708.
     """
     nfft = kwargs.get('nfft',320)
-    mtm_p = kwargs.get('mtm_p',3.5)
+    mtm_p = kwargs.get('mtm_p', _default_mtm_p)
     adapt = kwargs.get('adapt',True)
     
     assert signal.ndim == 1
@@ -353,6 +354,7 @@ def mtfft(S, **kwargs):
                            e.g. For N = 500, if PAD = -1, we do not pad; if PAD = 0, we pad the FFT
                            to 512 points, if pad=1, we pad to 1024 points etc.
                            Defaults to 0.
+              nfft      Directly set the number of points in the FFT. Overrides the pad parameter.
               Fs        sampling frequency. Default 1
               fpass     frequency band to be used in the calculation in the form
                         [fmin fmax]
@@ -371,7 +373,7 @@ def mtfft(S, **kwargs):
         S = S.reshape(S.size,1)
         
     N, C = S.shape
-    nfft = max(2**(nextpow2(N)+pad), N)
+    nfft = kwargs.get('nfft', max(2**(nextpow2(N)+pad), N))
     f,findx = getfgrid(Fs,nfft,fpass)
 
     tapers = dpsschk(N, **kwargs)
@@ -392,15 +394,15 @@ def mtfft(S, **kwargs):
     
 def mtcoherence(S1, S2, **kwargs):
     """
-    Compute the multi-taper coherence between two continous signals.
+    Compute the multi-taper coherence between two continuous signals.
 
-	[J,f]=mtfft(S1, **kwargs)
+	[C,f]=mtfft(S1, S2, **kwargs)
 	Input: 
 	      S1         continuous data in column-major format (matrix or vector)
               S2
         Optional keyword arguments:
               tapers    precalculated tapers from dpss, or the number of tapers to use
-                        Default 5
+                        Default 2*mtm_p-1
               mtm_p     time-bandwidth parameter for dpss (ignored if tapers is precalced)
                         Default 3
               pad       padding factor for the FFT:
@@ -415,10 +417,15 @@ def mtcoherence(S1, S2, **kwargs):
                         Default all frequencies between 0 and Fs/2
               trialave  average coherence between S1 and S2 across trials (columns)
                         Default False
+              err       error calculation [1 p] - Theoretical error bars; [2 p] - Jackknife error bars
+	                                  [0 p] or 0 - no error bars) - optional. Default 0.
 
 	Output:
 	      C       (complex spectrum with dimensions freq x chan x tapers)
               f       (frequency vector)
+              confC   (confidence level for C at 1-p)  (for err[0] > 0)
+              phistd  (theoretical or jknife standard deviations for C phase) (err[0] > 0)
+              Cerr    (jackknife confidence intervals for C) (err[0] == 2)
     """
     Fs = kwargs.get('Fs',1)
     fpass = kwargs.get('fpass',(0,Fs/2.))
@@ -437,9 +444,218 @@ def mtcoherence(S1, S2, **kwargs):
     if kwargs.get('trialave',False):
         S12 = S12.mean(1)
         S1 = S1.mean(1)
-        S2 = S1.mean(1)
+        S2 = S2.mean(1)
+
+    C = S12 / nx.sqrt(S1 * S2)
+    etype = kwargs.get('err',[0,0.05])[0]
+    if etype == 1:
+        confC,phistd = coherr(nx.absolute(C), J1, J2, **kwargs)
+        return C,f,confC,phistd
+    elif etype == 2:
+        confC,phistd,Cerr = coherr(nx.absolute(C), J1, J2, **kwargs)
+        return C,f,confC,phistd,Cerr
     
-    return S12 / nx.sqrt(S1 * S2),f
+    return C,f
+
+def specerr(S,J,err,**kwargs):
+    """
+    Computes lower and upper confidence intervals for a multitaper spectrum.
+
+    Inputs:
+        S - spectrum
+        J - tapered fourier transforms
+        err - [errtype p] (errtype=1 - asymptotic estimates; errchk=2 - Jackknife estimates; 
+                           p - p value for error estimates)
+        trialave - 0: no averaging over trials/channels (default)
+                   1: perform trial averaging
+        numsp    - number of spikes in each channel. specify only when finite
+                   size correction required (and of course, only for point
+                   process data)
+
+    Outputs:
+        Serr - Nx2 array, with column 0 the lower CL and column 1 the upper
+    """
+
+    if not nx.iterable(err) or not len(err)==2 or err[0]==0:
+        raise ValueError, "%s is not a valid error specification" % err
+    if not J.ndim==3:
+        raise ValueError, "J must be a 3D array"
+
+    nf,K,C = J.shape
+    if not nf==S.shape[0]: 
+        raise ValueError, "J and S lengths don't match."
+
+    etype,p = err
+    numsp = kwargs.get('numsp',None)
+    if not numsp==None and not numsp.size==C:
+        raise ValueError, "numsp must have as many entries as there are channels"
+
+    if kwargs.get('trialave',False):
+        dim = K*C
+        C = 1
+        dof = 2*dim
+        if not numsp==None:
+            dof = nx.fix(1/(1./dof + 1./(2*sum(numsp))))
+        J = nx.reshape(J,(nf,dim,1))
+    else:
+        dim = K
+        dof = 2*dim*nx.ones(C)
+        if not numsp==None:
+            dof = nx.fix(1/(1./dof + 1./(2*numsp)))
+
+    if S.ndim==1:
+        S.shape = (S.size, 1)
+    if not C==S.shape[1]:
+        raise ValueError, "Number of channels/trials in J and S don't match"
+    
+    Serr = nx.zeros((nf,2,C))
+    if etype == 1:
+        chidist = stats.chi2(dof)
+        Qp = chidist.ppf(1-p/2).tolist()
+        Qq = chidist.ppf(p/2).tolist()
+        Serr[:,0,:] = S * dof / Qp
+        Serr[:,1,:] = S * dof / Qq
+    elif etype==2:
+        tdist = stats.t(dim-1)
+        tcrit = tdist.ppf(p/2)
+        Sjk = nx.zeros((nf,dim,C))
+        for k in range(dim):
+            idx = nx.setdiff1d(range(dim),[k])
+            Jjk = J[:,idx,:]
+            eJjk= nx.sum(nx.real(Jjk * Jjk.conj()), 1)
+            Sjk[:,k,:] = eJjk / (dim-1)
+        sigma = nx.sqrt(dim-1) * nx.log(Sjk).std(1)
+        conf = tcrit * sigma
+        Serr[:,0,:] = S * nx.exp(-conf)
+        Serr[:,1,:] = S * nx.exp(conf)
+
+    return Serr.squeeze()
+
+def coherr(C,J1,J2,err,**kwargs):
+    """
+    Function to compute lower and upper confidence intervals on
+    coherency given the tapered fourier 
+     Usage: [confC,phistd,Cerr]=coherr(C,J1,J2,err,trialave,numsp1,numsp2)
+     Inputs:
+     C     - coherence (power)
+     J1,J2 - tapered fourier transforms 
+     err - [errtype p] (errtype=1 - asymptotic estimates; errchk=2 - Jackknife estimates; 
+                       p - p value for error estimates)
+     trialave - 0: no averaging over trials/channels
+                1 : perform trial averaging
+     numsp1    - number of spikes for data1. supply only if finite size corrections are required
+     numsp2    - number of spikes for data2. supply only if finite size corrections are required
+    
+     Outputs: 
+              confC - confidence level for C - only for err(1)>=1
+              phistd - theoretical or jackknife standard deviation for phi for err(1)=1 and err(1)=2 respectively
+                       returns zero if coherence is 1
+              Cerr  - Jacknife error bars for C  - only for err(1)=2
+
+     """
+    if not nx.iterable(err) or not len(err)==2 or err[0]==0:
+        raise ValueError, "Need err=[1 p] or [2 p] for error bar calculation"
+    if not J1.ndim in (2,3) or not J2.ndim in (2,3):
+        raise ValueError, "J1 and J2 must be 2D or 3D arrays"
+    if not J1.shape==J2.shape:
+        raise ValueError, "J1 and J2 must have the same dimensions."
+
+    if J1.ndim==2:
+        J1.shape = J1.shape + (1,)
+    if J2.ndim==2:
+        J2.shape = J2.shape + (1,)
+        
+    nf,K,Ch = J1.shape
+
+    if not nf==C.shape[0]:
+        raise ValueError, "J and C lengths don't match"
+    
+    etype,p = err
+    pp = 1 - p/2
+    numsp1 = kwargs.get('numsp1',None)
+    if not numsp1==None and not numsp1.size==Ch:
+        raise ValueError, "numsp1 must have as many entries as there are channels"
+    numsp2 = kwargs.get('numsp2',None)
+    if not numsp2==None and not numsp2.size==Ch:
+        raise ValueError, "numsp2 must have as many entries as there are channels"
+
+    # Find the number of degrees of freedom
+    if kwargs.get('trialave',False):
+        dim=K*Ch
+        dof=nx.repeat(2*dim,1)
+        dof1=dof
+        dof2=dof
+        Ch=1
+        if not numsp1==None:
+            totspikes1=sum(numsp1)
+            dof1=nx.fix(2.*totspikes1*dof/(2.*totspikes1+dof))
+        if not numsp2==None:
+            totspikes2=sum(numsp2)
+            dof2=nx.fix(2.*totspikes2*dof/(2.*totspikes2+dof))
+
+        dof=nx.minimum(dof1,dof2)
+        J1=nx.reshape(J1,(nf,dim,1))
+        J2=nx.reshape(J2,(nf,dim,1))
+    else:
+        dim=K
+        dof=nx.repeat(2*dim,Ch)
+        dof1=dof
+        dof2=dof
+        if not numsp1==None:
+            dof1 = nx.fix(2.*numsp1*dof/(2.*numsp1+dof))
+        if not numsp2==None:
+            dof1 = nx.fix(2.*numsp2*dof/(2.*numsp2+dof))
+
+        dof = nx.minimum(dof1,dof2)
+
+
+    if C.ndim==1:
+        C.shape = (C.size, 1)
+    if not Ch==C.shape[1]:
+        raise ValueError, "Number of channels/trials in J and C don't match"        
+
+    # theoretical, asymptotic confidence level
+    df = 1./((dof/2)-1)
+    confC = nx.sqrt(1 - p**df)
+    if confC.ndim > 0:
+        confC[dof<=2] = 1
+    elif dof <=2: confC = 1
+
+    # Phase standard deviation (theoretical and jackknife) and jackknife
+    # confidence intervals for C
+    if etype==1:
+        phistd = nx.sqrt(2./dof * (1./C**2 - 1))
+        idx = nx.absolute(C-1) < 1e-16
+        phistd[idx] = 0  # no esplode
+        return confC, phistd.squeeze()
+       
+    elif etype==2:
+        Cerr = nx.zeros((nf,2,Ch))
+        tcrit = [stats.t(df).ppf(pp).tolist() for df in dof-1]
+        atanhCxyk = nx.zeros((nf,dim,Ch))
+        phasefactorxyk = nx.zeros((nf,dim,Ch),dtype='complex128')
+        
+        for k in range(dim):
+            indxk = nx.setdiff1d(range(dim),[k])
+            J1k = J1[:,indxk,:]
+            J2k = J2[:,indxk,:]
+            eJ1k = nx.sum(nx.real(J1k * J1k.conj()),1)
+            eJ2k = nx.sum(nx.real(J2k * J2k.conj()),1)       
+            eJ12k = nx.sum(J1k.conj() * J2k,1)
+            Cxyk = eJ12k/nx.sqrt(eJ1k*eJ2k)
+            absCxyk = nx.absolute(Cxyk)
+            atanhCxyk[:,k,:] = nx.sqrt(2*dim-2)*nx.arctanh(absCxyk)
+            phasefactorxyk[:,k,:] = Cxyk / absCxyk
+
+        atanhC = nx.sqrt(2*dim-2)*nx.arctanh(C);
+        sigma12 = nx.sqrt(dim-1)* atanhCxyk.std(1)
+
+        Cu = atanhC + tcrit * sigma12
+        Cl = atanhC - tcrit * sigma12
+        Cerr[:,0,:] = nx.tanh(Cl / nx.sqrt(2*dim-2))
+        Cerr[:,1,:] = nx.tanh(Cu / nx.sqrt(2*dim-2))
+        phistd = (2*dim-2) * (1 - nx.absolute(phasefactorxyk.mean(1)))
+        return confC,phistd.squeeze(),Cerr.squeeze()
 
 def dpss(npoints, mtm_p, k=None):
     """
@@ -515,16 +731,17 @@ def dpss(npoints, mtm_p, k=None):
 
     return V,E
 
-def dpsschk(npoints, tapers=5, **kwargs):
+def dpsschk(npoints, tapers=None, **kwargs):
     """
     Generates tapers or checks that pregenerated tapers have the right size.
 
     npoints - the number of data points in the taper
     tapers  - if this is a vector, checks that tapers.shape[0]==npoints
               if it's an integer, calls dpss() to generate that many tapers
+              if None, defaults to 2*mtm_p - 1
 
     mtm_p -   if tapers are generated, sets the time-bandwidth parameter
-              Must be large enough that 2*mtm_p > tapers + 1
+              Must be large enough that tapers <= 2*mtm_p - 1
     Fs    -   sampling rate of the tapers. Used to normalize taper power
               Default 1.0
     """
@@ -534,7 +751,9 @@ def dpsschk(npoints, tapers=5, **kwargs):
             raise ValueError, "Number of points in tapers differs from window size"
         return tapers.copy()
     else:
-        mtm_p = kwargs.get('mtm_p', 3)
+        mtm_p = kwargs.get('mtm_p', _default_mtm_p)
+        if tapers==None:
+            tapers = int(2*mtm_p - 1)
         if mtm_p * 2 <= tapers:
             raise ValueError, "Number of tapers must be no larger than 2*mtm_p-1"
         

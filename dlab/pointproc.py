@@ -13,10 +13,12 @@ implementations of multitaper spectrograms.
 import numpy as nx
 import scipy.fftpack as sfft
 from scipy.interpolate import interp1d
-from signalproc import getfgrid, dpsschk, mtfft, mtcoherence
-from datautils import nextpow2, histogram
+from scipy import stats
+from signalproc import getfgrid, dpsschk, mtfft, mtcoherence, specerr, coherr, _default_mtm_p
+from datautils import nextpow2, histogram, runs
 from linalg import outer, gemm
 from mspikes import toelis
+import pdb
 
 def coherencecpt(S, tl, **kwargs):
     """
@@ -82,7 +84,7 @@ def coherencecpt(S, tl, **kwargs):
     kwargs['tapers'] = tapers
 
     J1 = mtfft(S, **kwargs)[0]
-    J2,Nsp,Msp = _mtfftpt(tl, tapers, nfft, t, f, findx)
+    J2,Msp,Nsp = _mtfftpt(tl, tapers, nfft, t, f, findx)
 
     S12 = nx.squeeze(nx.mean(J1.conj() * J2,1))
     S1 =  nx.squeeze(nx.mean(J1.conj() * J1,1))
@@ -96,6 +98,106 @@ def coherencecpt(S, tl, **kwargs):
     C = nx.absolute(C12)
     phi = nx.angle(C12)
 
+    if kwargs.get('fscorr',False):
+        kwargs['numsp2'] = Nsp
+
+    etype = kwargs.get('err',[0, 0.05])[0]
+    if etype==1:
+        confC,phistd = coherr(C, J1, J2, **kwargs)
+        return C,phi,S12,S1,S2,f,confC,phistd
+    elif etype==2:
+        confC,phistd,Cerr = coherr(C, J1, J2, **kwargs)
+        return C,phi,S12,S1,S2,f,confC,phistd,Cerr
+        
+    return C,phi,S12,S1,S2,f
+
+def coherencept(tl1, tl2, **kwargs):
+    """
+    Compute the coherence between two point processes.
+
+    [C,phi,S12,S1,S2,f] = coherencecpt(tl1, tl2, **kwargs)
+    Input:
+              tl1,tl2        iterables of vectors with event times
+    Optional keyword arguments:
+              tapers    precalculated tapers from dpss, or the number of tapers to use
+                        Default 5
+              mtm_p     time-bandwidth parameter for dpss (ignored if tapers is precalced)
+                        Default 3
+              pad       padding factor for the FFT:
+	                   -1 corresponds to no padding,
+                           0 corresponds to padding to the next highest power of 2 etc.
+                           e.g. For N = 500, if PAD = -1, we do not pad; if PAD = 0, we pad the FFT
+                           to 512 points, if pad=1, we pad to 1024 points etc.
+                           Defaults to 0.
+              Fs        sampling frequency. Default 1
+              fpass     frequency band to be used in the calculation in the form
+                        [fmin fmax]
+                        Default all frequencies between 0 and Fs/2
+              err       error calculation [1 p] - Theoretical error bars; [2 p] - Jackknife error bars
+	                                  [0 p] or 0 - no error bars) - optional. Default 0.
+              trialave  average over channels/trials when 1, don't average when 0) - optional. Default 0
+	      fscorr    finite size corrections for error calculations:
+                        0 (don't use finite size corrections)
+                        1 (use finite size corrections)
+	                Defaults 0
+	      tgrid     Time grid over which the tapers are to be calculated:
+                        This can be a vector of time points, or a pair of endpoints.
+                        By default, the max range of the point processes is used
+    """
+    Fs = kwargs.get('Fs',1)
+    fpass = kwargs.get('fpass',(0,Fs/2.))
+    pad = kwargs.get('pad', 0)
+
+    if not tl1.nrepeats == tl2.nrepeats:
+        raise ValueError, "Trial count doesn't match for data"
+
+    t = kwargs.get('tgrid',None)
+
+    if t==None or len(t)==2:
+        if t==None:
+            mint1,maxt1 = tl1.range
+            mint2,maxt2 = tl2.range
+            mint = min(mint1,mint2)
+            maxt = max(maxt1,maxt2)
+        else:
+            mint,maxt = t[:2]
+            
+        dt = 1./Fs
+        t = nx.arange(mint-dt,maxt+2*dt,dt)
+
+    N = len(t)
+    nfft = max(2**(nextpow2(N)+pad), N)
+    f,findx = getfgrid(Fs,nfft,fpass)
+    tapers = dpsschk(N, **kwargs)
+    kwargs['tapers'] = tapers
+
+    J1,Msp1,Nsp1 = _mtfftpt(tl1, tapers, nfft, t, f, findx)
+    J2,Msp2,Nsp2 = _mtfftpt(tl2, tapers, nfft, t, f, findx)
+
+    S12 = nx.squeeze(nx.mean(J1.conj() * J2,1))
+    S1 =  nx.squeeze(nx.mean(J1.conj() * J1,1))
+    S2 =  nx.squeeze(nx.mean(J2.conj() * J2,1))
+    if kwargs.get('trialave',False):
+        S12 = S12.mean(1)
+        S1 = S1.mean(1)
+        S2 = S2.mean(1)
+
+    C12 = S12 / nx.sqrt(S1 * S2)
+    C = nx.absolute(C12)
+    phi = nx.angle(C12)
+
+    if kwargs.get('fscorr',False):
+        kwargs['numsp1'] = Nsp1        
+        kwargs['numsp2'] = Nsp2
+
+    etype = kwargs.get('err',[0, 0.05])[0]
+    if etype==1:
+        confC,phistd = coherr(C, J1, J2, **kwargs)
+        return C,phi,S12,S1,S2,f,confC,phistd
+    elif etype==2:
+        confC,phistd,Cerr = coherr(C, J1, J2, **kwargs)
+        return C,phi,S12,S1,S2,f,confC,phistd,Cerr
+    
     return C,phi,S12,S1,S2,f
 
 def meancoherence(tl, **kwargs):
@@ -105,25 +207,67 @@ def meancoherence(tl, **kwargs):
     Theunissen (2004).  This is an unbiased estimator, in constrast to
     computing the mean coherence between the point processes and the
     estimated mean.
-    
+
+    Returns y_AR, y_RR, f
+
+    Optional arguments:
+              err       Set to compute significance of values
+                        [etype p] - etype 1 computes based on asymptotic approx
+                                    etype 2 computes based on jackknife estimate
+                        If set, also returns a boolean vector indicating which points
+                        in y_RR are significant.
     """
-    M = tl.nrepeats
+    M = (tl.nrepeats / 2) * 2  # force even number of trials
     dt = 1./ kwargs.get('Fs',1)
     mintime, maxtime = kwargs.get('tgrid',tl.range)
 
     # compute mean PSTHs of half the repeats
-    b,r1 = histogram(tl.repeats(nx.arange(0,M,2)), binsize=dt, onset=mintime, offset=maxtime)
-    b,r2 = histogram(tl.repeats(nx.arange(1,M,2)), binsize=dt, onset=mintime, offset=maxtime)
+    tl1 = tl.repeats(nx.arange(0,M,2))
+    tl2 = tl.repeats(nx.arange(1,M,2))
+    b,r1 = histogram(tl1, binsize=dt, onset=mintime, offset=maxtime)
+    b,r2 = histogram(tl2, binsize=dt, onset=mintime, offset=maxtime)
 
     N = b.size
     kwargs['tapers'] = dpsschk(N, **kwargs)
 
-    y_RR,f = mtcoherence(r1,r2,**kwargs)
-    y_RR = (y_RR.conj() * y_RR).real
-    Z = nx.sqrt(1./y_RR)
-    y_AR = 1./ (.5 * (-M + M * Z) + 1)
+    # catch case with no spikes
+    coh_results = mtcoherence(r1,r2,**kwargs)   # user might supply err flag
+    y_RR,f = coh_results[:2]
+    if r1.sum() == 0 or r2.sum() == 0:
+        y_RR = nx.zeros(y_RR.size)
+        y_AR = nx.zeros_like(y_RR)
+    else:
+        y_RR = (y_RR.conj() * y_RR).real
+        Z = nx.sqrt(1./y_RR)
+        y_AR = 1./ (.5 * (-M + M * Z) + 1)
 
-    return y_AR, y_RR, f
+    etype,p = kwargs.get('err',[0,0.05])
+    if etype == 0:
+        return y_AR, y_RR, f
+    elif etype == 1:
+        return y_AR, y_RR, f, nx.sqrt(y_RR) > coh_results[2]
+    else:
+        return y_AR, y_RR, f, coh_results[-1][:,0] > 0
+
+##     Cj = []
+##     for j in range(M/2):
+##         ind = nx.setdiff1d(nx.arange(M/2), [j])
+##         r1j = histogram(tl1.repeats(ind), binsize=dt, onset=mintime, offset=maxtime)[1]
+##         r2j = histogram(tl2.repeats(ind), binsize=dt, onset=mintime, offset=maxtime)[1]
+##         C,f = mtcoherence(r1j,r2j,**kwargs)[:2]
+##         Cj.append(C)
+
+##     Cj = nx.column_stack(Cj)
+##     atanhCj = nx.sqrt(M-2)*nx.arctanh(nx.abs(Cj))
+##     atanhC  = nx.sqrt(M-2)*nx.arctanh(nx.sqrt(y_RR))
+##     sigma12 = nx.sqrt(M/2-1) * atanhCj.std(1)
+##     tcrit = stats.t(M-1).ppf(1-p/2)
+##     Cerr = atanhC - tcrit * sigma12
+##     #Cerr = nx.column_stack([atanhC - tcrit * sigma12, atanhC + tcrit * sigma12])
+##     Cerr = nx.tanh(Cerr / nx.sqrt(M-2))
+
+##     return y_AR, y_RR, f, Cerr > 0
+
 
 def coherenceratio(S, tl, **kwargs):
     """
@@ -137,6 +281,13 @@ def coherenceratio(S, tl, **kwargs):
               S         continuous data set, or toelis data
                         If toelis data, this is converted to a PSTH at the binrate specified in options
               tl        iterable of vectors with event times
+
+    Optional arguments:
+              err       Set to force insignficant coherence values to 0
+                        [etype p] - etype 1 computes based on asymptotic approx
+                                    etype 2 computes based on jackknife estimate
+                        coherence is considered significant if it's in a window of
+                        significant values at least 2W in size.
 
     See module help for optional options
     """
@@ -162,17 +313,26 @@ def coherenceratio(S, tl, **kwargs):
 
     kwargs['tapers'] = dpsschk(N, **kwargs)
 
-    y_AR, y_RR, f = meancoherence(tl, **kwargs)
+    mcoh_results = meancoherence(tl, **kwargs)
+    y_AR, y_RR, f = mcoh_results[:3]
 
+    # catch case with no spikes
+    if S.sum() == 0:
+        y_BR = nx.zeros_like(y_RR)
+    else:
+        coh_results = mtcoherence(S, rall, **kwargs)
+        y_BRhat = coh_results[0]
+        y_BRhat = (y_BRhat.conj() * y_BRhat).real
+        Z = nx.sqrt(1./y_RR)
+        y_BR = (1. + Z) / (-M + M * Z + 2) * y_BRhat
 
-    Z = nx.sqrt(1./y_RR)
-    y_BRhat,f = mtcoherence(S, rall, **kwargs)
-    y_BRhat = (y_BRhat.conj() * y_BRhat).real
-    y_BR = (1. + Z) / (-M + M * Z + 2) * y_BRhat
-    
-    return y_BR, y_AR, f
-    
-    
+    etype = kwargs.get('err',[0])[0]
+    if etype==0:
+        return y_BR, y_AR, f
+    else:
+        sig = mcoh_results[3]
+        return y_BR, y_AR, f, sig
+
 
 def mtspectrumpt(tl, **kwargs):
     """
@@ -211,9 +371,10 @@ def mtspectrumpt(tl, **kwargs):
 	      S       (spectrum with dimensions frequency x channels/trials if trialave=0; dimension frequency if trialave=1)
 	      f       (frequencies)
 	      R       (rate)
-	      Serr    (error bars) - only if err(1)>=1
+	      Serr    (confidence interval) - only if err(1)>=1
     """
     Fs = kwargs.get('Fs',1)
+    err = kwargs.get('err',[0,0.05])
     J,Msp,Nsp,f = mtfftpt(tl, **kwargs)
     S = nx.mean(nx.real(J.conj() * J), 1)
     if kwargs.get('trialave',False):
@@ -222,7 +383,13 @@ def mtspectrumpt(tl, **kwargs):
 
     R = Msp * Fs
 
-    return S,f,R
+    if err[0]>0:
+        if kwargs.get('fscorr',False):
+            kwargs['numsp'] = Nsp
+        Serr = specerr(S, J, **kwargs)
+        return S,f,R,Serr
+    else:
+        return S,f,R
 
 
 def mtfftpt(tl, **kwargs):
@@ -325,6 +492,11 @@ def _mtfftpt(tl, tapers, nfft, t, f, findx):
 
     return J,Msp,Nsp
 
+def ksdist(tl1,tl2, **kwargs):
+    """
+    Computes the Komolgorov-Smirnoff distance between the spike times in two toelis objects.
+    """
+    pass
 
 def kernfun(name, bandwidth, spacing):
     """
