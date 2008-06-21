@@ -167,10 +167,8 @@ def colorcycle(ind=None, colors=_manycolors):
     Returns the color cycle, or a color cycle, for manually advancing
     line colors.
     """
-    if ind != None:
-        return colors[ind % len(colors)]
-    else:
-        return colors
+    return colors[ind % len(colors)] if ind!=None else colors
+
     
 def cmap_discretize(cmap, N):
     """
