@@ -300,3 +300,45 @@ def mergedicts(dicts, collect=list, fun='append', **kwargs):
         for k,x in d.items():
             fun(merged[k], x)
     return merged
+
+
+def runs(x, val):
+    """
+    Iterates through x and looks for runs of val.  Returns a vector
+    equal in length to x with the size of the current run in each
+    position, or 0 if x!=val
+    """
+
+    ind = (x==val) * 1
+    switch = nx.diff(ind)
+    starts = (switch==1).nonzero()[0].tolist()
+    stops = (switch==-1).nonzero()[0].tolist()
+
+    out = nx.zeros(x.size,'i')
+
+    # deal with all true or all false
+    if ind.all():
+        out[:] = out.size
+        return out
+    if not ind.any():
+        return out
+
+    # take care of ends first
+    if len(starts)==0 or (stops[0] < starts[0]):
+        i = stops[0] + 1
+        out[:i] = i
+        stops.pop(0)
+        if len(starts)==0: return out
+    if len(stops)==0 or (starts[-1] > stops[-1]):
+        i = starts[-1] + 1
+        out[i:] = x.size - i
+        starts.pop()
+
+    assert len(starts) == len(stops), "Trimmed sequences aren't the same length; something's wrong"
+    for a,b in zip(starts, stops):
+        out[a+1:b+1] = b-a
+
+    return out
+
+
+            
