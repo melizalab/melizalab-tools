@@ -6,6 +6,7 @@ Compute statistics on event list data
 
 import os
 from mspikes import toelis
+from dlab.datautils import histogram
 
 _tstat = "toestat"
 
@@ -28,10 +29,14 @@ def isi(tl, rrange=None):
             rates.append(isi)
     return rates
 
-def meanrate(tl, rrange, maxrep=None, dt=1000):
+def meanrate(tl, rrange, maxrep=None, dt=1000, count=False):
     """
     Computes the mean firing rate (i.e. spikes per unit time) over a time period.
+    If count is true, returns the spike count without normalizing for the window duration.
     Returns a vector of doubles, one for each repeat.
+
+    dt - units, in ms^-1.  Default is Hz
+    count - if True, return raw counts without normalizing by duration
     """
     from numpy import zeros, sum
     out = zeros(tl.nrepeats)
@@ -43,7 +48,9 @@ def meanrate(tl, rrange, maxrep=None, dt=1000):
 
     for i in range(0,maxrep):
         rep = tl.unit(0).events[i]
-        out[i] = sum( (rep >= rrange[0]) & (rep < rrange[1])) / delta
+        out[i] = sum( (rep >= rrange[0]) & (rep < rrange[1]))
+        if not count:
+            out[i] /= delta
 
     return out
 
@@ -54,7 +61,6 @@ def histomat(tl, onset=None, offset=None, binwidth=10.):
     bin of that repeat.
     """
     from numpy import zeros, ceil
-    from dlab.datautils import histogram
     rrange = tl.range
     if onset==None:
         onset = rrange[0]
@@ -186,8 +192,10 @@ def toestat(tl, rrange, srange, binsize=10., maxrep=None):
     if maxrep:
         tl = toelis.toelis(tl[0:min(maxrep,tl.nrepeats)])
 
-    rb,rf = tl.histogram(onset=rrange[0], offset=rrange[1], binsize=binsize, normalize=True)
-    sb,sf = tl.histogram(onset=srange[0], offset=srange[1], binsize=binsize, normalize=True)
+    rb,rf = histogram(tl, onset=rrange[0], offset=rrange[1], binsize=binsize)
+    rf = rf.astype('d') / (tl.nrepeats * binsize)
+    sb,sf = histogram(tl, onset=srange[0], offset=srange[1], binsize=binsize)
+    sf = sf.astype('d') / (tl.nrepeats * binsize)
     rf *= 1000
     sf *= 1000 
 
@@ -252,6 +260,36 @@ def aggregate_base(basename, motif_db, dir='.', motif_pos=None):
             continue
 
     return tls
+
+
+def load_responses(basename, motif_db, dir='.'):
+    """
+    This function gathers response data assuming that motifs
+    were played singly to the animal, and the corresponding toe_lis files
+    have names of the form <basename>_<motif>.toe_lis
+
+    Returns a dictionary of toelis objects
+    """
+    m = motif_db
+    # this lets one call this function from the directory above the cell dir
+    if os.path.exists(os.path.join(dir, basename)):
+        dir = os.path.join(dir, basename)
+    files = os.listdir(dir)
+        
+    motifs = m.get_motifs()
+    ext = '.toe_lis'
+
+    # load all files first
+    tls = {}
+    for file in files:
+        # assume the file starts with basename
+        if file.startswith(basename) and file.endswith(ext):
+            fname = file[len(basename)+1:-len(ext)]
+            if fname in motifs:
+                tls[fname] = toelis.readfile(os.path.join(dir, file))
+
+    return tls
+
     
 def aggregate(db, motifname, basename, dir='.', motif_pos=None):
     """
