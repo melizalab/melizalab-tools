@@ -300,7 +300,8 @@ class texplotter(object):
         Insert text (which can be latex code) into the document.
 
         Text is inserted as-is into the latex code for the document. Note that
-        in normal strings (non-raw) the backslash character has to be escaped.
+        in normal strings (non-raw) the backslash character has to be escaped,
+        and there are many characters that are reserved in LaTeX in different modes.
         Non-text objects are rejected silently.  Use this function with caution
         or you may render the latex unparseable.
         
