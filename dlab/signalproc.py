@@ -179,10 +179,10 @@ def spectro(S, fun=stft, **kwargs):
     shift = kwargs.get('shift', 10)
     
     PSD = fun(S, **kwargs)
-    if PSD.dtype.kind=='c':
+    if nx.iscomplexobj(PSD):
         PSD = nx.absolute(PSD)  # compute power from full complex stft
     
-    if S.dtype.kind!='c':
+    if not nx.iscomplexobj(S):
         if nx.remainder(nfft,2):
             nfft = (nfft+1)/2
             PSD = PSD[0:nfft, :]
@@ -272,7 +272,7 @@ def mtmspec(signal, **kwargs):
         S.shape = (nfft, ncols)
 
     # for real signals the spectrogram is one-sided
-    if signal.dtype.kind!='c':
+    if nx.iscomplexobj(signal):
         outrows = nfft % 2 and (nfft+1)/2 or nfft/2+1
         return S[0:outrows+1,:]
     else:
