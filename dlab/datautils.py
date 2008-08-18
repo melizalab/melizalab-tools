@@ -340,5 +340,41 @@ def runs(x, val):
 
     return out
 
+def accumarray(subs, val, **kwargs):
+    """
+    Accumulates values in an array based on an associated subscript vector
 
+    Optional arguments:
+
+    dim - sets the dimensions of the output array
+    """
+
+    if not isinstance(subs, nx.ndarray):
+        # try to assemble into a 2D array
+        if not nx.iterable(subs): raise ValueError, "subscripts must be an array or list of arrays"
+        if not nx.iterable(subs[0]): subs = [subs]
+        try:
+            subs = nx.column_stack(subs)
+        except ValueError:
+            raise ValueError, "subscript arrays must be the same length"
+
+    assert subs.ndim < 3, "subscript array must be 1 or 2 dimensions"
+    ndim = subs.shape[1]
+    maxind = subs.max(0)
+
+    val = nx.asarray(val)
+    assert val.size == subs.shape[0], "value array and subscript array must have the same d_0"
+
+    dims = kwargs.get('dim', maxind + 1)
+    assert all(dims > maxind), "Dimensions of array are not large enough to include all values"
+    
+    out = nx.zeros(dims, dtype=val.dtype)
+    for i,v in enumerate(val):
+        ind = subs[i,:]
+        if not any(nx.isnan(ind)):
+            out[tuple(ind)] += v
+
+    return out
+    
+    
             
