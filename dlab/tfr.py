@@ -77,8 +77,7 @@ def tfrrsp_hm(S, **kwargs):
     
     RS = nx.zeros((nfft, M, order))
     for k in range(order):
-        rs = tfrrsph(S, nfft, h[k,:], Dh[k,:], **kwargs)
-        RS[:,:,k] = rs
+        RS[:,:,k] = tfrrsph(S, nfft, h[k,:], Dh[k,:], **kwargs)
 
     if kwargs.get('avg',True):
         return RS.mean(2)
@@ -139,25 +138,15 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     Th = h * nx.arange(-Lh, Lh+1)
 
     # this is a funky way of doing the windowing
-    mmn = min([round(nfft/2)-1,Lh])
-    for icol,ti in enumerate(t):
-        tau = nx.arange( -min([mmn,ti-1])-1,
-                         min([mmn,xlen-ti]), dtype='i')
-        indices = nx.remainder(nfft+tau,nfft)
-        hh = h[Lh+tau]
-        # try to cut down on the number of calls to norm
-        norm_h = norm(hh) if tau.size < h.size else 1.0
-        S[indices,icol] = x[ti+tau] * hh / norm_h
-        tf2[indices,icol] = x[ti+tau] * Th[Lh+tau] / norm_h
-        tf3[indices,icol] = x[ti+tau] * Dh[Lh+tau] / norm_h
+
+    S = _fastfill(x, h, t, nfft)
+    tf2 = _fastfill(x, Th, t, nfft)
+    tf3 = _fastfill(x, Dh, t, nfft)
 
     # compute the FFT
     S = sfft.fft(S, nfft, axis=0, overwrite_x=1) #+ _deps
     tf2 = sfft.fft(tf2, nfft, axis=0, overwrite_x=1) #+ _deps
     tf3 = sfft.fft(tf3, nfft, axis=0, overwrite_x=1) #+ _deps
-    #S = nx.fft.fft(S, nfft, axis=0) #+ _deps
-    #tf2 = nx.fft.fft(tf2, nfft, axis=0) #+ _deps
-    #tf3 = nx.fft.fft(tf3, nfft, axis=0) #+ _deps
     N = nfft
 
     # compute shifts
@@ -237,7 +226,7 @@ def _accumarray_2d(V, I, J, out):
     """
 
     code = """
-        # line 349 "datautils.py"
+        # line 229 "tfr.py"
 
         int i, j;
 	int nentries = NV[0];
@@ -256,8 +245,11 @@ def _accumarray_2d(V, I, J, out):
 def _fastfill(sig, window, t, nfft, dtype='d'):
     """
     Quickly fills an array for transformation by FFT.  Assumes you have
-    all your ducks in order. Computes the window norm, but doesn't
-    adjust for zero-padding.
+    all your ducks in order, specifically that the window is normalized.
+    Ideally all the frames should be renormalized based on how much zero-
+    padding is being used, but using the mother window.  Consequently,
+    the mother window should just be normalized ahead of time, and we
+    accept a little extra power in the TFR at the edges.
     """
 
     arr = nx.zeros([nfft, t.size], dtype=dtype)
@@ -267,33 +259,29 @@ def _fastfill(sig, window, t, nfft, dtype='d'):
 
        int col,tau,row;
 
-       int nwindow = window.size(); //Nwindow[0];
-       int nt = t.size(); //Nt[0];
+       int nwindow = window.size(); 
+       int nt = t.size();
        int nx = sig.size();
        int Lh = (nwindow - 1) / 2;
        int tauminmax = nfft < Lh ? nfft : Lh;
 
        /* window norm */
-       double normh = 0.0;
-       for (row = 0; row < nwindow; row++) {
-            //normh += window[row] * window[row];
-            normh += window(row) * window(row);
-       }
-       normh = sqrt(normh);
+       //double normh = 0.0;
+       //for (row = 0; row < nwindow; row++) {
+       //     normh += window(row) * window(row);
+       //}
+       //normh = sqrt(normh);
        
        /* iterate through the columns */
        for (col = 0; col < nt; col++) {
             int time = t(col);
             int taumin = tauminmax < time ? tauminmax : time;
             int taumax = tauminmax < (nx - time - 1) ? tauminmax : (nx - time - 1);
-            //printf("col: %d, tau: [-%d, %d), row: ", time, taumin, taumax);
             for (tau = -taumin; tau <= taumax; tau++) {
                 row = nfft + tau - nfft * (int)((nfft+tau)/ nfft);  // positive remainder
-                //printf("%d ", row);
-                arr(row,col) = sig(time + tau) * window(Lh + tau) / normh;
-       //         //*(arr + row*Sarr[0] + col*Sarr[1]) = sig[time + tau] * window[Lh + tau] / normh;
+                arr(row,col) = sig(time + tau) * window(Lh + tau); // / normh;
+                //*(arr + col*Sarr[0] + row*Sarr[1]) = sig[time + tau] * window[Lh + tau] / normh;
             }
-            //printf("\\n");
        }
     """
     
@@ -301,17 +289,11 @@ def _fastfill(sig, window, t, nfft, dtype='d'):
                  type_converters=weave.converters.blitz)
     return arr
 
-        
 if __name__=="__main__":
 
     from dlab import pcmio
     s = pcmio.sndfile('st384_song_2_sono_4_38537_39435.wav').read()
     s = s.astype('d') / 2**15
 
-    # test fast array fill
-    h,Dh,tt = hermf(355,6,6)
-    nfft = 512
-    t = nx.arange(0,s.size,10)
-    
-    #import cProfile
-    #cProfile.run('tfrrsp_hm(s)','ras1') 
+    import cProfile
+    cProfile.run('RS = tfrrsp_hm(s)','ras_inlinews_inlineras') 
