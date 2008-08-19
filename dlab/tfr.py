@@ -12,6 +12,7 @@ CDM, 8/2008
 import numpy as nx
 import scipy.fftpack as sfft
 from scipy.linalg import norm
+from scipy import weave
 from datautils import accumarray
 
 _deps = nx.finfo(nx.dtype('d')).eps
@@ -107,6 +108,7 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     assert h.size==Dh.size, "Tapers and derivatives must be the same length"
     assert h.size % 2 == 1, "Tapers must have an odd number of points"
 
+    x = x.astype('d')
     xlen = x.size
     Lh = (h.size - 1)/2  # this should be integral
 
@@ -117,19 +119,20 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     t = nx.arange(onset, offset, shift)    
 
     # build the workspaces
-    S = nx.zeros([nfft, t.size], dtype='d')
-    tf2 = nx.zeros([nfft, t.size], dtype='d')
-    tf3 = nx.zeros([nfft, t.size], dtype='d')
+    S = nx.zeros([nfft, t.size], dtype='D')
+    tf2 = nx.zeros([nfft, t.size], dtype='D')
+    tf3 = nx.zeros([nfft, t.size], dtype='D')
     Th = h * nx.arange(-Lh, Lh+1)
 
-    # this is a bit kludgy
+    # this is a funky way of doing the windowing
+    mmn = min([round(nfft/2)-1,Lh])
     for icol,ti in enumerate(t):
-        tau = nx.arange( -min([round(nfft/2)-1,Lh,ti-1])-1,
-                         min([round(nfft/2)-1,Lh,xlen-ti]), dtype='i')
+        tau = nx.arange( -min([mmn,ti-1])-1,
+                         min([mmn,xlen-ti]), dtype='i')
         indices = nx.remainder(nfft+tau,nfft)
         hh = h[Lh+tau]
-        norm_h = norm(hh)
-        #print "%d, %d, %d, %3.2f, %3.4f" % (ti, tau[0], indices[0], hh[0], norm_h)
+        # try to cut down on the number of calls to norm
+        norm_h = norm(hh) if tau.size < h.size else 1.0
         S[indices,icol] = x[ti+tau] * hh / norm_h
         tf2[indices,icol] = x[ti+tau] * Th[Lh+tau] / norm_h
         tf3[indices,icol] = x[ti+tau] * Dh[Lh+tau] / norm_h
@@ -138,34 +141,25 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     S = sfft.fft(S, nfft, axis=0, overwrite_x=1) #+ _deps
     tf2 = sfft.fft(tf2, nfft, axis=0, overwrite_x=1) #+ _deps
     tf3 = sfft.fft(tf3, nfft, axis=0, overwrite_x=1) #+ _deps
+    #S = nx.fft.fft(S, nfft, axis=0) #+ _deps
+    #tf2 = nx.fft.fft(tf2, nfft, axis=0) #+ _deps
+    #tf3 = nx.fft.fft(tf3, nfft, axis=0) #+ _deps
     N = nfft
-    # if the signal is real, discard negative signal to speed things up
-##     if not nx.iscomplexobj(x):
-##         N = nx.fix(nfft/2) + 1
-##         S = S[:N,:]
-##         tf2 = tf2[:N,:]
-##         tf3 = tf3[:N,:]
-##     else:
-##         N = nfft
 
     # compute shifts
-    #nonz = S.nonzero()
-    #tf2[nonz] = nx.round(nx.real(tf2[nonz] / S[nonz] / shift))
-    #tf3[nonz] = nx.round(nx.imag(nfft * tf3[nonz] / S[nonz] / (2*nx.pi)))
-    #return tf2,tf3
-
     t_e = nx.real(tf2 / S / shift)
     f_e = nx.imag(nfft * tf3 / S / (2 * nx.pi))
 
-    q = (S * S.conj()).real
-    #sigpow = (nx.abs(x[onset:offset].astype('d'))**2).mean()
-    sigpow = norm(x[onset:offset].astype('d'))**2 / (offset - onset)
+    q = nx.absolute(S)**2  # (S * S.conj()).real
+    sigpow = norm(x[onset:offset])**2 / (offset - onset)
     thresh = 1.e-6 * sigpow
 
     # perform the reassignment
-    T,F = nx.meshgrid(nx.arange(t.size), nx.arange(N))
-    t_est = nx.round(T + t_e).astype('i')
-    f_est = nx.round(F - f_e).astype('i')
+    #T,F = nx.meshgrid(nx.arange(t.size), nx.arange(N))
+    ff = nx.arange(N)
+    ff.shape = (N,1)
+    t_est = nx.round(nx.arange(t.size) + t_e).astype('i')
+    f_est = nx.round(ff - f_e).astype('i')
 
     # zero out points that displace out of bounds of spectrogram
     # or which don't have sufficient power to be reliable
@@ -176,11 +170,10 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     if FL > 0:
         ind = ind | (nx.abs(f_e) > FL)
 
-    q[ind] = 0
-    f_est[ind] = nx.nan
-    t_est[ind] = nx.nan
+    iind = nx.logical_not(ind)
+    RS = nx.zeros_like(q)
 
-    RS = accumarray([f_est.flat, t_est.flat], q.flat, dim=q.shape)
+    _accumarray_2d(q[iind], f_est[iind], t_est[iind], RS)
 
     return RS
     
@@ -222,3 +215,35 @@ def hermf(N, order=6, tm=6):
         Dh[k,:] = (tt * Htemp[k,:] - nx.sqrt(2*(k+1)) * Htemp[k+1,:])*dt
     
     return Htemp[:order,:], Dh, tt
+
+
+def _accumarray_2d(V, I, J, out):
+    """
+    Fast accumulator function for 2D output arrays.
+    """
+
+    code = """
+        # line 349 "datautils.py"
+
+        int i, j;
+	int nentries = NV[0];
+        for (int k = 0; k < nentries; k++) {
+             i = I(k);
+             j = J(k);
+             
+             out(i,j) = V(k);
+             }
+             
+        """
+    
+    weave.inline(code, ['I','J','V','out'],
+                 type_converters=weave.converters.blitz)
+
+
+if __name__=="__main__":
+
+    from dlab import pcmio
+    s = pcmio.sndfile('st384_song_2_sono_4_38537_39435.wav').read()
+    s = s.astype('d') / 2**15
+    import cProfile
+    cProfile.run('tfrrsp_hm(s)','ras1') 
