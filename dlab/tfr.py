@@ -26,25 +26,41 @@ def tfrrsp_hm(S, **kwargs):
     reassigned spectrogram is the average of multiple spectrograms
     computed with different Hermitian tapers. This gives a dramatic
     increase in resolution and obviates some of the time-frequency
-    tradeoffs with standard windowed STFTs.  Optional arguments and
-    default values:
+    tradeoffs with standard windowed STFTs.
+    
+    Spectrogram parameters:
 
     nfft - size of the FFT timeframe (default 512)
-    order - number of hermitian tapers to use (default 4)
-    Nh - number of points in the hermitian tapers (default the first odd
-         number greater than 0.70 * nfft
-    tm - half-time support for tapers (default 6)
-
     onset - starting sample of the input signal (default 0)
     offset - ending offset (relative to signal length; default 0)
     shift - number of samples between analysis windows (default 10)
 
-    returns a 2D array RS, with has nfft rows and len(S)/shift columns
+    Reassignment parameters:
+    
+    order - number of hermitian tapers to use (default 4)
+    Nh - number of points in the hermitian tapers (default the first odd
+         number greater than 0.50 * nfft
+    tm - half-time support for tapers (default 6).
+    zoomf - 'zoom' factor in frequency resolution. after reassignment the
+            frequency resolution can wind up being higher than the original nfft.
+            Default 3
+    zoomt - zoom factor for time. Default 1
+    freql - locking for frequency dimension. points with reassignments larger than this
+            are zeroed out.  Can increase the resolution of the lines. Default 5
+    timel - locking for time dimension. Default 5
+
+    The values for the reassignment parameters are appropriate for an NFFT of 512.
+    In particular, tm and freql should be scaled if NFFT is greatly increased or decreased
+
+
+    avg - if true (default), averages across tapers
+
+    returns a 2D array (3D with avg False) RS, with nfft rows and len(S)/shift columns
     """
 
-    nfft = kwargs.get('nfft', 512)
+    nfft = kwargs.pop('nfft', 512)
     order = kwargs.get('order',4)
-    Nh = kwargs.get('Nh', nx.fix(0.70 * nfft))
+    Nh = kwargs.get('Nh', nx.fix(0.50 * nfft))
     Nh += -(Nh % 2) + 1
     tm = kwargs.get('tm', 6)
 
@@ -54,18 +70,24 @@ def tfrrsp_hm(S, **kwargs):
 
     h,Dh,tt = hermf(Nh, order, tm)
 
+    # convert to doubles now to save some time
+    S = S.astype('d')
     nt = len(S) - offset - onset
+    M = nx.ceil(1.*nt/shift)
     
-    RS = nx.zeros((nfft, nt/shift, order))
+    RS = nx.zeros((nfft, M, order))
     for k in range(order):
-        print "Computing spectrogram with order %d tapers..." % (k+1)
-        RS[:,:,k] = tfrrsph(S, nfft, h[k,:], Dh[k,:], **kwargs)
+        rs = tfrrsph(S, nfft, h[k,:], Dh[k,:], **kwargs)
+        RS[:,:,k] = rs
 
+    if kwargs.get('avg',True):
+        return RS.mean(2)
+    
     return RS
 
 def tfrrsph(x, nfft, h, Dh, **kwargs):
     """
-    Computes the reassigned spectrogram a specific hermitian taper.
+    Computes the reassigned spectrogram with a specific hermitian taper.
 
     x - signal
     nfft - the number of points in the FFT window
@@ -79,15 +101,8 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     offset - ending offset (relative to signal length)
     shift  - number of samples to shift the window by (default 10)
 
-    Reassignment parameters:
-
-    zoomf - 'zoom' factor in frequency resolution. after reassignment the
-            frequency resolution can wind up being higher than the original nfft.
-            Default 3
-    zoomt - zoom factor for time. Default 1
-    freql - locking for frequency dimension. points with reassignments larger than this
-            are zeroed out.  Can increase the resolution of the lines. Default 5
-    timel - locking for time dimension. Default 5
+    See help for tfrrsp_hm for information on reassignment parameters
+    including zoomf, zoomt, freql, and timel
 
     Outputs:
 
@@ -108,7 +123,6 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     assert h.size==Dh.size, "Tapers and derivatives must be the same length"
     assert h.size % 2 == 1, "Tapers must have an odd number of points"
 
-    x = x.astype('d')
     xlen = x.size
     Lh = (h.size - 1)/2  # this should be integral
 
@@ -239,11 +253,65 @@ def _accumarray_2d(V, I, J, out):
     weave.inline(code, ['I','J','V','out'],
                  type_converters=weave.converters.blitz)
 
+def _fastfill(sig, window, t, nfft, dtype='d'):
+    """
+    Quickly fills an array for transformation by FFT.  Assumes you have
+    all your ducks in order. Computes the window norm, but doesn't
+    adjust for zero-padding.
+    """
 
+    arr = nx.zeros([nfft, t.size], dtype=dtype)
+
+    code = """
+       # line 264 "tfr.py"
+
+       int col,tau,row;
+
+       int nwindow = window.size(); //Nwindow[0];
+       int nt = t.size(); //Nt[0];
+       int nx = sig.size();
+       int Lh = (nwindow - 1) / 2;
+       int tauminmax = nfft < Lh ? nfft : Lh;
+
+       /* window norm */
+       double normh = 0.0;
+       for (row = 0; row < nwindow; row++) {
+            //normh += window[row] * window[row];
+            normh += window(row) * window(row);
+       }
+       normh = sqrt(normh);
+       
+       /* iterate through the columns */
+       for (col = 0; col < nt; col++) {
+            int time = t(col);
+            int taumin = tauminmax < time ? tauminmax : time;
+            int taumax = tauminmax < (nx - time - 1) ? tauminmax : (nx - time - 1);
+            //printf("col: %d, tau: [-%d, %d), row: ", time, taumin, taumax);
+            for (tau = -taumin; tau <= taumax; tau++) {
+                row = nfft + tau - nfft * (int)((nfft+tau)/ nfft);  // positive remainder
+                //printf("%d ", row);
+                arr(row,col) = sig(time + tau) * window(Lh + tau) / normh;
+       //         //*(arr + row*Sarr[0] + col*Sarr[1]) = sig[time + tau] * window[Lh + tau] / normh;
+            }
+            //printf("\\n");
+       }
+    """
+    
+    weave.inline(code, ['arr','sig','window','t','nfft'],
+                 type_converters=weave.converters.blitz)
+    return arr
+
+        
 if __name__=="__main__":
 
     from dlab import pcmio
     s = pcmio.sndfile('st384_song_2_sono_4_38537_39435.wav').read()
     s = s.astype('d') / 2**15
-    import cProfile
-    cProfile.run('tfrrsp_hm(s)','ras1') 
+
+    # test fast array fill
+    h,Dh,tt = hermf(355,6,6)
+    nfft = 512
+    t = nx.arange(0,s.size,10)
+    
+    #import cProfile
+    #cProfile.run('tfrrsp_hm(s)','ras1') 
