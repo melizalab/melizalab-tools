@@ -24,15 +24,33 @@ algorithm from Xiao and Flandrin.  The latter involves 3 different FFT
 operations on the signal windowed with the hermitian taper [h(t)], its
 derivative [h'(t)], and its time product [t * h(t)].  The G&M
 algorithm only uses two FFTs, on the signal windowed with a gassian
-and its time derivative.  If I understand their methods correctly, however,
-this derivation is based on properties of the fourier transform of the
-gaussian, and isn't appropriate for window functions based on the
-Hermitian tapers.
+and its time derivative.  If I understand their methods correctly,
+however, this derivation is based on properties of the fourier
+transform of the gaussian, and isn't appropriate for window functions
+based on the Hermitian tapers.
 
 Therefore, the algorithm is mostly from [2], though I include time and
 frequency locking parameters from [3], which specify how far energy is
-allowed to be reassigned in the TF plane.  Large displacements generally
-arise from numerical errors, so this helps to sharpen the lines somewhat.
+allowed to be reassigned in the TF plane.  Large displacements
+generally arise from numerical errors, so this helps to sharpen the
+lines somewhat. I also included the time/frequency interpolation from
+[3], which can be used to get higher resolution (at the expense of
+less averaging) from smaller analysis windows.
+
+Some fiddling with parameters is necessary to get the best
+spectrograms from a given sort of signal at a given nfft/shift
+setting.  The taper parameters tm and Nh are inversely related and
+have some control over bandwidth. Increasing tm (decreasing Nh)
+increases resolution for broadband signals but smears narrowband
+signals; decreasing tm (increasing Nh) improves narrowband resolution
+but closely spaced clicks can become smeared.  
+
+Some parameter sets that seem to work well with starling song, which
+has lots of narrowband, broadband, and frequency-modulated features.
+
+nfft=512, shift=10, tm=6, Nh=257, zoomf=1, zoomt=1  (default)
+nfft=256, shift=10, tm=4.5, Nh=201, zoomf=2  (much faster than prev line, similar quality)
+
 
 CDM, 8/2008
 
@@ -68,9 +86,8 @@ def tfrrsp_hm(S, **kwargs):
     Reassignment parameters:
     
     order - number of hermitian tapers to use (default 4)
-    Nh - number of points in the hermitian tapers (default the first odd
-         number greater than 0.50 * nfft
-    tm - half-time support for tapers (default 6).
+    Nh - number of points in the hermitian tapers (default 257)
+    tm - half-time support for tapers (default 6)
     zoomf - 'zoom' factor in frequency resolution. after reassignment the
             frequency resolution can wind up being higher than the original nfft.
             Default 3
@@ -79,8 +96,7 @@ def tfrrsp_hm(S, **kwargs):
             are zeroed out.  Can increase the resolution of the lines. Default 0.01 (rel freq.)
     timel - locking for time dimension. Default 50 (samples)
 
-    Most of the parameters scale with different NFFT and shift values; the exception
-    is tm, which should be linearly adjusted with different NFFT.
+    See the module docstring for some notes on adjusting reassignment parameters.
 
     avg - if true (default), averages across tapers
 
@@ -89,13 +105,15 @@ def tfrrsp_hm(S, **kwargs):
 
     nfft = kwargs.pop('nfft', 512)
     order = kwargs.get('order',4)
-    Nh = kwargs.get('Nh', nx.fix(0.50 * nfft))
-    Nh += -(Nh % 2) + 1
+    Nh = kwargs.get('Nh', 257)
+    Nh += -(Nh % 2) + 1  # force this to be odd
     tm = kwargs.get('tm', 6)
 
     onset = kwargs.get('onset',0)
     offset = kwargs.get('offset',0)
     shift = kwargs.get('shift',10)
+    zoomf = int(kwargs.get('zoomf',1))
+    zoomt = int(kwargs.get('zoomt',1))
 
     h,Dh,tt = hermf(Nh, order, tm)
 
@@ -104,7 +122,7 @@ def tfrrsp_hm(S, **kwargs):
     nt = len(S) - offset - onset
     M = nx.ceil(1.*nt/shift)
     
-    RS = nx.zeros((nfft, M, order))
+    RS = nx.zeros((nfft*zoomf, M*zoomt, order))
     for k in range(order):
         RS[:,:,k] = tfrrsph(S, nfft, h[k,:], Dh[k,:], **kwargs)
 
@@ -170,35 +188,15 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     tf3 = sfft.fft(tf3, nfft, axis=0, overwrite_x=1) 
 
     # compute shifts - real times and relative frequency
-    t_e = nx.real(tf2 / S) # nx.real(tf2 / S / shift)
-    f_e = nx.imag(tf3 / S / (2 * nx.pi)) #nx.imag(nfft * tf3 / S / (2 * nx.pi))
+    t_e = nx.real(tf2 / S) 
+    f_e = nx.imag(tf3 / S / (2 * nx.pi)) 
 
     q = nx.absolute(S)**2 
     sigpow = norm(x[onset:offset])**2 / (offset - onset)
     thresh = 1.e-6 * sigpow
 
     # perform the reassignment
-    fgrid = nx.arange(nfft, dtype='d') / nfft # nx.arange(nfft)
-    RS = _reassign(q, t, fgrid, t_e, f_e, qthresh=thresh, **kwargs)
-##     fgrid.shape = (nfft,1)
-##     t_est = nx.round((t + t_e)/shift).astype('i') #nx.round(nx.arange(t.size) + t_e).astype('i')
-##     f_est = nx.round((fgrid - f_e)*nfft).astype('i')
-
-##     # zero out points that displace out of bounds of spectrogram
-##     # or which don't have sufficient power to be reliable
-##     ind = (f_est < 0) | (f_est >= nfft) | (t_est < 0) | (t_est >= t.size) | (q <= thresh)
-
-##     FL = kwargs.get('freql',0.01)
-##     TL = kwargs.get('timel',50)
-##     if TL > 0:
-##         ind = ind | (nx.abs(t_e) > TL)
-##     if FL > 0:
-##         ind = ind | (nx.abs(f_e) > FL)
-
-##     iind = nx.logical_not(ind)
-##     RS = nx.zeros_like(q)
-
-##     _accumarray_2d(q[iind], f_est[iind], t_est[iind], RS)
+    RS = _reassign(q, shift, t_e, f_e, qthresh=thresh, **kwargs)
 
     return RS
     
@@ -242,33 +240,7 @@ def hermf(N, order=6, tm=6):
     return Htemp[:order,:], Dh, tt
 
 
-def _accumarray_2d(V, I, J, arr):
-    """
-    Fast accumulator function for 2D output arrays.
-
-    V - values to fill the array with
-    I - first index values (must be integers)
-    J - second index values (integers)
-    arr - the output array. Make sure (max(I), max(J)) < arr.shape
-    """
-
-    code = """
-        # line 229 "tfr.py"
-
-        int i, j;
-	int nentries = NV[0];
-        for (int k = 0; k < nentries; k++) {
-             i = I(k);
-             j = J(k);
-
-             arr(i,j) = V(k);
-        }
-        """
-    
-    weave.inline(code, ['I','J','V','arr'],
-                 type_converters=weave.converters.blitz)
-
-def _fastfill(sig, window, t, nfft, dtype='d'):
+def _fastfill(sig, window, t, nfft, dtype='D'):
     """
     Quickly fills an array for transformation by FFT.  Assumes you have
     all your ducks in order, specifically that the window is normalized.
@@ -276,12 +248,18 @@ def _fastfill(sig, window, t, nfft, dtype='d'):
     padding is being used, but using the mother window.  Consequently,
     the mother window should just be normalized ahead of time, and we
     accept a little extra power in the TFR at the edges.
+
+    sig - signal
+    window - window function
+    t - time points for frames. should be evenly spaced
+    nfft - number of points in analysis windows
+    dtype - specify the dtype of the output array. complex is best
     """
 
     arr = nx.zeros([nfft, t.size], dtype=dtype)
 
     code = """
-       # line 264 "tfr.py"
+       # line 262 "tfr.py"
 
        int col,tau,row;
 
@@ -309,13 +287,12 @@ def _fastfill(sig, window, t, nfft, dtype='d'):
     return arr
 
 
-def _reassign(q, tgrid, fgrid, tdispl, fdispl, **kwargs):
+def _reassign(q, dt, tdispl, fdispl, **kwargs):
     """
     Reassign points in the spectrogram to new values.
 
     q - spectrotemporal power (2D)
-    tgrid - time values for columns of q
-    fgrid - frequency values for rows of q (if full matrix, no neg freqs)
+    dt - temporal spacing between columns of q
     tdispl - time displacement values for each point in q
     fdispl - freq displacement values for each point in q
 
@@ -325,32 +302,38 @@ def _reassign(q, tgrid, fgrid, tdispl, fdispl, **kwargs):
     timel - time locking factor (default 50)
     freql - freq locking factor (default 0.01)
     zoomt - time zoom factor (default 1)
-    zoomf - frequency zoom factor (default)
+    zoomf - frequency zoom factor (default 1)
+
+    Note that we assume that q is a full spectrogram, with NFFT rows
     """
 
     qthresh = float(kwargs.get('qthresh',0.0))
     FL = kwargs.get('freql',0.01)
     TL = kwargs.get('timel',50)
+    ZF = int(kwargs.get('zoomf',1))
+    ZT = int(kwargs.get('zoomt',1))
 
-    # conversion factors; assume even spacing
-    dt = float(tgrid[1]-tgrid[0])
-
-    # fix this for zooming later
-    arr = nx.zeros_like(q)
+    qshape = q.shape
+    arr = nx.zeros([q.shape[0] * ZF, q.shape[1] * ZT], dtype=q.dtype)
 
     code = """
-        # line 342 "tfr.py"
+        # line 320 "tfr.py"
 
         int i, j, ihat, jhat;
         int ncol = q.cols();
         int N = q.rows();
+        int outcols = arr.cols();
+        int outrows = arr.rows();
+        double fref, tref;
 
         for (i = 0; i < N; i++) {
+             fref = 1.0 * i / N;
              for (j = 0; j < ncol; j++) {
-                 jhat = round((tgrid(j) + tdispl(i,j))/dt);
-                 ihat = round((fgrid(i) - fdispl(i,j))*N);
+                 tref = j * dt;
+                 jhat = round(ZT*(tref + tdispl(i,j))/dt);
+                 ihat = round(ZF*(fref - fdispl(i,j))*N);
                  // check that we're in bounds, within locking distance, and above thresh
-                 if ((ihat < 0) || (ihat >= N) || (jhat < 0) || (jhat >= ncol))
+                 if ((ihat < 0) || (ihat >= outrows) || (jhat < 0) || (jhat >= outcols))
                      continue;
                  if (q(i,j) <= qthresh)
                      continue;
@@ -366,7 +349,7 @@ def _reassign(q, tgrid, fgrid, tdispl, fdispl, **kwargs):
     """
     
     weave.inline(code,
-                 ['q','tgrid','fgrid','tdispl','fdispl','dt','arr','TL','FL','qthresh'],
+                 ['q','dt','tdispl','fdispl','arr','TL','FL','qthresh','ZF','ZT'],
                  type_converters=weave.converters.blitz)
     return arr
 
@@ -378,4 +361,5 @@ if __name__=="__main__":
     s = s.astype('d') / 2**15
 
     import cProfile
-    cProfile.run('RS = tfrrsp_hm(s)','ras_inlinecmplxws_inlinefullras_fftw3') 
+    cProfile.run('RS = tfrrsp_hm(s)','ras')
+    cProfile.run('RSa = tfrrsp_hm(s, nfft=256, tm=4.5, Nh=201, zoomf=2)', 'ras_fast')
