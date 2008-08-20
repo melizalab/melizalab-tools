@@ -1,21 +1,51 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
+
 Functions to compute time-frequency reassignment spectrograms.
 Assembled from various MATLAB sources, including the time-frequency
-toolkit and code from Gardner and Magnasco PNAS 2006.
+toolkit [1], Xiao and Flandrin's work on multitaper reassignment [2]
+and code from Gardner and Magnasco [3].
+
+The basic principle is to use reassignment to increase the precision
+of the time-frequency localization, essentially by deconvolving the
+spectrogram with the TF representation of the window, recovering the
+center of mass of the spectrotemporal energy.  Reassigned TFRs
+typically show a 'froth' for noise, and strong narrow lines for
+coherent signals like pure tones, chirps, and so forth.  The use of
+multiple tapers reinforces the coherent signals while averaging out
+the froth, giving a very clean spectrogram with optimal precision and
+resolution properties.
+
+Implementation notes:
+
+Gardner & Magnasco calculate reassignment based on a different
+algorithm from Xiao and Flandrin.  The latter involves 3 different FFT
+operations on the signal windowed with the hermitian taper [h(t)], its
+derivative [h'(t)], and its time product [t * h(t)].  The G&M
+algorithm only uses two FFTs, on the signal windowed with a gassian
+and its time derivative.  If I understand their methods correctly, however,
+this derivation is based on properties of the fourier transform of the
+gaussian, and isn't appropriate for window functions based on the
+Hermitian tapers.
+
+Therefore, the algorithm is mostly from [2], though I include time and
+frequency locking parameters from [3], which specify how far energy is
+allowed to be reassigned in the TF plane.  Large displacements generally
+arise from numerical errors, so this helps to sharpen the lines somewhat.
 
 CDM, 8/2008
- 
+
+[1] http://tftb.nongnu.org/
+[2] http://perso.ens-lyon.fr/patrick.flandrin/multitfr.html
+[3] PNAS 2006, http://web.mit.edu/tgardner/www/Downloads/Entries/2007/10/22_Blue_bird_day_files/ifdv.m 
 """
 
 import numpy as nx
 import scipy.fftpack as sfft
 from scipy.linalg import norm
 from scipy import weave
-from datautils import accumarray
 
-_deps = nx.finfo(nx.dtype('d')).eps
 
 def tfrrsp_hm(S, **kwargs):
     """
@@ -46,12 +76,11 @@ def tfrrsp_hm(S, **kwargs):
             Default 3
     zoomt - zoom factor for time. Default 1
     freql - locking for frequency dimension. points with reassignments larger than this
-            are zeroed out.  Can increase the resolution of the lines. Default 5
-    timel - locking for time dimension. Default 5
+            are zeroed out.  Can increase the resolution of the lines. Default 0.01 (rel freq.)
+    timel - locking for time dimension. Default 50 (samples)
 
-    The values for the reassignment parameters are appropriate for an NFFT of 512.
-    In particular, tm and freql should be scaled if NFFT is greatly increased or decreased
-
+    Most of the parameters scale with different NFFT and shift values; the exception
+    is tm, which should be linearly adjusted with different NFFT.
 
     avg - if true (default), averages across tapers
 
@@ -114,8 +143,6 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     ifdv.m, Gardner & Magnasco PNAS 2006
     """
 
-    FL = kwargs.get('freql',5)
-    TL = kwargs.get('timel',5)
 
     assert x.ndim==1, "Input signal must be a 1D vector"
     assert h.ndim==1 and Dh.ndim==1, "Hermite tapers must be 1D vectors"
@@ -129,54 +156,49 @@ def tfrrsph(x, nfft, h, Dh, **kwargs):
     onset = int(kwargs.get('onset',0))
     offset = x.size - int(kwargs.get('offset',0))
     shift = int(kwargs.get('shift', 10))
-    t = nx.arange(onset, offset, shift)    
+    t = nx.arange(onset, offset, shift) 
 
-    # build the workspaces
-    S = nx.zeros([nfft, t.size], dtype='D')
-    tf2 = nx.zeros([nfft, t.size], dtype='D')
-    tf3 = nx.zeros([nfft, t.size], dtype='D')
+    # build workspaces and fill with windowed data
     Th = h * nx.arange(-Lh, Lh+1)
-
-    # this is a funky way of doing the windowing
-
-    S = _fastfill(x, h, t, nfft)
-    tf2 = _fastfill(x, Th, t, nfft)
-    tf3 = _fastfill(x, Dh, t, nfft)
+    S = _fastfill(x, h, t, nfft, dtype='D')
+    tf2 = _fastfill(x, Th, t, nfft, dtype='D')
+    tf3 = _fastfill(x, Dh, t, nfft, dtype='D')
 
     # compute the FFT
-    S = sfft.fft(S, nfft, axis=0, overwrite_x=1) #+ _deps
-    tf2 = sfft.fft(tf2, nfft, axis=0, overwrite_x=1) #+ _deps
-    tf3 = sfft.fft(tf3, nfft, axis=0, overwrite_x=1) #+ _deps
-    N = nfft
+    S = sfft.fft(S, nfft, axis=0, overwrite_x=1) 
+    tf2 = sfft.fft(tf2, nfft, axis=0, overwrite_x=1) 
+    tf3 = sfft.fft(tf3, nfft, axis=0, overwrite_x=1) 
 
-    # compute shifts
-    t_e = nx.real(tf2 / S / shift)
-    f_e = nx.imag(nfft * tf3 / S / (2 * nx.pi))
+    # compute shifts - real times and relative frequency
+    t_e = nx.real(tf2 / S) # nx.real(tf2 / S / shift)
+    f_e = nx.imag(tf3 / S / (2 * nx.pi)) #nx.imag(nfft * tf3 / S / (2 * nx.pi))
 
-    q = nx.absolute(S)**2  # (S * S.conj()).real
+    q = nx.absolute(S)**2 
     sigpow = norm(x[onset:offset])**2 / (offset - onset)
     thresh = 1.e-6 * sigpow
 
     # perform the reassignment
-    #T,F = nx.meshgrid(nx.arange(t.size), nx.arange(N))
-    ff = nx.arange(N)
-    ff.shape = (N,1)
-    t_est = nx.round(nx.arange(t.size) + t_e).astype('i')
-    f_est = nx.round(ff - f_e).astype('i')
+    fgrid = nx.arange(nfft, dtype='d') / nfft # nx.arange(nfft)
+    RS = _reassign(q, t, fgrid, t_e, f_e, qthresh=thresh, **kwargs)
+##     fgrid.shape = (nfft,1)
+##     t_est = nx.round((t + t_e)/shift).astype('i') #nx.round(nx.arange(t.size) + t_e).astype('i')
+##     f_est = nx.round((fgrid - f_e)*nfft).astype('i')
 
-    # zero out points that displace out of bounds of spectrogram
-    # or which don't have sufficient power to be reliable
-    ind = (f_est < 0) | (f_est >= N) | (t_est < 0) | (t_est >= t.size) | (q <= thresh)
+##     # zero out points that displace out of bounds of spectrogram
+##     # or which don't have sufficient power to be reliable
+##     ind = (f_est < 0) | (f_est >= nfft) | (t_est < 0) | (t_est >= t.size) | (q <= thresh)
 
-    if TL > 0:
-        ind = ind | (nx.abs(t_e) > TL)
-    if FL > 0:
-        ind = ind | (nx.abs(f_e) > FL)
+##     FL = kwargs.get('freql',0.01)
+##     TL = kwargs.get('timel',50)
+##     if TL > 0:
+##         ind = ind | (nx.abs(t_e) > TL)
+##     if FL > 0:
+##         ind = ind | (nx.abs(f_e) > FL)
 
-    iind = nx.logical_not(ind)
-    RS = nx.zeros_like(q)
+##     iind = nx.logical_not(ind)
+##     RS = nx.zeros_like(q)
 
-    _accumarray_2d(q[iind], f_est[iind], t_est[iind], RS)
+##     _accumarray_2d(q[iind], f_est[iind], t_est[iind], RS)
 
     return RS
     
@@ -220,9 +242,14 @@ def hermf(N, order=6, tm=6):
     return Htemp[:order,:], Dh, tt
 
 
-def _accumarray_2d(V, I, J, out):
+def _accumarray_2d(V, I, J, arr):
     """
     Fast accumulator function for 2D output arrays.
+
+    V - values to fill the array with
+    I - first index values (must be integers)
+    J - second index values (integers)
+    arr - the output array. Make sure (max(I), max(J)) < arr.shape
     """
 
     code = """
@@ -233,13 +260,12 @@ def _accumarray_2d(V, I, J, out):
         for (int k = 0; k < nentries; k++) {
              i = I(k);
              j = J(k);
-             
-             out(i,j) = V(k);
-             }
-             
+
+             arr(i,j) = V(k);
+        }
         """
     
-    weave.inline(code, ['I','J','V','out'],
+    weave.inline(code, ['I','J','V','arr'],
                  type_converters=weave.converters.blitz)
 
 def _fastfill(sig, window, t, nfft, dtype='d'):
@@ -265,12 +291,6 @@ def _fastfill(sig, window, t, nfft, dtype='d'):
        int Lh = (nwindow - 1) / 2;
        int tauminmax = nfft < Lh ? nfft : Lh;
 
-       /* window norm */
-       //double normh = 0.0;
-       //for (row = 0; row < nwindow; row++) {
-       //     normh += window(row) * window(row);
-       //}
-       //normh = sqrt(normh);
        
        /* iterate through the columns */
        for (col = 0; col < nt; col++) {
@@ -279,8 +299,7 @@ def _fastfill(sig, window, t, nfft, dtype='d'):
             int taumax = tauminmax < (nx - time - 1) ? tauminmax : (nx - time - 1);
             for (tau = -taumin; tau <= taumax; tau++) {
                 row = nfft + tau - nfft * (int)((nfft+tau)/ nfft);  // positive remainder
-                arr(row,col) = sig(time + tau) * window(Lh + tau); // / normh;
-                //*(arr + col*Sarr[0] + row*Sarr[1]) = sig[time + tau] * window[Lh + tau] / normh;
+                arr(row,col) = sig(time + tau) * window(Lh + tau); 
             }
        }
     """
@@ -289,6 +308,69 @@ def _fastfill(sig, window, t, nfft, dtype='d'):
                  type_converters=weave.converters.blitz)
     return arr
 
+
+def _reassign(q, tgrid, fgrid, tdispl, fdispl, **kwargs):
+    """
+    Reassign points in the spectrogram to new values.
+
+    q - spectrotemporal power (2D)
+    tgrid - time values for columns of q
+    fgrid - frequency values for rows of q (if full matrix, no neg freqs)
+    tdispl - time displacement values for each point in q
+    fdispl - freq displacement values for each point in q
+
+    Optional arguments:
+
+    qthresh - minimum value for q to be included in reassigned spectrogram
+    timel - time locking factor (default 50)
+    freql - freq locking factor (default 0.01)
+    zoomt - time zoom factor (default 1)
+    zoomf - frequency zoom factor (default)
+    """
+
+    qthresh = float(kwargs.get('qthresh',0.0))
+    FL = kwargs.get('freql',0.01)
+    TL = kwargs.get('timel',50)
+
+    # conversion factors; assume even spacing
+    dt = float(tgrid[1]-tgrid[0])
+
+    # fix this for zooming later
+    arr = nx.zeros_like(q)
+
+    code = """
+        # line 342 "tfr.py"
+
+        int i, j, ihat, jhat;
+        int ncol = q.cols();
+        int N = q.rows();
+
+        for (i = 0; i < N; i++) {
+             for (j = 0; j < ncol; j++) {
+                 jhat = round((tgrid(j) + tdispl(i,j))/dt);
+                 ihat = round((fgrid(i) - fdispl(i,j))*N);
+                 // check that we're in bounds, within locking distance, and above thresh
+                 if ((ihat < 0) || (ihat >= N) || (jhat < 0) || (jhat >= ncol))
+                     continue;
+                 if (q(i,j) <= qthresh)
+                     continue;
+                 if ((TL > 0) && (abs(tdispl(i,j)) > TL))
+                     continue;
+                 if ((FL > 0) && (abs(fdispl(i,j)) > FL))
+                     continue;
+                     
+                 // make the reassignment
+                 arr(ihat,jhat) += q(i,j);
+             }
+         }
+    """
+    
+    weave.inline(code,
+                 ['q','tgrid','fgrid','tdispl','fdispl','dt','arr','TL','FL','qthresh'],
+                 type_converters=weave.converters.blitz)
+    return arr
+
+
 if __name__=="__main__":
 
     from dlab import pcmio
@@ -296,4 +378,4 @@ if __name__=="__main__":
     s = s.astype('d') / 2**15
 
     import cProfile
-    cProfile.run('RS = tfrrsp_hm(s)','ras_inlinews_inlineras') 
+    cProfile.run('RS = tfrrsp_hm(s)','ras_inlinecmplxws_inlinefullras_fftw3') 
