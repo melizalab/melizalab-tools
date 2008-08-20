@@ -330,16 +330,16 @@ def _reassign(q, dt, tdispl, fdispl, **kwargs):
              fref = 1.0 * i / N;
              for (j = 0; j < ncol; j++) {
                  tref = j * dt;
-                 jhat = round(ZT*(tref + tdispl(i,j))/dt);
-                 ihat = round(ZF*(fref - fdispl(i,j))*N);
+                 jhat = (int)round(ZT*(tref + tdispl(i,j))/dt);
+                 ihat = (int)round(ZF*(fref - fdispl(i,j))*N);
                  // check that we're in bounds, within locking distance, and above thresh
                  if ((ihat < 0) || (ihat >= outrows) || (jhat < 0) || (jhat >= outcols))
                      continue;
                  if (q(i,j) <= qthresh)
                      continue;
-                 if ((TL > 0) && (abs(tdispl(i,j)) > TL))
+                 if ((TL > 0) && (fabs(tdispl(i,j)) > TL))
                      continue;
-                 if ((FL > 0) && (abs(fdispl(i,j)) > FL))
+                 if ((FL > 0) && (fabs(fdispl(i,j)) > FL))
                      continue;
                      
                  // make the reassignment
