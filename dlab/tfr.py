@@ -34,23 +34,36 @@ frequency locking parameters from [3], which specify how far energy is
 allowed to be reassigned in the TF plane.  Large displacements
 generally arise from numerical errors, so this helps to sharpen the
 lines somewhat. I also included the time/frequency interpolation from
-[3], which can be used to get higher resolution (at the expense of
+[3], which can be used to get higher precision (at the expense of
 less averaging) from smaller analysis windows.
 
 Some fiddling with parameters is necessary to get the best
-spectrograms from a given sort of signal at a given nfft/shift
-setting.  The taper parameters tm and Nh are inversely related and
-have some control over bandwidth. Increasing tm (decreasing Nh)
-increases resolution for broadband signals but smears narrowband
-signals; decreasing tm (increasing Nh) improves narrowband resolution
-but closely spaced clicks can become smeared.  
+spectrograms from a given sort of signal.  Like the window size in an
+STFT, the taper parameters control the time-frequency resolution.
+However, in the reassignment spectrogram the precision
+(i.e. localization) is not affected by the taper size, so the effects
+of taper size will generally only be seen when two coherent signals
+are close to each other in time or frequency.  Nh controls the size of
+the tapers; one can also adjust tm, the time support of the tapers,
+but depending on the number of tapers used, this shouldn't get a whole
+lot smaller than 5.  Increased values of Nh result in improved
+narrowband resolution (i.e. between pure tones) but closely spaced
+clicks can become smeared.  Decreasing Nh increases the resolution
+between broadband components (i.e. clicks) but smears closely spaced
+narrowband components.  The effect of smearing can be ameliorated to
+some extent by adjusting the frequency/time locking parameters.
 
-Some parameter sets that seem to work well with starling song, which
-has lots of narrowband, broadband, and frequency-modulated features.
+The frequency zoom parameter can be used to speed up calculation quite
+a bit [3].  Since calculating the multitaper reassigned spectrogram takes
+3xNtapers FFT operations, smaller FFTs are generally better.  The
+spectrogram can then be binned at a finer resolution during reassignment.
+These two sets of parameters should generate fairly similar results:
 
 nfft=512, shift=10, tm=6, Nh=257, zoomf=1, zoomt=1  (default)
-nfft=256, shift=10, tm=4.5, Nh=201, zoomf=2  (much faster than prev line, similar quality)
+nfft=256, shift=10, tm=6, Nh=257, zoomf=2, zoomt=1
 
+Increasing the order generally reduces the background 'froth', but
+interference between closely spaced components may increase.
 
 CDM, 8/2008
 
@@ -244,10 +257,16 @@ def _fastfill(sig, window, t, nfft, dtype='D'):
     """
     Quickly fills an array for transformation by FFT.  Assumes you have
     all your ducks in order, specifically that the window is normalized.
-    Ideally all the frames should be renormalized based on how much zero-
-    padding is being used, but using the mother window.  Consequently,
-    the mother window should just be normalized ahead of time, and we
-    accept a little extra power in the TFR at the edges.
+
+    A slight kludge: ideally all the frames should be normalized based
+    on how much zero-padding is being used; however, this is based on
+    the norm of the mother window, not the two derivatives. Because
+    this function doesn't know which window is being used, the
+    simplest solution is to make sure the mother window is normalized
+    ahead of time, and accept a little extra power in the TFR at the
+    edges, where the zero-padding occurs.  This should be fixed if one
+    needs to make inferences or reconstructions, but reassignment is
+    mostly about pretty pictures, isn't it?
 
     sig - signal
     window - window function
@@ -259,7 +278,7 @@ def _fastfill(sig, window, t, nfft, dtype='D'):
     arr = nx.zeros([nfft, t.size], dtype=dtype)
 
     code = """
-       # line 262 "tfr.py"
+       # line 281 "tfr.py"
 
        int col,tau,row;
 
@@ -317,7 +336,7 @@ def _reassign(q, dt, tdispl, fdispl, **kwargs):
     arr = nx.zeros([q.shape[0] * ZF, q.shape[1] * ZT], dtype=q.dtype)
 
     code = """
-        # line 320 "tfr.py"
+        # line 339 "tfr.py"
 
         int i, j, ihat, jhat;
         int ncol = q.cols();
@@ -356,10 +375,24 @@ def _reassign(q, dt, tdispl, fdispl, **kwargs):
 
 if __name__=="__main__":
 
+    import sys, os, pylab
     from dlab import pcmio
-    s = pcmio.sndfile('st384_song_2_sono_4_38537_39435.wav').read()
-    s = s.astype('d') / 2**15
 
-    import cProfile
-    cProfile.run('RS = tfrrsp_hm(s)','ras')
-    cProfile.run('RSa = tfrrsp_hm(s, nfft=256, tm=4.5, Nh=201, zoomf=2)', 'ras_fast')
+    if len(sys.argv) < 2:
+        print "tfr.py <sndfile> computes the multitaper reassignment spectrogram of <sndfile>\n" + \
+              "                 and displays it with a 60 dB dynamic range"
+        sys.exit(-1)
+
+    sndfile = sys.argv[1]
+
+    fp = pcmio.sndfile(sndfile)
+    s = fp.read()
+
+    Fs = fp.framerate / 1000.
+    RS = tfrrsp_hm(s, nfft=256, shift=10, tm=4.5, Nh=201, zoomf=2)
+    N = RS.shape[0]
+
+    thresh = RS.max() / 1e6
+    pylab.imshow(nx.log10(RS[:N/2+1,:] + thresh), extent=(0, s.size / Fs, 0, Fs / 2))
+    pylab.hot()
+    pylab.show()
