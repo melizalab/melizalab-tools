@@ -213,7 +213,7 @@ def mtmspec(signal, **kwargs):
     nfft - number of points in the FFT transform (default 320)
     mtm_p - mtm bandwidth (see dpss) (default 3.5)
     adapt - whether to use the adaptive method to scale the contributions
-            of the different tapers.
+            of the different tapers (default).
 
     Specify the lattice for the time intervals as in stft()
 
