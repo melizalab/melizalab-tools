@@ -342,11 +342,19 @@ def runs(x, val):
 
 def accumarray(subs, val, **kwargs):
     """
-    Accumulates values in an array based on an associated subscript vector
+    Accumulates values in an array based on an associated subscript vector.
+    This function should only be used for output arrays that aren't 2D,
+    since scipy.sparse.coo_matrix() can be used to accumulate over 2 dimensions.
+
+    subs - indices of values. Can be an MxN array or a list of M vectors
+           (or lists) with N elements. The output array will have M dimensions.
+    vals - values to accumulate in the new array. Can be a list or vector.
 
     Optional arguments:
 
-    dim - sets the dimensions of the output array
+    dim - sets the dimensions of the output array. defaults to subs.max(0) + 1
+    dtype - sets the data type of the output array. defaults to dtype of val, or
+            if val is a list, double
     """
 
     if not isinstance(subs, nx.ndarray):
@@ -358,17 +366,22 @@ def accumarray(subs, val, **kwargs):
         except ValueError:
             raise ValueError, "subscript arrays must be the same length"
 
-    assert subs.ndim < 3, "subscript array must be 1 or 2 dimensions"
+    # sanity checks
+    assert subs.ndim == 2, "subscript array must be 2 dimensions"
     ndim = subs.shape[1]
+    nval = len(val)
+    assert nval == subs.shape[0], "value array and subscript array must have the same d_0"
+
+    # try to figure out dimensions
     maxind = subs.max(0)
-
-    val = nx.asarray(val)
-    assert val.size == subs.shape[0], "value array and subscript array must have the same d_0"
-
     dims = kwargs.get('dim', maxind + 1)
-    assert all(dims > maxind), "Dimensions of array are not large enough to include all values"
-    
-    out = nx.zeros(dims, dtype=val.dtype)
+    assert all(dims > maxind), "Dimensions of array are not large enough to include all indices"    
+
+    # Try to guess dtype. Default is double
+    dtype = getattr(val, 'dtype', 'd')
+    dtype = kwargs.get('dtype', dtype)
+    out = nx.zeros(dims, dtype=dtype)
+
     for i,v in enumerate(val):
         ind = subs[i,:]
         if not any(nx.isnan(ind)):
