@@ -8,8 +8,9 @@ Collect responses to features in feature noise.
 from __future__ import with_statement
 import os,sys,glob
 import numpy as nx
+from mspikes import toelis
 from scipy import sparse, linalg
-from dlab import toelis, plotutils, datautils
+from dlab import plotutils, datautils
 from dlab.pointproc import kernrates
 
 _binsize= 30
@@ -207,6 +208,9 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, **kwargs)
     fparams - specify feature parameters. this is normally done automatically,
               but it can be useful to force the parameters to a certain order
               in order to get different model matrices to match
+    tmax    - specify the last time point to include in the output matrix.
+              default is to figure this out from the toelis data but can be
+              necessary for toelis's with few spikes
 
 
     Returns -
@@ -219,6 +223,7 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, **kwargs)
 
     binsize = kwargs.get('binsize', _binsize)
     kernwidth = kwargs.get('kernwidth', _kernwidth)
+    def_tmax = kwargs.pop('tmax', None)
 
     # need to generate a comprehensive list of all the features
     P = set([])
@@ -235,7 +240,7 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, **kwargs)
     R = []
     MM = []
     for stim, tl in rtls.items():
-        tmax = tl.range[1]
+        tmax = def_tmax if def_tmax != None else tl.range[1]
         f = resprate(tl, binsize, kernwidth=kernwidth, onset=0, offset=tmax)[0]
         M,P = ftabletomatrix(ftables[stim], params=P, tmax=tmax, **kwargs)
         R.append(f)
@@ -304,15 +309,16 @@ if __name__=="__main__":
                      'Fs' : 1.}
     mdb = db.motifdb()
     parser = combiner.featmerge(mdb)
+    _datadir = os.path.join(os.environ['HOME'], 'z1/acute_data')
 
-    exampledir = "/home/dmeliza/z1/acute_data/st318/20070505/cell_18_4_3"
+    exampledir = os.path.join(_datadir, 'st318/20070505/cell_18_4_3')
     stim = 'A6_0'
     #exampledir = "/home/dmeliza/z1/acute_data/st317/20070531/cell_5_1_1"
     #stim = 'Cd_0'
     #exampledir = "/home/dmeliza/z1/acute_data/st319/20070811/cell_12_1_2"
     #stim = 'A0_0'
-    #exampledir = "/home/dmeliza/z1/acute_data/st319/20070811/cell_12_1_2"
-    #stim = 'A0_0'
+    #exampledir = "/home/dmeliza/z1/acute_data/st229/20070120/cell_2_1_1"
+    #stim = 'B1_0'
     stimpattern = '*%s(*).toe_lis'
     options = {'binsize' : 7.5,
                'nlags' : 20,
