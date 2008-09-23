@@ -11,24 +11,36 @@ import numpy as nx
 from scipy import sparse, linalg
 from dlab import toelis, plotutils, datautils
 from dlab.pointproc import kernrates
-from motifdb import db
 
 _binsize= 30
+_kernwidth = 7.5
 _nlags = 10
+_ragged = False
 _feattmpl = '%(motif)s_%(feature)d'   # define the names for the features
+_paramtmpl = '%s_%d'
 
-# how to look up feature lengths
-feature_db = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/motifs_songseg.h5')
-featset = 0
-# where to look up the feature locations in feature noise
-featloc_tables = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/feattables')
+#_reg_params = re.compile(r"(?P<stim>\S+)_(?P<feat>\d+)_(?P<lag>\d+)")
+
 
 def readftable(stimname, mdb, **kwargs):
+    """
+    Read the feature table for a stimulus from disk and generate a numpy recarray.
+
+    stimname - stimulus name
+    mdb - motif database
+
+    Optional arguments:
+    stimdir - search directory for .tbl files
+    featset - which feature set to use in the database
+    """
 
     Fs = kwargs.get('Fs',20.)
-    filename = os.path.join(featloc_tables, stimname + '.tbl')
+    tabledir = kwargs.get('stimdir','')
+    featset = kwargs.get('featset',0)
+    
+    filename = os.path.join(tabledir, stimname + '.tbl')
     if not os.path.exists(filename):
-        raise ValueError, "No feature table defined for %s" % stimname
+        raise ValueError, "No feature table defined for %s in %s" % (stimname, tabledir)
     rows = []
         
     with open(filename,'rt') as fp:
@@ -41,7 +53,10 @@ def readftable(stimname, mdb, **kwargs):
 
 def genftable(stimname, parser, **kwargs):
     """
-    generate a feature table for a stimulus defined by a symbol (i.e. A6_0(0)
+    Generate a feature table for a stimulus defined by a symbol (i.e. A6_0(0)
+
+    stimname - stimulus name
+    parser - something that will return a list of features that correspond to the stimulus name
     """
     
     fset = parser.parse(stimname)
@@ -52,91 +67,95 @@ def genftable(stimname, parser, **kwargs):
 
     return nx.rec.fromrecords(rows, names='motif,feature,fstart,flen')
 
-def fparams_fixed(ftable, nlags):
+def param_names(ftable, nlags, **kwargs): 
     """
-    Generates parameter names based on fixed number of time lags
-    for each feature
+    Generates parameter names for the features in the table. Can use a
+    fixed number of lags for each feature (defaults), or a variable
+    number of lags based on the feature length. For the latter option,
+    set <ragged> to True and <binsize> to a nonzero value
     """
-    F = []
+    P = []
     for feat in ftable:
-        for i in range(nlags):
-            F.append(_feattmpl % feat + "_%d" % i)
+        if kwargs.get('ragged',_ragged):
+            binsize = kwargs.get('binsize',_binsize)
+            NL = int(nx.ceil(1. * feat['flen'] / binsize) + nlags)
+        else:
+            NL = nlags
+        for i in range(NL):
+            P.append(_paramtmpl % (_feattmpl % feat, i))
 
-    return F
+    return P
 
-def fparams_ragged(ftable, binsize, npostlags):
+
+def ftabletomatrix(ftable, **kwargs):
     """
-    Generates the parameters names for a ragged feature table model.
-    <ftable> is a table that contains all the features that will go in
-    the model.  Each is looked up in the motif database, and an
-    appropriate number of parameters is assigned based on the feature
-    length and the number of post-feature lags.
-    """
-
-    F = []
-    for feat in ftable:
-        nlags = int(nx.ceil(1. * feat['flen'] / binsize) + npostlags)
-        for i in range(nlags):
-            F.append(_feattmpl % feat + "_%d" % i)
-
-    return F
-
-def ftabletomatrix_ragged(ftable, binsize=50, npostlags=1, tmax=None, allfeats=None, meancol=False):
-    """
-    This function behaves like ftabletomatrix(), but instead of
-    specifying a fixed number of time lags, each feature has as many
-    lags as is necessary for the feature duration, plus <npostlags>
-    """
-    pass
-
-def ftabletomatrix(ftable, binsize=50, nlags=1, tmax=None, allfeats=None, meancol=False):
-    """
-    Convert a feature table to a matrix in which each column is a feature,
-    each row is a time bin, and the value of the matrix is 1 at the feature onset
-    (rounding down to the nearest time bin start) and 0 otherwise.
+    Convert a feature table to a matrix in which each column is a
+    feature, each row is a time bin, and the value of the matrix is 1
+    at the feature onset (rounding down to the nearest time bin start)
+    and 0 otherwise.  The number of parameters per feature is either a
+    fixed number of time lags (default) or a variable number of lags
+    that depends on the feature length.
 
     meancol - if true, includes a column of all zeros for mean firing rate.
-    allfeats - a list of all the features that could be in the table. Used
-               for combining multiple stimuli that don't have all the features
+    params  - a list of the feature parameters. If this is not supplied,
+              the default behavior is to generate a fixed number of parameters
+              for each feature in the table.  If the matrix needs to be combined
+              with matrices from other feature tables with different features,
+              this needs to be specified.
+    ragged -  if False, use a fixed number of lags per feature (default). If
+              true, the number of parameters is ceil(F_length / binsize) + nlags
     tmax - the maximum time point to include in the analysis
 
-    Returns (M,F,T)
+    Returns (M,P)
     M - feature matrix (2D sparse array)
-    F - feature names for each column (list)
-    T - time bin onsets
+    P - parameter names
     """
+    
+    binsize = kwargs.get('binsize',_binsize)
+    nlags = kwargs.get('nlags', _nlags)
+    meancol = kwargs.get('meanresp', True)
+    params = kwargs.get('params', None)
+    ragged = kwargs.get('ragged', _ragged)
 
     lastfeat = ftable['fstart'].argmax()
-    if tmax == None:
-        tmax = ftable[lastfeat]['fstart'] + ftable[lastfeat]['flen']
+    tmax = kwargs.get('tmax', ftable[lastfeat]['fstart'] + ftable[lastfeat]['flen'] + nlags * binsize)
 
-    if allfeats==None:
-        nfeats = len(ftable)
-        F = [_feattmpl % feat for feat in ftable]
+    if params==None:
+        if ragged:
+            P = param_names(ftable, nlags, binsize)
+        else:
+            P = param_names(ftable, nlags)
     else:
-        nfeats = len(allfeats)
-        F = allfeats
+        P = params
 
-    T = nx.arange(0, nx.ceil(tmax / binsize) * binsize, binsize)
+    nrow = nx.ceil(tmax / binsize)
+    ncol = len(P)
 
-    nrow,ncol = T.size, nfeats * nlags
-    #M = nx.zeros((T.size, len(ftable)), dtype=nx.int8)
     M = sparse.lil_matrix((nrow, ncol))
 
     for feat in ftable:
         fname = _feattmpl % feat
-        ind = [i for i,f in enumerate(F) if fname==f]
-        if len(ind) != 1:
-            raise ValueError, "The feature %s must match exactly 1 entry in allfeats (matches %d)" % (fname, len(ind))
-        i = ind[0]
-        for j in range(nlags):
-            jj = int(feat['fstart'] / binsize)+j
+        fstart = int(feat['fstart'] / binsize)
+
+        if ragged:
+            nfeatlags = int(nx.ceil(1. * feat['flen'] / binsize) + nlags)
+        else:
+            nfeatlags = nlags
+
+        for j in range(nfeatlags):
+            jj = fstart + j
+            pname = _paramtmpl % (fname, j)
+            ind = [i for i,f in enumerate(P) if pname==f]
+            
+            if len(ind) != 1:
+                raise ValueError, "The param %s must only match one in the parameter list (matches %d)" % (pname, len(ind))
+            ij = ind[0]
             if jj < M.shape[0]:
-                M[jj, i*nlags+j] = 1
+                M[jj, ij] = 1
 
     if meancol:
         M = sparse.hstack([nx.ones((nrow,1)), M])
-    return M,nx.asarray(F),T
+    return M, nx.asarray(P)
 
 
 def loadresponses(song, pattern='*%s*feats*.toe_lis', **kwargs):
@@ -145,10 +164,10 @@ def loadresponses(song, pattern='*%s*feats*.toe_lis', **kwargs):
     (e.g. C0_densefeats_000.toe_lis)
     
     Optional arguments:
-    dir - search for files in this directory
+    respdir - search for files in this directory
     """
     
-    glb = os.path.join(kwargs.get('dir',''), pattern % song)
+    glb = os.path.join(kwargs.get('respdir',''), pattern % song)
     files = glob.glob(glb)
     tls = {}
     for file in files:
@@ -158,13 +177,14 @@ def loadresponses(song, pattern='*%s*feats*.toe_lis', **kwargs):
 
     return tls
 
-def resprate(tl, binsize, onset=None, offset=None):
-    r,g = kernrates(tl, 2, binsize/2., 'gaussian', onset=onset, offset=offset,
+def resprate(tl, binsize, kernwidth=None, onset=None, offset=None):
+    kernwidth = binsize/2. if kernwidth == None else kernwidth
+    r,g = kernrates(tl, 2, kernwidth, 'gaussian', onset=onset, offset=offset,
                     gridspacing=binsize)
     return r.mean(1) * 1000, g
 
 
-def make_additive_model(S, mdb, **kwargs):
+def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, **kwargs):
     """
     Generates the design matrix and response vector for the simple additive model:
 
@@ -174,16 +194,19 @@ def make_additive_model(S, mdb, **kwargs):
     at time lag s.  r_0 is the mean firing rate, which is fit by default but can be
     forced to zero by setting meanresp=0
 
-    S can be a string indicating which song to use, in which case the data
-      will be loaded from the toelis files, or it can be a dictionary of toelis
-      objects, in which case the keys of the dictionary will be used to load
-      the appropriate table.  The error checking is not especially robust.
+    <rtls> is a dictionary of toelis objects, with the stimulus names given
+    by the keys of the dictionary.  The keys are used to look up or generate
+    the feature table using <ftablefun>
 
     Optional arguments:
     binsize - bin size for stimulus and response. Default 30 ms
     nlags - number of time lags to fit. Default 10
     meanresp - if true (default), include a column for the mean firing rate
-    dir - the directory in which to run the analysis (default current directory)
+    ragged - if True, then a variable number of lags is assigned to each feature
+             based on feature length and with <nlags> after feature offset
+    fparams - specify feature parameters. this is normally done automatically,
+              but it can be useful to force the parameters to a certain order
+              in order to get different model matrices to match
 
 
     Returns -
@@ -191,66 +214,35 @@ def make_additive_model(S, mdb, **kwargs):
        the data for each permutation of the song are concatenated.  The columns
        are organized by feature first and then time lag.
     Y: a 1D dense vector with dimension (T / binsize)
-    F: a list of names of the features in X.
+    F: a list of names of the parameters in X.
     """
 
     binsize = kwargs.get('binsize', _binsize)
-    nlags = kwargs.get('nlags', _nlags)
-    meancol = kwargs.get('meanresp', True)
-
-    if isinstance(S, str):
-        rtls = loadresponses(S, **kwargs)
-    elif isinstance (S, dict):
-        rtls = S
-    else:
-        raise ValueError, "Unable to process data of type %s." % type(S)
-                   
-    R = []
-    MM = []
-    for stim, tl in rtls.items():
-        ftable = readftable(stim, mdb)
-        tmax = tl.range[1]
-        f = resprate(tl, binsize, onset=0, offset=tmax)[0]
-        M,F,T = ftabletomatrix(ftable, binsize=binsize,
-                               nlags=nlags, tmax=tmax, meancol=meancol)
-        R.append(f)
-        MM.append(M)
-
-    return sparse.vstack(MM).tocsr(), nx.concatenate(R), F        
-
-def make_additive_model_motif(S, parser, **kwargs):
-    binsize = kwargs.get('binsize', _binsize)
-    nlags = kwargs.get('nlags', _nlags)
-    meancol = kwargs.get('meanresp', True)
-
-    if isinstance(S, str):
-        rtls = loadresponses(S, **kwargs)
-    elif isinstance (S, dict):
-        rtls = S
-    else:
-        raise ValueError, "Unable to process data of type %s." % type(S)
-
+    kernwidth = kwargs.get('kernwidth', _kernwidth)
 
     # need to generate a comprehensive list of all the features
-    F = set([])
+    P = set([])
     ftables = {}
     for stim in rtls.keys():
-        ftables[stim] = genftable(stim, parser)
-        F.update([_feattmpl % feat for feat in ftables[stim]])
-    F = list(F)
-        
+        ftables[stim] = ftablefun(stim, mdb, **kwargs)
+        P.update(param_names(ftables[stim], **kwargs))
+
+    if fparams==None:
+        P = list(P)
+    else:
+        P = fparams
+    
     R = []
     MM = []
     for stim, tl in rtls.items():
         tmax = tl.range[1]
-        f = resprate(tl, binsize, onset=0, offset=tmax)[0]
-        M,F,T = ftabletomatrix(ftables[stim], binsize=binsize,
-                               nlags=nlags, tmax=tmax,
-                               allfeats=F, meancol=meancol)
+        f = resprate(tl, binsize, kernwidth=kernwidth, onset=0, offset=tmax)[0]
+        M,P = ftabletomatrix(ftables[stim], params=P, tmax=tmax, **kwargs)
         R.append(f)
         MM.append(M)
 
-    return sparse.vstack(MM).tocsr(), nx.concatenate(R), F
+    return sparse.vstack(MM).tocsr(), nx.concatenate(R), P
+
           
 def fit_additive_model(X,Y, **kwargs):
     """
@@ -275,28 +267,65 @@ def fit_additive_model(X,Y, **kwargs):
     S = nx.power(Yhat-Y,2).sum()
     SE = nx.sqrt(S/(X.shape[0]-X.shape[1]) * nx.diag(linalg.inv(CSS.todense())))
 
-    # reshape
-    if kwargs.has_key('meanresp') and kwargs.has_key('nlags'):
-        nlags = kwargs['nlags']
-        startind = 1 if kwargs['meanresp'] else 0
-        Bmat = nx.reshape(B[startind:], ((B.size-startind) / nlags, nlags)).T
-        SE = nx.reshape(SE[startind:], ((SE.size-startind) / nlags, nlags)).T
-        return B,Bmat,SE
-    else:
-        return B,SE
+    return B,SE
+
+def reshape_parameters(A, P):
+    """
+    Reshapes a parameter vector into a dictionary, with a vector for each feature
+    """
+
+    out = {}
+    startind = 0
+    if A.size > P.size:
+        # assume that this is only the case when the first element is the mean response
+        startind = 1
+        
+    # first find out all the unique feature names:
+    fnames = nx.unique(['_'.join(x.split('_')[:2]) for x in P])
+    # now look up all the associated indices and assign them
+    for fname in fnames:
+        ind = [i for i,x in enumerate(P) if x.startswith(fname + '_')]
+        V = nx.zeros(len(ind))
+        for i in ind:
+            lag = int(P[i].split('_')[-1])
+            V[lag] = A[startind+i]
+        out[fname] = V
+        
+    return out
+
 
 if __name__=="__main__":
-    
-    mdb = db.motifdb(feature_db)
-    exampledir = "/z1/users/dmeliza/acute_data/st358/20080129/cell_4_2_2"
-    song = 'C0'
-    options = {'binsize' : 30,
-               'nlags' : 10,
-               'meanresp' : True}
 
-    rtls = loadresponses(song, dir=exampledir)
-    X,Y,F = make_additive_model(rtls, mdb, dir=exampledir, **options)
-    A,Amat,Aerr = fit_additive_model(X,Y, **options)
+    from motifdb import db, combiner
+    from dlab import pointproc
+    
+    _coh_options = { 'mtm_p' : 5,
+                     'fpass' : [0., 0.100],
+                     'Fs' : 1.}
+    mdb = db.motifdb()
+    parser = combiner.featmerge(mdb)
+
+    exampledir = "/home/dmeliza/z1/acute_data/st318/20070505/cell_18_4_3"
+    stim = 'A6_0'
+    #exampledir = "/home/dmeliza/z1/acute_data/st317/20070531/cell_5_1_1"
+    #stim = 'Cd_0'
+    #exampledir = "/home/dmeliza/z1/acute_data/st319/20070811/cell_12_1_2"
+    #stim = 'A0_0'
+    #exampledir = "/home/dmeliza/z1/acute_data/st319/20070811/cell_12_1_2"
+    #stim = 'A0_0'
+    stimpattern = '*%s(*).toe_lis'
+    options = {'binsize' : 7.5,
+               'nlags' : 20,
+               'ragged' : True,
+               'meanresp' : True}
+    rtls = loadresponses(stim, pattern=stimpattern, respdir=exampledir)
+    for k in rtls.keys():
+        if k.find('g') > -1:
+            rtls.pop(k)
+    
+    X,Y,F = make_additive_model(rtls, parser, ftablefun=genftable, **options)
+    A,Aerr = fit_additive_model(X,Y, **options)
+    Ap = reshape_parameters(A, F)
 
     Yhat = A * X.T
 
@@ -307,8 +336,10 @@ if __name__=="__main__":
     #t = nx.arange(0,Amat.shape[0]*binsize,binsize)
 
     # x-validate
-    songtl = {song : toelis.readfile(os.path.join(exampledir,'cell_4_2_2_C0.toe_lis'))}
-    Msong,f,F = make_additive_model(songtl, mdb, **options)
+    songtl = {stim : toelis.readfile(os.path.join(exampledir,'cell_18_4_3_A6.toe_lis'))}
+    #songtl = {stim : toelis.readfile(os.path.join(exampledir,'cell_5_1_1_Cd.toe_lis'))}
+    #songtl = {stim : toelis.readfile(os.path.join(exampledir,'cell_12_1_2_A0.toe_lis'))}
+    Msong,f,F = make_additive_model(songtl, parser, ftablefun=genftable, fparams=F, **options)
 
     fhat = A * Msong.T
     print "Song CC: %3.4f" % nx.corrcoef(f, fhat)[0,1]
