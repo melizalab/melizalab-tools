@@ -105,6 +105,7 @@ def ftabletomatrix(ftable, **kwargs):
               this needs to be specified.
     ragged -  if False, use a fixed number of lags per feature (default). If
               true, the number of parameters is ceil(F_length / binsize) + nlags
+    tmin - the first time point to include in the analysis *(not implemented)
     tmax - the maximum time point to include in the analysis
 
     Returns (M,P)
@@ -120,6 +121,7 @@ def ftabletomatrix(ftable, **kwargs):
 
     lastfeat = ftable['fstart'].argmax()
     tmax = kwargs.get('tmax', ftable[lastfeat]['fstart'] + ftable[lastfeat]['flen'] + nlags * binsize)
+    tmin = kwargs.get('tmin', 0)
 
     if params==None:
         if ragged:
@@ -129,7 +131,7 @@ def ftabletomatrix(ftable, **kwargs):
     else:
         P = params
 
-    nrow = nx.ceil(tmax / binsize)
+    nrow = nx.ceil((tmax - tmin) / binsize)
     ncol = len(P)
 
     M = sparse.lil_matrix((nrow, ncol))
@@ -208,6 +210,8 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, trialave=
     fparams - specify feature parameters. this is normally done automatically,
               but it can be useful to force the parameters to a certain order
               in order to get different model matrices to match
+    tmin    - specify the first time point to include. useful for including some
+              additional spontaneous activity
     tmax    - specify the last time point to include in the output matrix.
               default is to figure this out from the toelis data but can be
               necessary for toelis's with few spikes
@@ -233,8 +237,11 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, trialave=
     P = set([])
     ftables = {}
     for stim in rtls.keys():
-        ftables[stim] = ftablefun(stim, mdb, **kwargs)
-        P.update(param_names(ftables[stim], **kwargs))
+        try:
+            ftables[stim] = ftablefun(stim, mdb, **kwargs)
+            P.update(param_names(ftables[stim], **kwargs))
+        except ValueError, e:
+            print "Warning: couldn't generate a feature table for %s, skipping" % stim
 
     if fparams==None:
         P = list(P)
@@ -243,10 +250,11 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, trialave=
     
     R = []
     MM = []
-    for stim, tl in rtls.items():
+    for stim, ftable in ftables.items():
+        tl = rtls[stim]
         tmax = def_tmax if def_tmax != None else tl.range[1]
         f = resprate(tl, binsize, kernwidth=kernwidth, onset=0, offset=tmax, trialave=trialave)[0]
-        M,P = ftabletomatrix(ftables[stim], params=P, tmax=tmax, **kwargs)
+        M,P = ftabletomatrix(ftable, params=P, tmax=tmax, **kwargs)
         if trialave:
             R.append(f)
             MM.append(M)
