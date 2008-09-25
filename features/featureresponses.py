@@ -178,14 +178,14 @@ def loadresponses(song, pattern='*%s*feats*.toe_lis', **kwargs):
 
     return tls
 
-def resprate(tl, binsize, kernwidth=None, onset=None, offset=None):
+def resprate(tl, binsize, kernwidth=None, onset=None, offset=None, trialave=True):
     kernwidth = binsize/2. if kernwidth == None else kernwidth
     r,g = kernrates(tl, 2, kernwidth, 'gaussian', onset=onset, offset=offset,
                     gridspacing=binsize)
-    return r.mean(1) * 1000, g
+    return (r.mean(1)*1000,g) if trialave else (r*1000,g)
 
 
-def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, **kwargs):
+def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, trialave=True, **kwargs):
     """
     Generates the design matrix and response vector for the simple additive model:
 
@@ -211,10 +211,14 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, **kwargs)
     tmax    - specify the last time point to include in the output matrix.
               default is to figure this out from the toelis data but can be
               necessary for toelis's with few spikes
+    trialave - if True, the response (r_t) is the average across the trials
+               if False, the responses in different trials are independent entries
+               in the model, leading to a much larger table
 
 
     Returns -
     X: a 2D sparse matrix with dimensions (nlags*nfeatures+1) by (T / binsize)
+       for trialave==True and (ntrials * T / binsize) for trialave==False
        the data for each permutation of the song are concatenated.  The columns
        are organized by feature first and then time lag.
     Y: a 1D dense vector with dimension (T / binsize)
@@ -241,10 +245,16 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, **kwargs)
     MM = []
     for stim, tl in rtls.items():
         tmax = def_tmax if def_tmax != None else tl.range[1]
-        f = resprate(tl, binsize, kernwidth=kernwidth, onset=0, offset=tmax)[0]
+        f = resprate(tl, binsize, kernwidth=kernwidth, onset=0, offset=tmax, trialave=trialave)[0]
         M,P = ftabletomatrix(ftables[stim], params=P, tmax=tmax, **kwargs)
-        R.append(f)
-        MM.append(M)
+        if trialave:
+            R.append(f)
+            MM.append(M)
+        else:
+            for j in range(f.shape[1]):
+                R.append(f[:,j])
+                MM.append(M)
+            
 
     return sparse.vstack(MM).tocsr(), nx.concatenate(R), P
 
@@ -329,7 +339,7 @@ if __name__=="__main__":
         if k.find('g') > -1:
             rtls.pop(k)
     
-    X,Y,F = make_additive_model(rtls, parser, ftablefun=genftable, **options)
+    X,Y,F = make_additive_model(rtls, parser, ftablefun=genftable, trialave=False, **options)
     A,Aerr = fit_additive_model(X,Y, **options)
     Ap = reshape_parameters(A, F)
 
