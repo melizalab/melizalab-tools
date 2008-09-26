@@ -105,7 +105,7 @@ def ftabletomatrix(ftable, **kwargs):
               this needs to be specified.
     ragged -  if False, use a fixed number of lags per feature (default). If
               true, the number of parameters is ceil(F_length / binsize) + nlags
-    tmin - the first time point to include in the analysis *(not implemented)
+    tmin - the first time point to include in the analysis 
     tmax - the maximum time point to include in the analysis
 
     Returns (M,P)
@@ -138,7 +138,7 @@ def ftabletomatrix(ftable, **kwargs):
 
     for feat in ftable:
         fname = _feattmpl % feat
-        fstart = int(feat['fstart'] / binsize)
+        fstart = int((feat['fstart'] - tmin)/ binsize)
 
         if ragged:
             nfeatlags = int(nx.ceil(1. * feat['flen'] / binsize) + nlags)
@@ -231,6 +231,7 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, trialave=
 
     binsize = kwargs.get('binsize', _binsize)
     kernwidth = kwargs.get('kernwidth', _kernwidth)
+    tmin = kwargs.get('tmin', 0)
     def_tmax = kwargs.pop('tmax', None)
 
     # need to generate a comprehensive list of all the features
@@ -253,7 +254,7 @@ def make_additive_model(rtls, mdb, ftablefun=readftable, fparams=None, trialave=
     for stim, ftable in ftables.items():
         tl = rtls[stim]
         tmax = def_tmax if def_tmax != None else tl.range[1]
-        f = resprate(tl, binsize, kernwidth=kernwidth, onset=0, offset=tmax, trialave=trialave)[0]
+        f = resprate(tl, binsize, kernwidth=kernwidth, onset=tmin, offset=tmax, trialave=trialave)[0]
         M,P = ftabletomatrix(ftable, params=P, tmax=tmax, **kwargs)
         if trialave:
             R.append(f)
