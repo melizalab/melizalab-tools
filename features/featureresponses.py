@@ -276,9 +276,7 @@ def fit_additive_model(X,Y, **kwargs):
 
     Returns:
     b - solution in vector form
-    bmat - solution in matrix form, with each column corresponding to a feature
-           (not returned if kwargs is missing meanresp and nlags arguments)
-    berr - standard errors of the coefficients (reshaped if bmat is included, otherwise not)
+    cov - variance-covariance matrix
     """
     assert X.shape[0]==Y.size, "Design matrix must have same number of rows as Y"
     
@@ -286,19 +284,17 @@ def fit_additive_model(X,Y, **kwargs):
     CSR = X.T * Y
     B = sparse.linalg.spsolve(CSS, CSR)
 
-    # standard errors
-    Yhat = B * X.T
-    S = nx.power(Yhat-Y,2).sum()
-    SE = nx.sqrt(S/(X.shape[0]-X.shape[1]) * nx.diag(linalg.inv(CSS.todense())))
+    return B,CSS
 
-    return B,SE
-
-def reshape_parameters(A, P):
+def reshape_parameters(A,P):
     """
     Reshapes a parameter vector into a dictionary, with a vector for each feature
+    Returns the reshaped values, as well as a dictionary with the indices, which
+    is useful for reshaping other vectors or the covariance matrix.
     """
 
     out = {}
+    indices = {}
     startind = 0
     if A.size > P.size:
         # assume that this is only the case when the first element is the mean response
@@ -310,12 +306,15 @@ def reshape_parameters(A, P):
     for fname in fnames:
         ind = [i for i,x in enumerate(P) if x.startswith(fname + '_')]
         V = nx.zeros(len(ind))
+        I = nx.zeros(len(ind), dtype='int16')
         for i in ind:
             lag = int(P[i].split('_')[-1])
             V[lag] = A[startind+i]
+            I[lag] = startind+i
         out[fname] = V
+        indices[fname] = I
         
-    return out
+    return out, indices
 
 
 if __name__=="__main__":
@@ -349,7 +348,7 @@ if __name__=="__main__":
             rtls.pop(k)
     
     X,Y,F = make_additive_model(rtls, parser, ftablefun=genftable, trialave=False, **options)
-    A,Aerr = fit_additive_model(X,Y, **options)
+    A,XtX = fit_additive_model(X,Y, **options)
     Ap = reshape_parameters(A, F)
 
     Yhat = A * X.T
