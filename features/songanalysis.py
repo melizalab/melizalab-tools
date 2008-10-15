@@ -60,14 +60,19 @@ from dlab.signalproc import spectro
 from pylab import figure, setp, draw
 import featureresponses as fresps
 from matplotlib import cm, rcParams, rcdefaults
-from motifdb import plotter
-import pdb
+from motifdb import db, plotter
 
 
 _stimdirs = [os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/'),
             os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/acute'),]
 
 _specthresh = 0.01
+
+# how to look up feature lengths
+feature_db = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/motifs_songseg.h5')
+featset = 0
+# where to look up the feature locations in feature noise
+_featloc_tables = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/feattables')
 
 
 def make_pdf(outfile, song, mdb, dir='', **kwargs):
@@ -77,18 +82,18 @@ def make_pdf(outfile, song, mdb, dir='', **kwargs):
 
 
     # load the data and see if there's feature data
-    rtls = fresps.loadresponses(song, dir=dir)
+    rtls = fresps.loadresponses(song, respdir=dir)
     have_feats = len(rtls) > 0
 
     if have_feats:
         # compute the model
-        tls, prec = collectfeatures(rtls, mdb)
-        X,Y,F = fresps.make_additive_model(rtls, mdb, dir=dir, **kwargs)
-        A,Amat = fresps.fit_additive_model(X,Y, **kwargs)
+        tls, prec = collectfeatures(rtls, mdb, **kwargs)
+        X,Y,P = fresps.make_additive_model(rtls, mdb, **kwargs)
+        A,Aerr = fresps.fit_additive_model(X,Y, **kwargs)
         Yhat = A * X.T
         comments += "\\item Fit CC: %3.4f\n" % nx.corrcoef(Y, Yhat)[0,1]
         if kwargs['meanresp']: comments += "\\item Mean firing rate (fit): %3.4f\n" % A[0]
-        f,fhat = xvalidate(song, A, mdb, dir=dir, **kwargs)
+        f,fhat = xvalidate(song, A, mdb, respdir=dir, **kwargs)
         comments += "\\item Song CC: %3.4f\n" % nx.corrcoef(f, fhat)[0,1]
         #print "Song CC: %3.4f\n" % nx.corrcoef(f, fhat)[0,1]
 
@@ -104,7 +109,7 @@ def make_pdf(outfile, song, mdb, dir='', **kwargs):
     fig = figure(figsize=(6.5,7.))
 
     #print "Plot song responses..."
-    plot_songresps(song, mdb, fig=fig, dir=dir,
+    plot_songresps(song, mdb, fig=fig, respdir=dir,
                    songpred=A if have_feats else None, **kwargs)
     ctp.plotfigure(fig)
 
@@ -115,13 +120,15 @@ def make_pdf(outfile, song, mdb, dir='', **kwargs):
         ctp.plotfigure(fig)
 
         # sort features by max response
-        maxresp = Amat.max(0)
+        Ap = fresps.reshape_parameters(A, P)
+        F = Ap.keys()
+        maxresp = nx.asarray([Ap[f].max() for f in F])
         ind = maxresp.argsort()[::-1]
 
         for i in ind:
             fig = figure(figsize=(6.5, 3.0))
             #print "Plot response to %s" % F[i]
-            plot_featresp_single(F[i], tls, mdb, Amat[:,i],
+            plot_featresp_single(F[i], tls, mdb, Ap[F[i]],
                                  neighbor_feats=prec, fig=fig, **kwargs)
             ctp.plotfigure(fig)
 
@@ -135,7 +142,7 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
     Generate the figure comparing responses to song and reconstruction
 
     Optional kwargs:
-    dir - the directory to analyze
+    respdir - the directory to analyze
     postpad - the amount of time after motif offset to keep events (default 200)
     songpred - Supply the coefficients of the linear model to plot predicted response
     """
@@ -392,7 +399,7 @@ def neighborfeatures(ftable, nreps, **kwargs):
                          nreps)) for i in range(len(F))])
 
 
-def splittoelis(tl, feattbl, postpad=None, abslen=600):
+def splittoelis(tl, feattbl, postpad=None, abslen=600, **kwargs):
     """
     Run through a toelis and split it into features.
 
@@ -425,21 +432,25 @@ if __name__=='__main__':
     if len(sys.argv) < 4:
         print __doc__
         sys.exit(-1)
+
     
-    mdb = fresps.db.motifdb(fresps.feature_db)
+    mdb = db.motifdb(feature_db)
     exampledir = "/z1/users/dmeliza/acute_data/st358/20080129/cell_4_2_2"
     song = 'C0'
     options = {'binsize' : 30,
                'nlags' : 10,
-               'meanresp' : True}
+               'meanresp' : True,
+               'stimdir' : _featloc_tables}
 
-    opts,args = getopt.getopt(sys.argv[1:], 'b:l:')
+    opts,args = getopt.getopt(sys.argv[1:], 'b:l:d:')
 
     for o,a in opts:
         if o=='-b':
             options['binsize'] = int(a)
         elif o=='-l':
             options['nlags'] = int(a)
+        elif o=='-d':
+            options['stimdir'] = a
 
     make_pdf(args[2], args[1], mdb, dir=args[0], **options)
 
