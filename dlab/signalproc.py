@@ -132,8 +132,10 @@ def istft(C, **kwargs):
     elif isinstance(window, str):
         W = get_window(window, nrows)
     elif len(window) != nrows:
-        window.resize(nrows, refcheck=True)    
-
+        W = nx.resize(window, nrows)
+    else:
+        W = window
+        
     W2 = nx.power(W,2)
 
     # we can assume that the imaginary component is extremely small if the
