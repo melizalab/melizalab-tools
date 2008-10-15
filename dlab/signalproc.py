@@ -182,7 +182,7 @@ def spectro(S, fun=stft, **kwargs):
     
     PSD = fun(S, **kwargs)
     if nx.iscomplexobj(PSD):
-        PSD = nx.absolute(PSD)  # compute power from full complex stft
+        PSD = nx.power(nx.absolute(PSD),2)  # compute power from full complex stft
     
     if not nx.iscomplexobj(S):
         if nx.remainder(nfft,2):
