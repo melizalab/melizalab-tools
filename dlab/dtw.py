@@ -14,6 +14,8 @@ Dynamic time warping is a three-step algorithm.
 If the signals are multivariate (e.g. spectrograms) then stage (1) requires
 a pretty careful choice of distance metric.
 
+
+
 CDM, 10/2008
  
 """
@@ -21,6 +23,8 @@ CDM, 10/2008
 import numpy as nx
 from linalg import gemm, outer
 from scipy import weave
+from scipy.fftpack import ifft
+from scipy.linalg import norm
 
 def dtw(M, C=None):
     """
@@ -38,9 +42,9 @@ def dtw(M, C=None):
 
     if C==None:
         C = ([1, 1, 1.0],[0, 1, 1.0],[1, 0, 1.0])
-    C = nx.asarray(C)
+    C = nx.asarray(C, dtype=M.dtype)
 
-    assert C.ndim == 2 and C.shape[0]==3, "C must be a 3xN array"
+    assert C.ndim == 2 and C.shape[1]==3, "C must be an Nx3 array"
     assert nx.isfinite(M).sum()==M.size, "M can only contain finite values"
     if M.min() < 0: print "Warning: M contins negative values"
 
@@ -95,6 +99,21 @@ def dtw(M, C=None):
 
     return nx.asarray(p[::-1]), nx.asarray(q[::-1]), D
 
+def warpindex(S1, S2, p, q, forward=True):
+    """
+    Generates an index vector for warping S1 to S2 (default) or
+    S2 to S1 (forward=False)
+    """
+    if not forward:
+        S2,S1 = S1,S2
+        q,p = p,q
+    
+    D2i1 = nx.zeros(S1.shape[1], dtype='i')
+    for i in range(D2i1.size):
+        D2i1[i] = q[ (p >= i).nonzero()[0].min() ]
+
+    return D2i1
+    
                 
 def dist_cos(S1, S2):
     """
@@ -109,10 +128,44 @@ def dist_cos(S1, S2):
     return gemm(S1, S2, trans_a=1) / outer(E1, E2, overwrite_a=1)
 
 def dist_eucl(S1, S2):
+    """
+    Compute the euclidean distance between the frames of S1 and S2.
+    """
+    # Expand distance formula: d_{i,j}^2 = b_{ii}^2 + b_{jj}^2 - 2 * b_{ij}
+    # This lets us use dot products and broadcasting to calculate the outer products/sums
+    E1 = (S1**2).sum(0)
+    E2 = (S2**2).sum(0)
 
-    assert S1.shape[0] == S2.shape[0], "Signals must have the same number of points"
+    return nx.sqrt(E1[:,nx.newaxis] + E2 + gemm(S1,S2,alpha=-2.0,trans_a=1))
 
-    return nx.sqrt(((S1 - S2)**2).sum(0))
+
+def dist_logspec(S1,S2):
+
+    n = S1.shape[1]
+    m = S2.shape[1]
+
+    D = nx.zeros((n,m))
+
+    for i in range(n):
+        for j in range(m):
+            D[i,j] = (nx.log10(S1[:,i] / S2[:,j])**2).sum()
+            #D[i,j] = nx.log((S1[:,i] / S2[:,j]).mean())
+
+    return D
+
+def dist_ceptrum(S1,S2):
+    n = S1.shape[1]
+    m = S2.shape[1]
+
+    D = nx.zeros((n,m))
+    SS1 = ifft(nx.log10(nx.sqrt(S1)), axis=0)
+    SS2 = ifft(nx.log10(nx.sqrt(S2)), axis=0)    
+
+    for i in range(n):
+        for j in range(m):
+            D[i,j] = norm(SS1[:,i] - SS2[:,j])
+
+    return D
 
 if __name__=="__main__":
 
@@ -124,7 +177,8 @@ if __name__=="__main__":
     example_dir = os.path.join(os.environ['HOME'], 'giga/data/motifdtw')
     examples = ['st398_song_1_sono_33_49223_49815.wav',
                 'st398_song_1_sono_14_27151_27790.wav',
-                'st398_song_1_sono_14_27845_28435.wav']
+                'st398_song_1_sono_14_27845_28435.wav',
+                'st398_song_1_sono_34_20099_20862.wav']
 
     S = []
     for example in examples:
