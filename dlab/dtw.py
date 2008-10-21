@@ -25,6 +25,7 @@ from linalg import gemm, outer
 from scipy import weave
 from scipy.fftpack import ifft
 from scipy.linalg import norm
+import mdp
 
 def dtw(M, C=None):
     """
@@ -113,6 +114,24 @@ def warpindex(S1, S2, p, q, forward=True):
         D2i1[i] = q[ (p >= i).nonzero()[0].min() ]
 
     return D2i1
+
+def repr_spec(s, nfft, shift, Fs, der=True):
+    """
+    Calculates a spectrographic representation of the signal s using adaptive
+    multitaper estimates of the spectral power.  If der is True, augments the
+    spectrogram with the time-derivative at each point.
+
+    Units are in dB and dB/frame
+    The first and last five columns are dropped to avoid rolloff issues.
+
+    """
+    spec = signalproc.spectro(s, fun=signalproc.mtmspec, Fs=Fs, nfft=nfft, shift=shift)[0][:,:-5]
+    spec = nx.log(spec) * 10
+    if der:
+        dspec = nx.diff(spec, axis=1)
+        return nx.concatenate([dspec, spec[:,1:]], axis=0)
+
+    return spec[:,1:]
     
                 
 def dist_cos(S1, S2):
@@ -138,6 +157,17 @@ def dist_eucl(S1, S2):
 
     return nx.sqrt(E1[:,nx.newaxis] + E2 + gemm(S1,S2,alpha=-2.0,trans_a=1))
 
+def dist_eucl_wh(S1, S2, output_var=0.9):
+    """
+    Computes euclidean distance between frames of S1 and S2 after whitening (using PCA)
+    output_var controls which principal components are used (up to output_var explained variance)
+    """
+    node = mdp.nodes.WhiteningNode(output_dim=output_var)
+    node.train(S1.T)
+    node.train(S2.T)
+    node.stop_training()
+
+    return dist_eucl(node(S1.T).T, node(S2.T).T)
 
 def dist_logspec(S1,S2):
 
@@ -172,22 +202,72 @@ if __name__=="__main__":
     import os
     from dlab import pcmio, signalproc
 
+    # FFT parameters
     nfft = 512
     shift = 50
+
+    # "standard" DTW cost matrix:
+    costs = [[1,1,1],[1,0,1],[0,1,1]]
+    # tends to produce smoother paths:
+    costs = [[1,1,1],[1,0,1],[0,1,1],[1,2,2],[2,1,2]]
+    # prevents more than one frame from being omitted from either signal
+    costs = [[1,1,1],[1,2,2],[2,1,2]]
+
+    # example data
     example_dir = os.path.join(os.environ['HOME'], 'giga/data/motifdtw')
     examples = ['st398_song_1_sono_33_49223_49815.wav',
-                'st398_song_1_sono_14_27151_27790.wav',
                 'st398_song_1_sono_14_27845_28435.wav',
-                'st398_song_1_sono_34_20099_20862.wav']
+                'st398_song_1_sono_14_27151_27790.wav',
+                'st398_song_1_sono_34_20099_20862.wav',
+                'st398_song_1_sono_34_25580_26554.wav']
 
     S = []
+    sigwhite = mdp.nodes.WhiteningNode(output_dim=0.9)
     for example in examples:
         fp = pcmio.sndfile(os.path.join(example_dir, example))
         s = fp.read()
         Fs = fp.framerate
 
-        spec = signalproc.spectro(s, fun=signalproc.mtmspec, Fs=Fs, nfft=nfft, shift=shift)[0]
+        # generate the feature vectors
+        spec = repr_spec(s, nfft, shift, Fs, der=False)
         S.append(spec)
+        sigwhite.train(spec.T)
 
+    SW = [sigwhite(spec.T).T for spec in S]
 
-    Z = dist_cos(S[0], S[1])
+    # also try z-scoring the data
+    SS = nx.concatenate(S, axis=1)
+    freqmean = SS.mean(1)
+    freqvar = SS.var(1)
+
+    SZ = [(spec - freqmean[:,nx.newaxis]) / nx.sqrt(freqvar[:,nx.newaxis]) for spec in S]
+
+    nsignals = len(S)
+    gDist = nx.zeros((nsignals, nsignals))
+    gDistPCA = nx.zeros_like(gDist)
+    gDistPCAL = nx.zeros_like(gDist)
+    gDistZSC = nx.zeros_like(gDist)
+    for i in range(nsignals):
+        for j in range(i+1, nsignals):
+            # compute local distances
+            E = dist_eucl(S[i], S[j])
+            # dynamic time warping
+            p,q,D = dtw(E, C = costs)
+            # normalized global distance
+            gDist[i,j] = D[-1,-1] / p.size
+
+            # compute local distances after whitening (using all the stimuli)
+            W = dist_eucl(SW[i], SW[j])
+            p,q,D = dtw(W, C = costs)
+            gDistPCA[i,j] = D[-1,-1] / p.size
+
+            # whitening using pairs of stimuli
+            WW = dist_eucl_wh(S[i], S[j])
+            p,q,D = dtw(WW, C = costs)
+            gDistPCAL[i,j] = D[-1,-1] / p.size
+
+            # compute local distances after z-scoring
+            Z = dist_eucl(SZ[i], SZ[j])
+            p,q,D = dtw(Z, C = costs)                
+            gDistZSC[i,j] = D[-1,-1] / p.size
+
