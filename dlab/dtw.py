@@ -201,6 +201,7 @@ if __name__=="__main__":
 
     import os
     from dlab import pcmio, signalproc
+    from pylab import figure, cm, show
 
     # FFT parameters
     nfft = 512
@@ -236,17 +237,16 @@ if __name__=="__main__":
     SW = [sigwhite(spec.T).T for spec in S]
 
     # also try z-scoring the data
-    SS = nx.concatenate(S, axis=1)
-    freqmean = SS.mean(1)
-    freqvar = SS.var(1)
-
-    SZ = [(spec - freqmean[:,nx.newaxis]) / nx.sqrt(freqvar[:,nx.newaxis]) for spec in S]
+    #SS = nx.concatenate(S, axis=1)
+    #freqmean = SS.mean(1)
+    #freqvar = SS.var(1)
+    #SZ = [(spec - freqmean[:,nx.newaxis]) / nx.sqrt(freqvar[:,nx.newaxis]) for spec in S]
 
     nsignals = len(S)
     gDist = nx.zeros((nsignals, nsignals))
     gDistPCA = nx.zeros_like(gDist)
     gDistPCAL = nx.zeros_like(gDist)
-    gDistZSC = nx.zeros_like(gDist)
+    gDistCOS = nx.zeros_like(gDist)
     for i in range(nsignals):
         for j in range(i+1, nsignals):
             # compute local distances
@@ -266,8 +266,25 @@ if __name__=="__main__":
             p,q,D = dtw(WW, C = costs)
             gDistPCAL[i,j] = D[-1,-1] / p.size
 
-            # compute local distances after z-scoring
-            Z = dist_eucl(SZ[i], SZ[j])
-            p,q,D = dtw(Z, C = costs)                
-            gDistZSC[i,j] = D[-1,-1] / p.size
+            # compute local distances using cosine
+            AC = dist_cos(S[i], S[j])
+            p,q,D = dtw(1 - AC, C = costs)                
+            gDistCOS[i,j] = D[-1,-1] / p.size
 
+    i = 0
+    j = 2
+    fig = figure()
+    ax = fig.add_subplot(221)
+    X = dist_eucl(S[i],S[j])
+    ax.imshow(X, cmap=cm.Greys_r, interpolation='nearest')
+              
+    ax = fig.add_subplot(222)
+    ax.imshow(1 - dist_cos(S[i],S[j]), cmap=cm.Greys_r, interpolation='nearest')
+
+    ax = fig.add_subplot(223)
+    ax.imshow(dist_eucl(SW[i],SW[j]), cmap=cm.Greys_r, interpolation='nearest')
+
+    ax = fig.add_subplot(224)
+    ax.imshow(dist_eucl_wh(S[i],S[j]), cmap=cm.Greys_r, interpolation='nearest')
+
+    show()
