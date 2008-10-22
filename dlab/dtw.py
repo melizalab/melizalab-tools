@@ -98,7 +98,22 @@ def dtw(M, C=None):
         p.append(i)
         q.append(j)
 
-    return nx.asarray(p[::-1]), nx.asarray(q[::-1]), D
+    return nx.asarray(p[::-1], dtype='i'), nx.asarray(q[::-1], dtype='i'), D
+
+def pathlen(p, q):
+    """
+    Computes the length of the DTW path. Normally this is just the
+    size of the index vectors, but if the step-cost function has
+    double steps (e.g. (1,2)) this has to be corrected.  Given a step
+    size (x,y) the length of the step is defined as max(x,y), and the
+    total math length is the sum of all the distances.
+    """
+
+    P = nx.diff(p)
+    Q = nx.diff(q)
+
+    return nx.sum(nx.maximum(P,Q))
+    
 
 def warpindex(S1, S2, p, q, forward=True):
     """
@@ -115,23 +130,23 @@ def warpindex(S1, S2, p, q, forward=True):
 
     return D2i1
 
-def repr_spec(s, nfft, shift, Fs, der=True):
+def repr_spec(s, nfft, shift, Fs, der=True, padding=1):
     """
     Calculates a spectrographic representation of the signal s using adaptive
     multitaper estimates of the spectral power.  If der is True, augments the
     spectrogram with the time-derivative at each point.
 
     Units are in dB and dB/frame
-    The first and last five columns are dropped to avoid rolloff issues.
+    <padding> columns are dropped from either end of the spectrogram to reduce rolloff issues
 
     """
-    spec = signalproc.spectro(s, fun=signalproc.mtmspec, Fs=Fs, nfft=nfft, shift=shift)[0][:,:-5]
+    spec = signalproc.spectro(s, fun=signalproc.mtmspec, Fs=Fs, nfft=nfft, shift=shift)[0]
     spec = nx.log(spec) * 10
     if der:
         dspec = nx.diff(spec, axis=1)
         return nx.concatenate([dspec, spec[:,1:]], axis=0)
 
-    return spec[:,1:]
+    return spec[:,padding:-padding]
     
                 
 def dist_cos(S1, S2):
@@ -144,7 +159,7 @@ def dist_cos(S1, S2):
     E1 = nx.sqrt((S1**2).sum(0))
     E2 = nx.sqrt((S2**2).sum(0))
 
-    return gemm(S1, S2, trans_a=1) / outer(E1, E2, overwrite_a=1)
+    return 1 - gemm(S1, S2, trans_a=1) / outer(E1, E2, overwrite_a=1)
 
 def dist_eucl(S1, S2):
     """
@@ -200,12 +215,16 @@ def dist_ceptrum(S1,S2):
 if __name__=="__main__":
 
     import os
-    from dlab import pcmio, signalproc
+    from dlab import pcmio, signalproc, labelio
     from pylab import figure, cm, show
+    from rpy import r
+    r.library('fpc')
+    r.library('MASS')
 
     # FFT parameters
-    nfft = 512
-    shift = 50
+    window = 10.  # ms
+    shift = 2.
+    padding = 5  # number of frames to use for padding the spectrogram; these are cut off later
 
     # "standard" DTW cost matrix:
     costs = [[1,1,1],[1,0,1],[0,1,1]]
@@ -216,75 +235,121 @@ if __name__=="__main__":
 
     # example data
     example_dir = os.path.join(os.environ['HOME'], 'giga/data/motifdtw')
-    examples = ['st398_song_1_sono_33_49223_49815.wav',
-                'st398_song_1_sono_14_27845_28435.wav',
-                'st398_song_1_sono_14_27151_27790.wav',
-                'st398_song_1_sono_34_20099_20862.wav',
-                'st398_song_1_sono_34_25580_26554.wav']
+    examples = ['st398_song_1_sono_12_4152_30231',
+                'st398_song_1_sono_3_10245_33893',]
+
+    # compute some cluster statistics using similar motifs
+    # note  - the fourth cluster is potentially problematic; the variants are quite different
+    motclusts = [(4,5,33,34),(27,28,56,57,58),(7,8,40),(22,51,23,52),(24,25,53,54),
+                 (10,11,12,13,14,43,44,45)]
+    clustind = nx.concatenate([(i+1,) * len(x) for i,x in enumerate(motclusts)])
+    motclusts = nx.concatenate(motclusts)
 
     S = []
+    motdur = []
     sigwhite = mdp.nodes.WhiteningNode(output_dim=0.9)
     for example in examples:
-        fp = pcmio.sndfile(os.path.join(example_dir, example))
+        fp = pcmio.sndfile(os.path.join(example_dir, example + '.wav'))
         s = fp.read()
         Fs = fp.framerate
+        nfft = window * Fs / 1000
+        fshift = shift * Fs / 1000
 
-        # generate the feature vectors
-        spec = repr_spec(s, nfft, shift, Fs, der=False)
-        S.append(spec)
-        sigwhite.train(spec.T)
+        # load the associated label file and segment the song into motifs
+        lbl = labelio.readfile(os.path.join(example_dir, example + '.lbl'))
+        for motif in lbl.epochs:
+            mstart, mstop, label = motif
+            if label != 'm' or mstart==mstop: continue
+            # grab some extra frames on either side
+            istart = int((mstart - padding * shift / 1000) * Fs)
+            istop = int((mstop + padding * shift / 1000) * Fs) + 1
 
+            # generate the feature vectors
+            spec = repr_spec(s[istart:istop], nfft, fshift, Fs, der=False, padding=padding)
+            S.append(spec)
+            sigwhite.train(spec.T)
+
+            motdur.append((mstop - mstart) * 1000)
+
+    # calculate whitened spectrograms
+    sigwhite.stop_training()
     SW = [sigwhite(spec.T).T for spec in S]
 
-    # also try z-scoring the data
-    #SS = nx.concatenate(S, axis=1)
-    #freqmean = SS.mean(1)
-    #freqvar = SS.var(1)
-    #SZ = [(spec - freqmean[:,nx.newaxis]) / nx.sqrt(freqvar[:,nx.newaxis]) for spec in S]
+    motdur = nx.asarray(motdur)[motclusts]
 
-    nsignals = len(S)
-    gDist = nx.zeros((nsignals, nsignals))
-    gDistPCA = nx.zeros_like(gDist)
-    gDistPCAL = nx.zeros_like(gDist)
-    gDistCOS = nx.zeros_like(gDist)
-    for i in range(nsignals):
-        for j in range(i+1, nsignals):
-            # compute local distances
-            E = dist_eucl(S[i], S[j])
-            # dynamic time warping
-            p,q,D = dtw(E, C = costs)
-            # normalized global distance
-            gDist[i,j] = D[-1,-1] / p.size
+    print "Calculated spectrograms of %d motifs" % len(S)
 
-            # compute local distances after whitening (using all the stimuli)
-            W = dist_eucl(SW[i], SW[j])
-            p,q,D = dtw(W, C = costs)
-            gDistPCA[i,j] = D[-1,-1] / p.size
+    # define the comparisons to try:
+    methods = {'euclid': (dist_eucl, S),
+               'eucl_pca' : (dist_eucl, SW),
+               'cos' : (dist_cos, S)}
 
-            # whitening using pairs of stimuli
-            WW = dist_eucl_wh(S[i], S[j])
-            p,q,D = dtw(WW, C = costs)
-            gDistPCAL[i,j] = D[-1,-1] / p.size
-
-            # compute local distances using cosine
-            AC = dist_cos(S[i], S[j])
-            p,q,D = dtw(1 - AC, C = costs)                
-            gDistCOS[i,j] = D[-1,-1] / p.size
-
-    i = 0
-    j = 2
+    # only analyze selected comparisons for speed
+    nsignals = motclusts.size
     fig = figure()
-    ax = fig.add_subplot(221)
-    X = dist_eucl(S[i],S[j])
-    ax.imshow(X, cmap=cm.Greys_r, interpolation='nearest')
-              
-    ax = fig.add_subplot(222)
-    ax.imshow(1 - dist_cos(S[i],S[j]), cmap=cm.Greys_r, interpolation='nearest')
+    nplots = len(methods)
+    pl = 1
+    for method,params in methods.items():
+        print "Computing distances using %s" % method
+        gDist = nx.zeros((nsignals, nsignals))
+        
+        for i in range(nsignals):
+            for j in range(i+1, nsignals):
+                # compute local distances
+                distfun = params[0]
+                Xi = params[1][motclusts[i]]
+                Xj = params[1][motclusts[j]]
+                d = distfun(Xi, Xj)
+                # dynamic time warping
+                p,q,D = dtw(d, C = costs)
+                # normalized global distance
+                Dij = D[-1,-1] / pathlen(p,q)
+                if not nx.isfinite(Dij):
+                    gDist[i,j] = nx.nan
+                else:
+                    gDist[i,j] = Dij
 
-    ax = fig.add_subplot(223)
-    ax.imshow(dist_eucl(SW[i],SW[j]), cmap=cm.Greys_r, interpolation='nearest')
+        # nx.savetxt('gDist_%s.tbl' % method, gDist, delimiter='\t')
+        # compute cluster statistics on example stimuli
+        # cDist = gDist[:,motclusts][motclusts,:]
+        gDist = gDist + gDist.T
+        nx.savetxt('gDist_%s.tbl' % method, gDist, delimiter='\t')
 
-    ax = fig.add_subplot(224)
-    ax.imshow(dist_eucl_wh(S[i],S[j]), cmap=cm.Greys_r, interpolation='nearest')
+        # deal with missing values (stimuli are too different in length to warp) by giving
+        # the comparison the maximum value
+        gDist[~nx.isfinite(gDist)] = nx.nanmax(gDist)
+
+        cstats = r.cluster_stats(gDist, clustind)
+        zz = r.isoMDS(gDist)['points']
+
+        ax = fig.add_subplot(nplots, 2, pl)
+        ax.imshow(gDist, cmap=cm.Greys_r, interpolation='nearest')
+        ax.set_title(method)
+        ax = fig.add_subplot(nplots, 2, pl+1)
+        ax.scatter(zz[:,0], zz[:,1], 50, clustind)
+        ttl = 'Silh: %(avg.silwidth)3.3f  Dunn: %(dunn)3.3f  Hub: %(hubertgamma)3.3f  WBrat: %(wb.ratio)3.3f'
+        ax.set_title(ttl % cstats)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        pl += 2
 
     show()
+
+##     i = 0
+##     j = 2
+##     fig = figure()
+##     ax = fig.add_subplot(221)
+##     X = dist_eucl(S[i],S[j])
+##     ax.imshow(X, cmap=cm.Greys_r, interpolation='nearest')
+              
+##     ax = fig.add_subplot(222)
+##     ax.imshow(1 - dist_cos(S[i],S[j]), cmap=cm.Greys_r, interpolation='nearest')
+
+##     ax = fig.add_subplot(223)
+##     ax.imshow(dist_eucl(SW[i],SW[j]), cmap=cm.Greys_r, interpolation='nearest')
+
+##     ax = fig.add_subplot(224)
+##     ax.imshow(dist_eucl_wh(S[i],S[j]), cmap=cm.Greys_r, interpolation='nearest')
+
+##     show()
