@@ -125,8 +125,8 @@ def tfrrsp_hm(S, **kwargs):
     onset = kwargs.get('onset',0)
     offset = kwargs.get('offset',0)
     shift = kwargs.get('shift',10)
-    zoomf = int(kwargs.get('zoomf',1))
-    zoomt = int(kwargs.get('zoomt',1))
+    zoomf = float(kwargs.get('zoomf',1))
+    zoomt = float(kwargs.get('zoomt',1))
 
     h,Dh,tt = hermf(Nh, order, tm)
 
@@ -329,8 +329,8 @@ def _reassign(q, dt, tdispl, fdispl, **kwargs):
     qthresh = float(kwargs.get('qthresh',0.0))
     FL = kwargs.get('freql',0.01)
     TL = kwargs.get('timel',50)
-    ZF = int(kwargs.get('zoomf',1))
-    ZT = int(kwargs.get('zoomt',1))
+    ZF = float(kwargs.get('zoomf',1.))
+    ZT = float(kwargs.get('zoomt',1.))
 
     qshape = q.shape
     arr = nx.zeros([q.shape[0] * ZF, q.shape[1] * ZT], dtype=q.dtype)
