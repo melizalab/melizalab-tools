@@ -26,6 +26,7 @@ from scipy import weave
 from scipy.fftpack import ifft
 from scipy.linalg import norm
 import mdp
+import signalproc
 
 def dtw(M, C=None):
     """
@@ -130,21 +131,23 @@ def warpindex(S1, S2, p, q, forward=True):
 
     return D2i1
 
-def repr_spec(s, nfft, shift, Fs, der=True, padding=1):
+def repr_spec(s, nfft, shift, Fs, der=True, padding=1, meanpow=0.0):
     """
     Calculates a spectrographic representation of the signal s using adaptive
     multitaper estimates of the spectral power.  If der is True, augments the
     spectrogram with the time-derivative at each point.
 
     Units are in dB and dB/frame
+    <meanpow> is subtracted from the spectrogram - useful to make the spectrogram and derivative
+              have a similar mean
     <padding> columns are dropped from either end of the spectrogram to reduce rolloff issues
 
     """
     spec = signalproc.spectro(s, fun=signalproc.mtmspec, Fs=Fs, nfft=nfft, shift=shift)[0]
-    spec = nx.log(spec) * 10
+    spec = nx.log(spec) * 10 - meanpow
     if der:
         dspec = nx.diff(spec, axis=1)
-        return nx.concatenate([dspec, spec[:,1:]], axis=0)
+        return nx.concatenate((spec[:,(padding+1):-padding], dspec[:,padding:-padding]), axis=0)
 
     return spec[:,padding:-padding]
     
@@ -215,7 +218,7 @@ def dist_ceptrum(S1,S2):
 if __name__=="__main__":
 
     import os
-    from dlab import pcmio, signalproc, labelio
+    from dlab import pcmio, labelio
     from pylab import figure, cm, show
     from rpy import r
     r.library('fpc')
@@ -252,8 +255,10 @@ if __name__=="__main__":
         fp = pcmio.sndfile(os.path.join(example_dir, example + '.wav'))
         s = fp.read()
         Fs = fp.framerate
-        nfft = window * Fs / 1000
+        nfft = int(window * Fs / 1000)
         fshift = shift * Fs / 1000
+
+        meanpow = nx.log10(nx.sqrt(s.var())) * 10
 
         # load the associated label file and segment the song into motifs
         lbl = labelio.readfile(os.path.join(example_dir, example + '.lbl'))
@@ -265,7 +270,8 @@ if __name__=="__main__":
             istop = int((mstop + padding * shift / 1000) * Fs) + 1
 
             # generate the feature vectors
-            spec = repr_spec(s[istart:istop], nfft, fshift, Fs, der=False, padding=padding)
+            spec = repr_spec(s[istart:istop], nfft, fshift, Fs, der=True,
+                             padding=padding, meanpow=meanpow)
             S.append(spec)
             sigwhite.train(spec.T)
 
@@ -274,6 +280,8 @@ if __name__=="__main__":
     # calculate whitened spectrograms
     sigwhite.stop_training()
     SW = [sigwhite(spec.T).T for spec in S]
+    print "%d dimensions account for %3.2f%% of the variance" % (sigwhite.output_dim,
+                                                                 sigwhite.explained_variance * 100)
 
     motdur = nx.asarray(motdur)[motclusts]
 
