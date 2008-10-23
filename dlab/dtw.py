@@ -26,7 +26,7 @@ from scipy import weave
 from scipy.fftpack import ifft
 from scipy.linalg import norm
 import mdp
-import signalproc
+import signalproc, spectools, tfr
 
 def dtw(M, C=None):
     """
@@ -131,26 +131,31 @@ def warpindex(S1, S2, p, q, forward=True):
 
     return D2i1
 
-def repr_spec(s, nfft, shift, Fs, der=True, padding=1, meanpow=0.0):
+def repr_spec(s, nfft, shift, Fs, der=False, padding=1):
     """
     Calculates a spectrographic representation of the signal s using adaptive
     multitaper estimates of the spectral power.  If der is True, augments the
     spectrogram with the time-derivative at each point.
 
-    Units are in dB and dB/frame
-    <meanpow> is subtracted from the spectrogram - useful to make the spectrogram and derivative
-              have a similar mean
+    Units are in B and B/frame
     <padding> columns are dropped from either end of the spectrogram to reduce rolloff issues
 
     """
     spec = signalproc.spectro(s, fun=signalproc.mtmspec, Fs=Fs, nfft=nfft, shift=shift)[0]
-    spec = nx.log(spec) * 10 - meanpow
+    spec = nx.log10(spec)
     if der:
         dspec = nx.diff(spec, axis=1)
         return nx.concatenate((spec[:,(padding+1):-padding], dspec[:,padding:-padding]), axis=0)
 
     return spec[:,padding:-padding]
-    
+
+def repr_tfr(s, nfft, shift, Fs, padding=1):
+    """
+    Calculates the time-frequency reassignment spectrogram of the stimulus.
+    """
+    spec = signalproc.spectro(s, fun=tfr.tfrrsp_hm, Fs=Fs, nfft=nfft, Nh=nfft, shift=shift)[0]
+    return spec[:,padding:-padding]
+
                 
 def dist_cos(S1, S2):
     """
@@ -249,16 +254,16 @@ if __name__=="__main__":
     motclusts = nx.concatenate(motclusts)
 
     S = []
+    T = []
     motdur = []
-    sigwhite = mdp.nodes.WhiteningNode(output_dim=0.9)
+    specwhite = mdp.nodes.WhiteningNode(output_dim=0.9)
+    tfrwhite = mdp.nodes.WhiteningNode(output_dim=0.9)
     for example in examples:
         fp = pcmio.sndfile(os.path.join(example_dir, example + '.wav'))
         s = fp.read()
         Fs = fp.framerate
         nfft = int(window * Fs / 1000)
         fshift = shift * Fs / 1000
-
-        meanpow = nx.log10(nx.sqrt(s.var())) * 10
 
         # load the associated label file and segment the song into motifs
         lbl = labelio.readfile(os.path.join(example_dir, example + '.lbl'))
@@ -270,27 +275,41 @@ if __name__=="__main__":
             istop = int((mstop + padding * shift / 1000) * Fs) + 1
 
             # generate the feature vectors
-            spec = repr_spec(s[istart:istop], nfft, fshift, Fs, der=True,
-                             padding=padding, meanpow=meanpow)
+            spec = repr_spec(s[istart:istop], nfft, fshift, Fs, padding=padding)
+            tspec = repr_tfr(s[istart:istop], nfft, fshift, Fs, padding=padding)
+            tspec_thresh = tspec.max() / 1e6
+            tspec = nx.log10(tspec + tspec_thresh)
+            
             S.append(spec)
-            sigwhite.train(spec.T)
+            T.append(tspec)
+            specwhite.train(spec.T)
+            tfrwhite.train(tspec.T)
 
             motdur.append((mstop - mstart) * 1000)
 
     # calculate whitened spectrograms
-    sigwhite.stop_training()
-    SW = [sigwhite(spec.T).T for spec in S]
-    print "%d dimensions account for %3.2f%% of the variance" % (sigwhite.output_dim,
-                                                                 sigwhite.explained_variance * 100)
+    specwhite.stop_training()
+    SW = [specwhite(spec.T).T for spec in S]
+    print "MTM spectrograms: %d dimensions account for %3.2f%% of the variance" % (specwhite.output_dim,
+                                                                 specwhite.explained_variance * 100)
+
+    # calculate whitened tfr spectros
+    tfrwhite.stop_training()
+    TW = [tfrwhite(tspec.T).T for tspec in T]
+    print "TFR spectrograms: %d dimensions account for %3.2f%% of the variance" % (tfrwhite.output_dim,
+                                                                 tfrwhite.explained_variance * 100)
 
     motdur = nx.asarray(motdur)[motclusts]
 
     print "Calculated spectrograms of %d motifs" % len(S)
 
     # define the comparisons to try:
-    methods = {'euclid': (dist_eucl, S),
-               'eucl_pca' : (dist_eucl, SW),
-               'cos' : (dist_cos, S)}
+    methods = {'euclid_mtm': (dist_eucl, S),
+               'eucl_pca_mtm' : (dist_eucl, SW),
+               'cos_mtm' : (dist_cos, S),
+               'euclid_tfr': (dist_eucl, T),
+               'eucl_pca_tfr' : (dist_eucl, TW),
+               'cos_tfr' : (dist_cos, T)}
 
     # only analyze selected comparisons for speed
     nsignals = motclusts.size
