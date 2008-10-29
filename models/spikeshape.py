@@ -15,8 +15,7 @@ import os, sys, re, glob, tables
 import numpy as nx
 from scipy import io
 from scipy.stats import randint
-from spikes import _readklu, extractor
-from dlab import _pcmseqio, explog
+from mspikes import _readklu, extractor, _pcmseqio, explog
 from dlab.datautils import filecache
 
 
@@ -127,7 +126,7 @@ def extractspikes(elog, channel, spiketimes, filebase='.', window=50):
         atime1 = atime0 + entry['duration']
         events = spiketimes[(spiketimes > atime0) & (spiketimes < atime1)]
         ffp = fcache[os.path.join(filebase, file['filebase'])]
-        ffp.seek(file['entry'])
+        ffp.entry = file['entry']
         S = ffp.read()
         S.shape = (S.size, 1)
         spikes.append(extractor.extract_spikes(S, events - atime0, window=window))

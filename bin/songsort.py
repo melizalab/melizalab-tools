@@ -63,7 +63,7 @@ if __name__=="__main__":
         if not os.path.exists(fentry['filebase']):
             continue
         fp = fcache[fentry['filebase']]
-        fp.seek(fentry['entry'])
+        fp.entry = fentry['entry']
         sout = "%s/%d: start %d, stop %d" % (fentry['filebase'], fentry['entry'],
                                              start, stop)
 
@@ -88,7 +88,7 @@ if __name__=="__main__":
                 fname_out = fname_nois
 
             if fp_out.nframes > 0:
-                fp_out.seek(fp_out.entry+1)
+                fp_out.entry += 1
                 
             fp_out.timestamp = lasttimestamp
             fp_out.framerate = fp.framerate  # this shouldn't be different
