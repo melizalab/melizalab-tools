@@ -35,7 +35,7 @@ def stft(S, **kwargs):
 
     grid  - an array of integer onsets. No value may exceed the length
             of the input array
-            
+    
     onset  - starting sample of the input signal (default 0)
     offset - ending offset (relative to signal length)
     shift  - number of samples to shift the window by (default 10)
@@ -163,15 +163,16 @@ def spectro(S, fun=stft, **kwargs):
     power spectrum.
 
     fun - the function that computes the time-frequency density
-          from the signal S.  If the result of this function is
+          from the (real) signal S.  If the result of this function is
           complex, the spectrogram is symmetric, and only the unique
           rows of the output are returned.  If the result of <fun>
           is real, the power spectrum is assumed to have been already
           cut in half and converted to power.
           
-    Fs - the sampling rate of the signal, in Hz (default 20 kHz)
-    nfft - the number of frequency bins to use
-    shift - temporal resolution of the spectrogram, in # of samples
+    Fs     - the sampling rate of the signal, in Hz (default 20 kHz)
+    nfft   - the number of frequency bins to use
+    shift  - temporal resolution of the spectrogram, in # of samples
+    fpass  - range of frequencies to return (default [0,Fs/2]) for
 
     Returns a tuple (PSD, T, F), where T and F are the bins
     for time and frequency
@@ -184,26 +185,12 @@ def spectro(S, fun=stft, **kwargs):
     if nx.iscomplexobj(PSD):
         PSD = nx.power(nx.absolute(PSD),2)  # compute power from full complex stft
     
-    if not nx.iscomplexobj(S):
-        if nx.remainder(nfft,2):
-            nfft = (nfft+1)/2
-            PSD = PSD[0:nfft, :]
-            # double all frequencies except DC
-            PSD[1:,:] *= 2
-        else:
-            nfft = nfft/2+1
-            PSD = PSD[0:nfft,:]
-            # double all frequencies except DC and nyquist
-            PSD[1:-1,:] *= 2
-        F = nx.arange(0, Fs/2., (Fs/2.)/PSD.shape[0])
-    else:
-        F = nx.arange(-Fs/2., Fs/2., float(Fs)/PSD.shape[0])
+    # in matlab's code the power is doubled for all freqs except DC and nyq -- is this really necessary?
+    fpass = kwargs.get('fpass', (0, Fs/2.))
+    F,findx = getfgrid(Fs, nfft, fpass)
+    T = nx.arange(0, PSD.shape[1] * 1. / Fs * shift, 1. / Fs * shift)
 
-    # scale by sampling frequency for PSD
-    # PSD /= Fs
-    T = nx.arange(0, PSD.shape[1] * 1000. / Fs * shift, 1000. / Fs * shift)
-
-    return (PSD, T, F)
+    return (PSD[findx,:], T, F)
 
 
 def mtmspec(signal, **kwargs):
@@ -233,7 +220,7 @@ def mtmspec(signal, **kwargs):
     mtm_p = kwargs.get('mtm_p', _default_mtm_p)
     adapt = kwargs.get('adapt',True)
     
-    assert signal.ndim == 1
+    assert len(signal.shape) == 1
     assert nfft > 0 and mtm_p > 0
 
     nrows = (nfft % 2) and nfft/2+1 or (nfft+1)/2
