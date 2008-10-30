@@ -257,7 +257,6 @@ if __name__=="__main__":
     T = []
     motdur = []
     specwhite = mdp.nodes.WhiteningNode(output_dim=0.9)
-    tfrwhite = mdp.nodes.WhiteningNode(output_dim=0.9)
     for example in examples:
         fp = pcmio.sndfile(os.path.join(example_dir, example + '.wav'))
         s = fp.read()
@@ -277,13 +276,12 @@ if __name__=="__main__":
             # generate the feature vectors
             spec = repr_spec(s[istart:istop], nfft, fshift, Fs, padding=padding)
             tspec = repr_tfr(s[istart:istop], nfft, fshift, Fs, padding=padding)
-            tspec_thresh = tspec.max() / 1e6
-            tspec = nx.log10(tspec + tspec_thresh)
+            #tspec_thresh = tspec.max() / 1e6
+            #tspec = nx.log10(tspec + tspec_thresh)
             
             S.append(spec)
             T.append(tspec)
             specwhite.train(spec.T)
-            tfrwhite.train(tspec.T)
 
             motdur.append((mstop - mstart) * 1000)
 
@@ -293,12 +291,6 @@ if __name__=="__main__":
     print "MTM spectrograms: %d dimensions account for %3.2f%% of the variance" % (specwhite.output_dim,
                                                                  specwhite.explained_variance * 100)
 
-    # calculate whitened tfr spectros
-    tfrwhite.stop_training()
-    TW = [tfrwhite(tspec.T).T for tspec in T]
-    print "TFR spectrograms: %d dimensions account for %3.2f%% of the variance" % (tfrwhite.output_dim,
-                                                                 tfrwhite.explained_variance * 100)
-
     motdur = nx.asarray(motdur)[motclusts]
 
     print "Calculated spectrograms of %d motifs" % len(S)
@@ -306,10 +298,7 @@ if __name__=="__main__":
     # define the comparisons to try:
     methods = {'euclid_mtm': (dist_eucl, S),
                'eucl_pca_mtm' : (dist_eucl, SW),
-               'cos_mtm' : (dist_cos, S),
-               'euclid_tfr': (dist_eucl, T),
-               'eucl_pca_tfr' : (dist_eucl, TW),
-               'cos_tfr' : (dist_cos, T)}
+               'cos_mtm' : (dist_cos, S)}
 
     # only analyze selected comparisons for speed
     nsignals = motclusts.size
