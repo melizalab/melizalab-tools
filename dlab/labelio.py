@@ -7,7 +7,6 @@ module for reading and writing label files.
 
 from __future__ import with_statement
 import numpy as nx
-from datautils import isnested
 
 class labelset(object):
     """
@@ -32,11 +31,13 @@ class labelset(object):
         self.epochs = []
 
         if isinstance(data, self.__class__):
-            self.importlol(data.epochs)
-        elif isnested(data):
-            self.importlol(data)
+            self.importrecarray(data.torecarray())
         elif isinstance(data, nx.recarray):
             self.importrecarray(data)
+        elif data==None:
+            pass
+        else:
+            self.importlol(data)
 
     #####################
     # Add events methods
@@ -83,10 +84,12 @@ class labelset(object):
         Appends epochs defined in a list-of-lists to the current object.  The inner
         lists must contain two numbers and a string; a ValueError is thrown if this isn't true.
         """
-        for item in data:
-            if len(item) != 3:
-                raise ValueError, "All lists in the LOL must have 3 items"
-            self.addepoch(*item)
+        try:
+            self.importrecarray(nx.rec.fromrecords(data, names=('start','stop','label')))
+        except ValueError, e:
+            raise ValueError, "Unable to coerce data to Nx3 array: %s" % e
+        except Exception:
+            raise ValueError, "Unable to coerce data to Nx3 array"
 
     def importrecarray(self, data):
         """
