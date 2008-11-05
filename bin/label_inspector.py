@@ -4,15 +4,18 @@
 Script to generate printouts of song segmentation structure.  The spectrogram
 of each song in the database is computed, and marked with the segment boundaries
 
-Usage: label_inspector.py <songdb.h5> <outfile> [-dPDF]
+Usage: label_inspector.py [-l] <songdb.h5> <outfile> [-dPDF]
 
 Generates a series of pdf (or whatever format) files called
 '<outfile>_NNN.pdf', which each contain spectrograms of several songs.
+
+Options:
+  -l                Label segments
 """
 
 from msong import songdb
 import numpy as nx
-import os, sys, matplotlib, pdb
+import os, sys, getopt, matplotlib, pdb
 from dlab import plotutils, signalproc
 
 # spectrogram parameters:
@@ -29,14 +32,21 @@ matplotlib.rc('xtick', labelsize=8)
 _nspec = 3
 _figsize = (10.5,8)
 
+_label_segs = False
+
 if __name__=="__main__":
     
     if len(sys.argv) < 3:
         print __doc__
         sys.exit(-1)
 
-    sdb = songdb.db(sys.argv[1], 'r')
-    outbase = sys.argv[2] + "_%03d"
+    opts,args = getopt.getopt(sys.argv[1:], 'l')
+    for o,a in opts:
+        if o == '-l':
+            _label_segs = True
+
+    sdb = songdb.db(args[0], 'r')
+    outbase = args[1] + "_%03d"
 
     import matplotlib.pyplot as plt
 
@@ -64,8 +74,12 @@ if __name__=="__main__":
             lblset = song.segments.catalog
             marks = []
             for epoch in song.segments.catalog:
-                marks.append(epoch['start'])
-                marks.append(epoch['stop'])
+                estart = epoch['start']
+                estop = epoch['stop']
+                marks.append(estart)
+                marks.append(estop)
+                if _label_segs:
+                    ax.text( estart + (estop - estart)/2, 0.9 * F[-1], epoch['name'], fontsize=8, ha='center')
             ax.vlines(marks, F[0], F[-1], 'r', lw=0.2)
 
         plotutils.setframe(ax, 1100)
