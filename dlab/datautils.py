@@ -340,6 +340,16 @@ def runs(x, val):
 
     return out
 
+def xtab1d(x):
+    """
+    Computes the frequencies of all the unique values in x. Returns
+    the unique levels and their frequencies
+    """
+    vals = nx.asarray(x)
+    levels = nx.unique(vals)
+    return levels, nx.asarray([(vals==level).sum() for level in levels])
+    
+
 def accumarray(subs, val, **kwargs):
     """
     Accumulates values in an array based on an associated subscript vector.
