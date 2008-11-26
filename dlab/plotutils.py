@@ -7,13 +7,12 @@ CDM, 1/2007
  
 """
 import numpy as nx
-import matplotlib
-from matplotlib import cm
+import matplotlib.pyplot as mplt
 import tempfile, shutil, os
 import functools
 
 def drawoffscreen(f):
-    from pylab import isinteractive, ion, ioff, draw
+    from matplotlib.pyplot import isinteractive, ion, ioff, draw
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         retio = isinteractive()
@@ -45,7 +44,6 @@ def plot_raster(X, Y=0, start=None, stop=None, ax=None,
     **kwargs - additional arguments to plot
 
     """
-    from pylab import gca
 
     nreps = len(X)
     if nreps == 0:
@@ -78,7 +76,7 @@ def plot_raster(X, Y=0, start=None, stop=None, ax=None,
         maxx = x.max()
     
     if ax==None:
-        ax = gca()
+        ax = mplt.gca()
 
     # if the filter eliminates all the events, fail gracefully
     if x.size == 0:
@@ -104,7 +102,6 @@ def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
 
     <kwargs> - passed to bar()
     """
-    from pylab import bar, xticks
     assert len(labels)==len(values)
     lbl = nx.asarray(labels)
     if sort_labels:
@@ -113,8 +110,8 @@ def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
         values = values[ind]
     
     x = nx.arange(lbl.size,dtype='f')+width
-    bar(x, values, **kwargs)
-    xticks(x+width/2, lbl.tolist())
+    mplt.bar(x, values, **kwargs)
+    mplt.xticks(x+width/2, lbl.tolist())
     
     
 def dcontour(ax, *args, **kwargs):
@@ -182,7 +179,7 @@ def cmap_discretize(cmap, N):
         djet = cmap_discretize(cm.jet, 5)
         imshow(x, cmap=djet)
     """
-    from matplotlib.colors import LinearSegmentedColormap
+    from mplt.colors import LinearSegmentedColormap
     from scipy.interpolate import interp1d
 
     cdict = cmap._segmentdata.copy()
@@ -208,7 +205,7 @@ def cmap_discretize(cmap, N):
     # Return colormap object.
     return LinearSegmentedColormap('colormap',cdict,1024)
 
-def cimap(data, cmap=cm.hsv, thresh=0.2):
+def cimap(data, cmap=mplt.cm.hsv, thresh=0.2):
     """
     Plot complex data using the RGB space for the phase and the
     alpha for the magnitude
@@ -219,19 +216,86 @@ def cimap(data, cmap=cm.hsv, thresh=0.2):
     Z[:,:,3] = (M - M.min()) / (M.max() - M.min())
     return Z
 
-
-class texplotter(object):
+class multiplotter(object):
     """
-    
     This class is used to group a bunch of figures into a single pdf
-    file. On initialization it creates a temporary directory where eps
-    files and the tex input file are stored.  Each call to
-    plotfigure() generates a new eps file.  Entries are stored in the
-    figures attribute for each subplot/file.  Calling makepdf() causes
-    the tex file to be compiled, and a pdf file is saved in the
-    location specified.  Destruction of the object results in cleanup
-    of the temporary directory.
+    file. On initialization it creates a temporary directory where
+    each page of the multipage pdf file will be stored. Each call to
+    plotfigure() generates a new file in the temporary
+    directory. Calling makepdf() causes the multipage pdf to be
+    generated and saved in the specific location. Destruction of the
+    object results in cleanup of the temporary directory.
+    """
+    _fig_type = '.pdf'
+    _defparams = params = {'axes.labelsize': 10,
+                           'text.fontsize': 10,
+                           'xtick.labelsize': 8,
+                           'ytick.labelsize': 8,}
+    _pdf_cmd = 'gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=%s'
 
+    def __init__(self, leavetempdir=False, parameters=None):
+        """
+        Initialize the multiplotter object. This creates the temporary directory.
+
+        Optional arguments:
+        leavetempdir - if true (default false), leave temporary files on object destruction
+        parameters - dictionary used to set values in matplotlib.rcParams
+
+        For instance, tx = multiplotter(parameters={'font.size':8.0})
+        """
+        if parameters!=None:
+            self._defparams.update(parameters)
+        mplt.rcParams.update(self._defparams)
+        self._tdir = tempfile.mkdtemp()
+        print "Temp dir: %s" % self._tdir
+        self._leavetempdir = leavetempdir
+        self.figures = []
+
+    def __del__(self):
+        if hasattr(self, '_tdir') and os.path.isdir(self._tdir) and not self._leavetempdir:
+            shutil.rmtree(self._tdir)
+
+
+    def plotfigure(self, fig, closefig=True, **kwargs):
+        """
+        Calls savefig() on the figure object to save the page. 
+
+        closefig - by default, closes figure after it's done saving it;
+                     set to True to keep the figure
+        additional options are passed to savefig()
+        """
+        figname = "multiplotter_%03d%s" % (len(self.figures), self._fig_type)
+        fig.savefig(os.path.join(self._tdir, figname), **kwargs)
+        self.figures.append(figname)
+        if closefig:
+            mplt.close(fig)
+
+    def writepdf(self, filename, options=''):
+        """
+        Generates a pdf file from the current figure set.
+
+        filename - the file to save the pdf to
+        options - additional options to pass to the pdf generating command
+        """
+
+        pwd = os.getcwd()
+        if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
+        figlist = ' '.join(self.figures)
+        cmd = self._pdf_cmd % filename + ' ' + options + ' ' + figlist
+
+        try:
+            os.chdir(self._tdir)
+            status = os.system(cmd)
+            if status > 0: raise IOError, "Error generating multipage PDF"
+        finally:
+            os.chdir(pwd)
+
+
+class texplotter(multiplotter):
+    """
+    An extension of the multiplotter class that uses latex to join
+    figures together.  Useful when for lots of little figures, or to
+    insert pages with text on them.
     """
     _defparams = params = {'backend': 'ps',
                            'axes.labelsize': 10,
@@ -242,54 +306,24 @@ class texplotter(object):
     _latex_cmd = "latex -halt-on-error -interaction=nonstopmode %s > /dev/null"
     _pdf_cmd = "dvipdf -dAutoRotatePages=/None %s"
 
-    def __init__(self, parameters=None, leavetempdir=False):
-        """
-        
-        Initialize the texplotter object. This creates the temporary
-        directory and the texfile.
-
-        Optional arguments:
-             margins - set the margins of the output file (inches, inches)
-             plotdims - set the default dimensions of plots (inches, inches)
-             parameters - a dictionary which is used to set values in matplotlib.rcParams.
-
-        For instance, tx = texplotter(parameters={'font.size':8.0})
-
-        The default margins and plotdims will plot 8 figures per page.
-        """
-
-        if parameters!=None:
-            self._defparams.update(parameters)
-        matplotlib.rcParams.update(self._defparams)
-
-        self._tdir = tempfile.mkdtemp()
-        self._leavetempdir = leavetempdir
-        self.figures = []
-
-
-    def __del__(self):
-
-        if hasattr(self, '_tdir') and os.path.isdir(self._tdir) and not self._leavetempdir:
-            shutil.rmtree(self._tdir)
-
-    def plotfigure(self, fig, plotdims=None, closefig=True):
+    def plotfigure(self, fig, plotdims=None, closefig=True, **kwargs):
         """
         Calls savefig() on the figure object to save an eps file. Adds the figure
         to the list of plots.
 
-        <plotdims> - override figure dimensions
-        <closefig> - by default, closes figure after it's done exporting the EPS file;
+        plotdims - override figure dimensions
+        closefig - by default, closes figure after it's done exporting the EPS file;
                      set to True to keep the figure
+        additional options are passed to savefig()
         """
 
         if plotdims==None:
             plotdims = fig.get_size_inches()
         figname = "texplotter_%03d.eps" % len(self.figures)
-        fig.savefig(os.path.join(self._tdir, figname))
+        fig.savefig(os.path.join(self._tdir, figname), **kwargs)
         self.figures.append([figname, plotdims])
         if closefig:
-            from pylab import close
-            close(fig)
+            mplt.close(fig)
 
     def pagebreak(self):
         """ Insert a pagebreak in the file """
@@ -304,7 +338,6 @@ class texplotter(object):
         and there are many characters that are reserved in LaTeX in different modes.
         Non-text objects are rejected silently.  Use this function with caution
         or you may render the latex unparseable.
-        
         """
         if isinstance(text, basestring):
             self.figures.append(text)
@@ -340,10 +373,10 @@ class texplotter(object):
         if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
         try:
             os.chdir(self._tdir)
-            os.system(self._latex_cmd % 'texplotter.tex')
-            if not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
-            os.system(self._pdf_cmd % 'texplotter.dvi')
-            if not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
+            status = os.system(self._latex_cmd % 'texplotter.tex')
+            if status > 0 or not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
+            status = os.system(self._pdf_cmd % 'texplotter.dvi')
+            if status > 0 or not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
             shutil.move('texplotter.pdf', filename)
         finally:
             os.chdir(pwd)
@@ -368,7 +401,6 @@ def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
             boundaries specified by xstart and xstop
     kwargs - passed to axes command
     """
-    from pylab import axes
     
     ax = []
     xwidth = (xstop - xstart - spacing * (nplots-1))/ nplots
@@ -395,7 +427,6 @@ def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
             plot will be changed by this factor.  Make sure they add up to less than nplots.
     kwargs - passed to axes command
     """
-    from pylab import axes
     
     ax = []
     yheight = (ystop - ystart - spacing * (nplots-1))/ nplots
@@ -470,7 +501,7 @@ def setframe(ax, lines=1100):
 
 if __name__=="__main__":
 
-    from pylab import plot, gcf
+    from matplotlib.pyplot import plot, gcf
     tp = texplotter()
     plot(range(20))
     tp.plotfigure(gcf())
