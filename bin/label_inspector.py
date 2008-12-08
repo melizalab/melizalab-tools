@@ -4,10 +4,9 @@
 Script to generate printouts of song segmentation structure.  The spectrogram
 of each song in the database is computed, and marked with the segment boundaries
 
-Usage: label_inspector.py [-l] <songdb.h5> <outfile> [-dPDF]
+Usage: label_inspector.py [-l] <songdb.h5> <outfile>
 
-Generates a series of pdf (or whatever format) files called
-'<outfile>_NNN.pdf', which each contain spectrograms of several songs.
+Generates a multipage pdf file with spectrograms of all the songs in the database.
 
 Options:
   -l                Label segments
@@ -15,7 +14,8 @@ Options:
 
 from msong import songdb
 import numpy as nx
-import os, sys, getopt, matplotlib, pdb
+import os, sys, getopt, matplotlib
+matplotlib.use('PDF')
 from dlab import plotutils, signalproc
 
 # spectrogram parameters:
@@ -46,7 +46,7 @@ if __name__=="__main__":
             _label_segs = True
 
     sdb = songdb.db(args[0], 'r')
-    outbase = args[1] + "_%03d"
+    outfile = args[1]
 
     import matplotlib.pyplot as plt
 
@@ -57,6 +57,7 @@ if __name__=="__main__":
     # first find the maximum duration
     maxdur = max([(1. * x.waveform.nrows / x.waveform.attrs.sampling_rate) for x in sdb])
 
+    mp = plotutils.multiplotter()
     for song in sdb:
         print "Plotting %s" % song._v_name
         Fs = song.waveform.attrs.sampling_rate
@@ -91,13 +92,11 @@ if __name__=="__main__":
             ax.set_xticklabels('')
         else:
             i = 0
-            print "Saving " + (outbase % page)
-            fig.savefig(outbase % page, dpi=300, orientation='landscape')
+            mp.plotfigure(fig, dpi=300, orientation='landscape')
             fig = plt.figure(figsize=_figsize)
             page += 1
 
     if i > 0 and i < _nspec:
-        print "Saving " + (outbase % page)
-        fig.savefig(outbase % page, dpi=300, orientation='landscape')
-            
-    
+        mp.plotfigure(fig, dpi=300, orientation='landscape')
+
+    mp.writepdf(outfile)
