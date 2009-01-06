@@ -409,7 +409,7 @@ def perm_dfr(rs):
     return len(rs) and rs[:1] + [r + (rs[0]<=r) for r in perm_dfr(rs[1:])] or []
 
 
-def perm_unique_trans(n,m,startk=0, verbose=False):
+def perm_unique_trans(n,startk=0, verbose=False):
     """
     Generate unique permutations of n numbers, with the constraint
     that none of the transitions can be the same. Continues to generate
@@ -422,7 +422,6 @@ def perm_unique_trans(n,m,startk=0, verbose=False):
     out = []
     seqpairs = []
     maxk = factorial(n, exact=True)
-    if verbose: print "Searching %d permutations for unique transitions" % maxk
     k = startk
     while k < maxk:
         perm = perm_dfr(perm_rr(n,k))
@@ -432,10 +431,6 @@ def perm_unique_trans(n,m,startk=0, verbose=False):
         if len(pairmatches)==0 or max(pairmatches)==0:
             out.append(perm)
             seqpairs.append(permpairs)
-            if verbose: print "Permutation %d is unique: %s" % (k, perm)
-        if m!=None and len(out)>=m:
-            return out
-        if verbose and k % 10000 == 0: print "Checked to permutation %d" % k
-        
-    if m!=None: print "Warning: unable to find %d unique transition sequences out of %d permutations" % (m, maxk)
-    return out
+            yield k, perm
+        elif verbose and k % 10000 == 0: print "Checked to permutation %d" % k
+
