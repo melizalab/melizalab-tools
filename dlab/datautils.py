@@ -400,4 +400,42 @@ def accumarray(subs, val, **kwargs):
     return out
     
     
-            
+def perm_rr(n,k):
+    """ Radix representation of the kth permutation of n-sequence """
+    return (n > 0) and [k%n] + perm_rr(n-1,k/n) or []
+
+def perm_dfr(rs):
+    """ Direct representation of radix permutation (rs) """
+    return len(rs) and rs[:1] + [r + (rs[0]<=r) for r in perm_dfr(rs[1:])] or []
+
+
+def perm_unique_trans(n,m,startk=0, verbose=False):
+    """
+    Generate unique permutations of n numbers, with the constraint
+    that none of the transitions can be the same. Continues to generate
+    sequences until all the possible permutations have been tested.
+
+    This is not a terribly fast algorithm.
+    """
+    from scipy import factorial
+    mpairs = lambda x: set(['%d%d' % (x[i],x[i+1]) for i in range(len(x)-1)])
+    out = []
+    seqpairs = []
+    maxk = factorial(n, exact=True)
+    if verbose: print "Searching %d permutations for unique transitions" % maxk
+    k = startk
+    while k < maxk:
+        perm = perm_dfr(perm_rr(n,k))
+        k += 1
+        permpairs = mpairs(perm)
+        pairmatches = [len(x.intersection(permpairs)) for x in seqpairs]
+        if len(pairmatches)==0 or max(pairmatches)==0:
+            out.append(perm)
+            seqpairs.append(permpairs)
+            if verbose: print "Permutation %d is unique: %s" % (k, perm)
+        if m!=None and len(out)>=m:
+            return out
+        if verbose and k % 10000 == 0: print "Checked to permutation %d" % k
+        
+    if m!=None: print "Warning: unable to find %d unique transition sequences out of %d permutations" % (m, maxk)
+    return out
