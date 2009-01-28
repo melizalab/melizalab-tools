@@ -125,16 +125,20 @@ def ftabletomatrix(ftable, **kwargs):
 
     if params==None:
         if ragged:
-            P = param_names(ftable, nlags, binsize)
+            P = param_names(ftable, nlags, binsize=binsize, ragged=ragged)
         else:
             P = param_names(ftable, nlags)
     else:
+        # assert param list has no duplicates
+        assert len(params)==len(set(params)), "Parameter list must have no duplicates"
         P = params
 
     nrow = nx.ceil((tmax - tmin) / binsize)
     ncol = len(P)
 
     M = sparse.lil_matrix((nrow, ncol))
+    # reverse lookup table
+    PP = dict([(f,i) for (i,f) in enumerate(P)])
 
     for feat in ftable:
         fname = _feattmpl % feat
@@ -148,11 +152,7 @@ def ftabletomatrix(ftable, **kwargs):
         for j in range(nfeatlags):
             jj = fstart + j
             pname = _paramtmpl % (fname, j)
-            ind = [i for i,f in enumerate(P) if pname==f]
-            
-            if len(ind) != 1:
-                raise ValueError, "The param %s must only match one in the parameter list (matches %d)" % (pname, len(ind))
-            ij = ind[0]
+            ij = PP[pname]            
             if jj < M.shape[0]:
                 M[jj, ij] = 1
 
