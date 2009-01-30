@@ -4,17 +4,13 @@
 
 Script to generate feature noise stimuli.  Makes a reconstructed song,
 with all the features at their original offsets, and 'feature noise',
-which is the features in random order.  Makes a sparse and 'dense'
-version of this, with the features separated by gaps of 150 ms in the
-sparse version, and by 10 ms in the dense version.
+which is the features in random order separated by gaps of 10 ms.
 
 Usage: featurenoise.py <song1> [<song2>...]
 
 Ouputs: <song>_recon.pcm  - reconstructed song
-        <song>_sparsefeats_%03d.pcm - sparse noise (N different permutations)
-        <song>_densefeats_%03d.pcm - dense noise (N different permutations)
-        <song>_sparsefeats.s - stimulus macro for saber
-        <song>_densefeats.s - stimulus macro for saber
+        <song>_feats_%03d.pcm - dense noise (N different permutations)
+        <song>_feats.s - stimulus macro for saber
 
 """
 
@@ -23,11 +19,10 @@ import numpy as nx
 from motifdb import db, combiner
 from dlab import pcmio
 
-mdbfile = 'motifs_songseg.h5'
-nsparse = 5
-sparsegap = 200.
+stimdir = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg')
+mdbfile = os.path.join(stimdir, 'motifs_songseg.h5')
 
-ndense = 7
+ndense = 5
 densegap = 10.
 
 prewait = 2000
@@ -37,7 +32,7 @@ Fs = 20
 def reconstructsong(song, mdb, parser, ramp_transients=4.0):
 
     # figure out how long the song will be
-    fp = pcmio.sndfile('%s.pcm' % song)
+    fp = pcmio.sndfile(os.path.join(stimdir, '%s.pcm' % song))
 
     S = nx.zeros(fp.nframes)
     motifs = mdb.get_motifs()
@@ -63,8 +58,13 @@ def reconstructsong(song, mdb, parser, ramp_transients=4.0):
 
     return S
 
-def featnoise(song, mdb, gap=150.):
-
+def featnoise(song, mdb, N, songdur, gap=10.):
+    """
+    Construct feature noise stimuli consisting of N permutations of the features
+    in <song>.  The stimuli are split across multiple files with an average length
+    equal to songdur (to make stimulus presentation a bit easier)
+    """
+    
     padding = int(round(20 * Fs))
     gap = int(round(gap * Fs))
 
@@ -73,21 +73,38 @@ def featnoise(song, mdb, gap=150.):
     nfeats = len(feats)
 
     featlens = feats['dim'][:,0]
-    totlen = int(round(featlens.sum() * Fs)) + gap * nfeats + padding * 2
-    ind = nx.random.permutation(nfeats)
-    fdata = []
+    #totlen = int(round(featlens.sum() * Fs)) + gap * nfeats + padding * 2
+    totlen = int((songdur + featlens.max()*2) * Fs)
 
+    ind = nx.concatenate([nx.random.permutation(nfeats) for i in range(N)])
+
+    allfdata = []
+    allS = []
+    
+    fdata = []
     S = nx.zeros(totlen)
     offset = padding
+
+    # fill up files until they cross songdur, then start new ones
+    thresh = int(songdur * Fs)
     for i in ind:
         feat = feats[i]
         fdata.append([mdb.get_symbol(feat['motif']), feat['id'], offset])
         sig = mdb.get_feature_data(feat['motif'], feat['featmap'], feat['id'])
         S[offset:offset+sig.size] = sig
-        offset += sig.size + gap
+        if offset > thresh:
+            allfdata.append(fdata)
+            allS.append(S)
+            fdata = []
+            S = nx.zeros(totlen)
+            offset = padding
+        else:
+            offset += sig.size + gap
 
-
-    return S, fdata
+    if offset > padding:
+        allS.append(S)
+        allfdata.append(fdata)
+    return allS, allfdata
 
 def write_featnoisetable(filename, fdata):
     fp = open(filename, 'wt')
@@ -104,41 +121,29 @@ if __name__=="__main__":
 
     songs = sys.argv[1:]
 
-    mdb = db.motifdb(mdbfile)
+    mdb = db.motifdb(mdbfile,'r')
     parser = combiner.featmerge(mdb)
 
     for song in songs:
 
-        fp1 = open('%s_sparsefeats.s' % song, 'wt')
-        fp2 = open('%s_densefeats.s' % song, 'wt')
+        fp2 = open('%s_feats.s' % song, 'wt')
         
         print "%s: generating feature reconstruction" % song
         S = reconstructsong(song,mdb,parser)
         pcmio.sndfile('%s_recon.pcm' % song, 'w').write(S)
 
-        print "%s: generating sparse feature noise" % song
-        for i in range(nsparse):
-            S,fdata = featnoise(song, mdb, sparsegap)
-            pcmio.sndfile('%s_sparsefeats_%03d.pcm' % (song,i), 'w').write(S)
-            write_featnoisetable('%s_sparsefeats_%03d.tbl' % (song, i), fdata)
+        songdur = (S.size / Fs)
 
-        maxdur = int(S.size / Fs) + prewait + postwait
-        fp1.write('stim -dur %d -prewait %d -rtrig %d -random -reps 5 songseg/%s.pcm songseg/acute/%s_recon.pcm ' % \
-                  (maxdur, prewait, maxdur, song, song))
-        fp1.write(' '.join(["songseg/acute/%s_sparsefeats_%03d.pcm" % (song, i) for i in range(nsparse)]))
-        fp1.write('\n')
-
-        print "%s: generating dense feature noise" % song
-        for i in range(ndense):
-            S,fdata = featnoise(song, mdb, densegap)
-            pcmio.sndfile('%s_densefeats_%03d.pcm' % (song,i), 'w').write(S)
-            write_featnoisetable('%s_densefeats_%03d.tbl' % (song, i), fdata)
+        print "%s: generating feature noise" % song
+        S,fdata = featnoise(song, mdb, ndense, songdur, densegap)
+        for i in range(len(S)):
+            pcmio.sndfile('%s_feats_%03d.pcm' % (song,i), 'w').write(S[i])
+            write_featnoisetable('%s_feats_%03d.tbl' % (song, i), fdata[i])
             
-        maxdur = int(S.size / Fs) + prewait + postwait
+        maxdur = int(songdur) + prewait + postwait
         fp2.write('stim -dur %d -prewait %d -rtrig %d -random -reps 5 songseg/%s.pcm songseg/acute/%s_recon.pcm ' % \
                   (maxdur, prewait, maxdur, song, song))
-        fp2.write(' '.join(["songseg/acute/%s_densefeats_%03d.pcm" % (song, i) for i in range(ndense)]))
+        fp2.write(' '.join(["songseg/acute/%s_feats_%03d.pcm" % (song, i) for i in range(len(S))]))
         fp2.write('\n')
 
-        fp1.close()
         fp2.close()
