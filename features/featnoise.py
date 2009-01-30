@@ -14,20 +14,28 @@ to 1 if feature j is present at lag s.
 
 Usage:
 
-featnoise.py <celltable> <outfile.pdf>
+featnoise.py <celltable> <outfile>
+
+Generates <outfile.pdf> with nice graphics, and <outfile.tbl> with
+statistics for each neuron/song pair
 
 """
 
+from __future__ import with_statement
 import os, sys, glob
 import numpy as nx
+# this program sucks down memory if it's not using the PDF backend driver
+import matplotlib
+matplotlib.use('PDF')
+from matplotlib import cm
+from pylab import figure
+
 from motifdb import db
 import features.featureresponses as fresps
-from matplotlib import cm, rcParams, rcdefaults, use
-use('PS')
-from pylab import figure
 from mspikes import toelis
 from dlab.signalproc import spectro
 from dlab import plotutils, pcmio, datautils
+import spikes.stat as sstat
 
 # Stim/Response data: I have some early preliminary data and some
 # additional data which I intend to use for a different paper that I'm
@@ -57,10 +65,11 @@ ftable_options =  {'binsize' : binsize,
                    'ragged' : True,
                    'prepad' : -500,
                    'meanresp' : True}
+_spon_range = (-2000, 0)
+
 example = {'dir': os.path.join(_data_dir, 'st358/20080129/cell_4_2_3'),
            'base' : 'cell_4_2_3',
            'song' : 'C0'}
-
 example = {'dir': os.path.join(_data_dir, 'st376/20090107/cell_1_1_6'),
            'base' : 'cell_1_1_6',
            'song' : 'C0'}
@@ -88,7 +97,8 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     songos = loadstim(song)
     (PSD, T, F) = spectro(songos, Fs=20)
     extent = (T[0], T[-1], F[0], F[-1])
-    sax.imshow(nx.log10(PSD[:,:-1] + _specthresh), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
+    sax.imshow(nx.log10(PSD[:,:-1] + _specthresh), cmap=matplotlib.cm.Greys, extent=extent,
+               origin='lower', aspect='auto')
     sax.set_xticklabels('')
 
     # song responses
@@ -135,7 +145,8 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     cmax = max(abs(FRF.max()), abs(FRF.min()))
     tmax = FRF.shape[1] * ftable_options['binsize']
     h = ax.imshow(FRF, extent=(0, tmax, 0, FRF.shape[0]),
-              cmap=cm.RdBu_r, clim=(-cmax, cmax), interpolation='nearest')
+                  clim=(-cmax, cmax), interpolation='nearest')
+              #cmap=matplotlib.cm.RdBu_r, )
     ax.set_ylabel('Note (ranked)')
     ax.set_xlabel('Time (ms)')
     ax.set_title('FRF', fontsize=10)
@@ -147,7 +158,19 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     fig.text(0.5, 0.91, 'binsize=%(binsize)3.2f ms; kernel=%(kernwidth)3.2f ms; postlags=%(nlags)d' % ftable_options,
              **textopts)
 
-    return fig
+    # mark note offsets
+    axlim = ax.axis()
+    note_offsets = nx.asarray([len(x) for x in AA.values()]) - ftable_options['nlags']
+    note_offsets = note_offsets[ind]*ftable_options['binsize']
+    ax.hold(1)
+    ax.plot(note_offsets, nx.arange(note_offsets.size)+1, 'k|', mew=1, ms=1)
+    ax.axis(axlim)
+
+    # calculate mean FR etc
+    m_spon = sstat.meanrate(songtl, _spon_range).mean()
+    m_resp = sstat.meanrate(songtl, (0, t[-1])).mean()
+
+    return fig,m_spon,m_resp,cc_fit,cc_val
 
 def loadstim(stimname):
     for dir in _stimdirs:
@@ -167,24 +190,30 @@ if __name__=='__main__':
     ndb = db.motifdb(_notedb,'r')
 
     mapfile = sys.argv[1]
-    outfile = sys.argv[2]
+    outfile = os.path.splitext(sys.argv[2])[0]
     
-    fp = open(mapfile,'rt')
+    infp = open(mapfile,'rt')
     mtp = plotutils.multiplotter()
 
-    for line in fp:
-        if line.startswith('#') or len(line.strip())==0: continue
-        fields = line.split()
-        bird,basename,date = fields[0:3]
-        songs = fields[3:]
+    with open(outfile + '.tbl','wt') as outfp:
+        outfp.write("cell\tsong\tspon.m\tresp.m\tfit.cc\tsong.cc\n")
+        for count,line in enumerate(infp):
+            if line.startswith('#') or len(line.strip())==0: continue
+            fields = line.split()
+            bird,basename,date = fields[0:3]
+            songs = fields[3:]
 
-        for song in songs:
-            print >> sys.stderr, 'Analyzing %s_%s::%s' % (bird, basename, song)
-            try:
-                respdir = os.path.join(_data_dir, 'st' + bird, date, basename)
-                fig = analyze_song(song, ndb, respdir=respdir, **ftable_options)
-                mtp.plotfigure(fig)
-            except Exception, e:
-                print >> sys.stderr, 'Error: %s' % e
+            for song in songs:
+                print >> sys.stderr, 'Analyzing %s_%s::%s' % (bird, basename, song)
+                try:
+                    respdir = os.path.join(_data_dir, 'st' + bird, date, basename)
+                    fig,m_spon,m_resp,cc_fit,cc_valid = analyze_song(song, ndb, respdir=respdir,
+                                                                     **ftable_options)
+                    mtp.plotfigure(fig)
+                    outfp.write('st%s_%s\t%s\t%3.4f\t%3.4f\t%3.4f\t%3.4f\n' % (bird,basename,song,
+                                                                            m_spon,m_resp,cc_fit,cc_valid))
+                    outfp.flush()
+                except Exception, e:
+                    print >> sys.stderr, 'Error: %s' % e
 
-    mtp.writepdf(outfile)
+    mtp.writepdf(outfile + '.pdf')
