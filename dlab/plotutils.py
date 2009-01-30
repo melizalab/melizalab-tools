@@ -231,7 +231,8 @@ class multiplotter(object):
                            'text.fontsize': 10,
                            'xtick.labelsize': 8,
                            'ytick.labelsize': 8,}
-    _pdf_cmd = 'gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=%s'
+    #_pdf_cmd = 'gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=%s'
+    _pdf_cmd = 'texexec --silent --pdfarrange --result=%s'
 
     def __init__(self, leavetempdir=False, parameters=None):
         """
@@ -318,7 +319,7 @@ class texplotter(multiplotter):
         """
 
         if plotdims==None:
-            plotdims = fig.get_size_inches()
+            plotdims = tuple(fig.get_size_inches())
         figname = "texplotter_%03d.eps" % len(self.figures)
         fig.savefig(os.path.join(self._tdir, figname), **kwargs)
         self.figures.append([figname, plotdims])
