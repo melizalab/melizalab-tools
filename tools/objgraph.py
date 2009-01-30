@@ -330,8 +330,8 @@ def show_graph(objs, edge_func, swap_source_target,
         print "Spawning graph viewer (xdot)"
         os.system("xdot objects.dot &")
     else:
-        os.system("dot -Tpng objects.dot > objects.png")
-        print "Image generated as objects.png"
+        os.system("dot -Teps objects.dot > objects.eps")
+        print "Image generated as objects.eps"
 
 
 def obj_node_id(obj):
