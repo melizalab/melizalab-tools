@@ -163,7 +163,8 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
     sax.set_xticklabels('')
 
     # song responses
-    glb = glob.glob(os.path.join(dir, '*%s.toe_lis' % song))
+    glb = glob.glob(os.path.join(dir, '*%s.toe_lis' % song)) + \
+          glob.glob(os.path.join(dir, '*%s_motifs_000.toe_lis' % song))
     if len(glb) > 0:
         ax = fig.add_subplot(nplots,1,2)
         songtl = toelis.readfile(glb[0])
@@ -217,7 +218,7 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
 
     if isinstance(kwargs.get('songpred',None), nx.ndarray):
         ax.set_xticklabels('')  # clear xtick labels from plot 4
-        f,fhat = xvalidate(song, kwargs['songpred'], mdb, **kwargs)
+        f,fhat = xvalidate({song : recontl}, kwargs['songpred'], mdb, **kwargs)
         t = nx.arange(0,fhat.size*kwargs['binsize'],kwargs['binsize'])
         ax = fig.add_subplot(nplots,1,5)
         ax.plot(t,f,t,fhat)
@@ -420,9 +421,9 @@ def splittoelis(tl, feattbl, postpad=None, abslen=600, **kwargs):
 
     return tls
 
-def xvalidate(song, A, mdb, **kwargs):
+def xvalidate(songtl, A, mdb, **kwargs):
 
-    songtl = fresps.loadresponses(song, pattern='*%s.toe_lis', **kwargs)
+    #songtl = fresps.loadresponses(song, pattern='*%s.toe_lis', **kwargs)
     Msong,f,F = fresps.make_additive_model(songtl, mdb, **kwargs)
     return f, A * Msong.T
 
