@@ -55,9 +55,10 @@ def plot_motif(ax, mdb, symbol, featmap=None, **kwargs):
 
 def plot_feature(ax, mdb, symbol, featmap, feature, nfft=320, shift=10):
 
+    Fs = mdb.get(symbol)['Fs'] / 1000
     sig = mdb.get_feature_data(symbol, featmap, feature)
-    (PSD, T, F) = spectro(sig, NFFT=nfft, shift=shift)
+    (PSD, T, F) = spectro(sig, NFFT=nfft, shift=shift, Fs=Fs)
     extent = (T[0], T[-1], F[0], F[-1])
-    ax.imshow(log10(PSD+0.1), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto',
-           interpolation='nearest')
+    return ax.imshow(log10(PSD+0.1), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto',
+                     interpolation='nearest')
 
