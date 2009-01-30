@@ -20,12 +20,20 @@ from dlab import pcmio
 
 stimdir = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg')
 mdbfile = os.path.join(stimdir, 'motifs_songseg.h5')
+permute_dir = os.path.join(stimdir, 'permutation_tables')
 
 _prewait = 2000
 _postwait = 2000
 _Fs = 20.
 _nperm = 3
 _ramp_motif = 2
+
+def load_permutations(N):
+    """ Load pre-generated permutation tables for N sequences """
+    filename = os.path.join(permute_dir, '%d_transperms.tbl' % N)
+    if not os.path.exists(filename):
+        raise ValueError, "Permutation tables for %d not generated yet" % N
+    return nx.loadtxt(filename, dtype='i', delimiter='\t')[:,1:]
 
 def ramp_signal(s, Fs, ramp):
     """ Apply a squared cosine ramp to a signal. Modifies the signal in place. """
@@ -62,6 +70,7 @@ def motif_permutations(mdb, song, nperm=_nperm):
     signal = pcmio.sndfile(os.path.join(stimdir, song + '.pcm')).read()
 
     motifs = nx.asarray([x for x in mdb.get_motifs() if x.startswith(song)])
+    nmotifs = len(motifs)
     motstarts = nx.asarray([float(mdb.get_motif(x)['name'].split('_')[-2]) for x in motifs])
     motends = nx.concatenate((motstarts[1:], [1. * signal.size / _Fs]))
 
@@ -69,7 +78,9 @@ def motif_permutations(mdb, song, nperm=_nperm):
     motifs = motifs[sorted]
     motstarts = motstarts[sorted]
 
-    permutations = [nx.arange(len(motifs))] + [nx.random.permutation(len(motifs)) for x in range(nperm)]
+    #permutations = [nx.arange(nmotifs)] + [nx.random.permutation(nmotifs) for x in range(nperm)]
+    # compute permutations with unique motif transitions for maximum power
+    permutations = load_permutations(nmotifs)[:nperm+1,]
     endpoints = [nx.column_stack((motstarts[x], motends[x])) for x in permutations]
 
     out_endpoints = []
