@@ -62,6 +62,21 @@ import featureresponses as fresps
 from matplotlib import cm, rcParams, rcdefaults
 from motifdb import db, plotter
 
+# where to look up the feature locations in feature noise
+_featloc_tables = os.path.join(os.environ['HOME'], 'z1/acute_data/analysis/feat_noise/tables')
+
+#default options:
+binsize = 15.
+contin_bandwidth = 30.
+continwindow = 200
+ftable_options =  {'binsize' : binsize,
+                   'kernwidth' : contin_bandwidth,
+                   'nlags' : int(continwindow / binsize),
+                   'ragged' : True,
+                   'prepad' : -500,
+                   'meanresp' : True,
+                   'stimdir' : _featloc_tables}
+
 
 _stimdirs = [os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/'),
             os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/acute'),]
@@ -71,18 +86,16 @@ _specthresh = 0.01
 # how to look up feature lengths
 feature_db = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/motifs_songseg.h5')
 featset = 0
-# where to look up the feature locations in feature noise
-_featloc_tables = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/feattables')
 
 
-def make_pdf(outfile, song, mdb, dir='', **kwargs):
+def make_pdf(outfile, song, mdb, respdir='', **kwargs):
 
-    comments = "\\begin{itemize} \\item Directory: %s \\item Song: %s\n" % (dir.replace('_','\\_'), song) + \
+    comments = "\\begin{itemize} \\item Directory: %s \\item Song: %s\n" % (respdir.replace('_','\\_'), song) + \
                "\\item Binsize: %(binsize)3.2f \\item Lags: %(nlags)d\n" % kwargs
 
 
     # load the data and see if there's feature data
-    rtls = fresps.loadresponses(song, respdir=dir)
+    rtls = fresps.loadresponses(song, respdir=respdir)
     have_feats = len(rtls) > 0
 
     if have_feats:
@@ -93,7 +106,7 @@ def make_pdf(outfile, song, mdb, dir='', **kwargs):
         Yhat = A * X.T
         comments += "\\item Fit CC: %3.4f\n" % nx.corrcoef(Y, Yhat)[0,1]
         if kwargs['meanresp']: comments += "\\item Mean firing rate (fit): %3.4f\n" % A[0]
-        f,fhat = xvalidate(song, A, mdb, respdir=dir, **kwargs)
+        f,fhat = xvalidate(song, A, mdb, respdir=respdir, **kwargs)
         comments += "\\item Song CC: %3.4f\n" % nx.corrcoef(f, fhat)[0,1]
         #print "Song CC: %3.4f\n" % nx.corrcoef(f, fhat)[0,1]
 
@@ -109,26 +122,27 @@ def make_pdf(outfile, song, mdb, dir='', **kwargs):
     fig = figure(figsize=(6.5,7.))
 
     #print "Plot song responses..."
-    plot_songresps(song, mdb, fig=fig, respdir=dir,
+    plot_songresps(song, mdb, fig=fig, respdir=respdir,
                    songpred=A if have_feats else None, **kwargs)
     ctp.plotfigure(fig)
 
     if have_feats:
         fig = figure(figsize=(7.5,9.5))
         #print "Plot feature responses..."
-        plot_featresps(tls, mdb, fig=fig, plottitle=os.path.join(dir, song))
+        plot_featresps(tls, mdb, fig=fig, plottitle=os.path.join(respdir, song))
         ctp.plotfigure(fig)
 
         # sort features by max response
-        Ap = fresps.reshape_parameters(A, P)
+        Ap,PP = fresps.reshape_parameters(A, P)
+        FRF,ind = fresps.makefrf(Ap,fill=nx.nan,descending=True)
         F = Ap.keys()
-        maxresp = nx.asarray([Ap[f].max() for f in F])
-        ind = maxresp.argsort()[::-1]
+        #meanresp = nx.asarray([Ap[f].mean() for f in F])
+        #ind = meanresp.argsort()[::-1]
 
-        for i in ind:
+        for i,j in enumerate(ind):
             fig = figure(figsize=(6.5, 3.0))
             #print "Plot response to %s" % F[i]
-            plot_featresp_single(F[i], tls, mdb, Ap[F[i]],
+            plot_featresp_single(FRF, tls, mdb, F[j], i,
                                  neighbor_feats=prec, fig=fig, **kwargs)
             ctp.plotfigure(fig)
 
@@ -147,7 +161,7 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
     songpred - Supply the coefficients of the linear model to plot predicted response
     """
 
-    dir = kwargs.get('dir','')
+    respdir = kwargs.get('respdir','')
     if fig==None:
         fig = figure()
 
@@ -156,15 +170,14 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
     # song spectrogram
     sax = fig.add_subplot(nplots,1,1)
     songos = loadstim(song)
-    (PSD, T, F) = spectro(songos, **kwargs)
-    F /= 1000
+    (PSD, T, F) = spectro(songos, Fs=20)
     extent = (T[0], T[-1], F[0], F[-1])
     sax.imshow(nx.log10(PSD[:,:-1] + _specthresh), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
     sax.set_xticklabels('')
 
     # song responses
-    glb = glob.glob(os.path.join(dir, '*%s.toe_lis' % song)) + \
-          glob.glob(os.path.join(dir, '*%s_motifs_000.toe_lis' % song))
+    glb = glob.glob(os.path.join(respdir, '*%s.toe_lis' % song)) + \
+          glob.glob(os.path.join(respdir, '*%s_motifs_000.toe_lis' % song))
     if len(glb) > 0:
         ax = fig.add_subplot(nplots,1,2)
         songtl = toelis.readfile(glb[0])
@@ -177,7 +190,7 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
 
 
     # recon responses
-    glb = glob.glob(os.path.join(dir, '*%s_recon.toe_lis' % song))
+    glb = glob.glob(os.path.join(respdir, '*%s_recon.toe_lis' % song))
     if len(glb) > 0:
         ax = fig.add_subplot(nplots,1,3)
         recontl = toelis.readfile(glb[0])
@@ -218,7 +231,7 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
 
     if isinstance(kwargs.get('songpred',None), nx.ndarray):
         ax.set_xticklabels('')  # clear xtick labels from plot 4
-        f,fhat = xvalidate({song : recontl}, kwargs['songpred'], mdb, **kwargs)
+        f,fhat = xvalidate(song, kwargs['songpred'], mdb, **kwargs)
         t = nx.arange(0,fhat.size*kwargs['binsize'],kwargs['binsize'])
         ax = fig.add_subplot(nplots,1,5)
         ax.plot(t,f,t,fhat)
@@ -296,7 +309,7 @@ def plot_featresps(tls, mdb, bandwidth=5, plottitle=None,
     fig.subplots_adjust(hspace=0.)
     return fig
 
-def plot_featresp_single(feature, tls, mdb, lmpred,
+def plot_featresp_single(FRF, tls, mdb, feature, index,
                          fig=None, neighbor_feats=None, **kwargs):
     """
     Plots responses to single features.
@@ -310,29 +323,38 @@ def plot_featresp_single(feature, tls, mdb, lmpred,
     
     """
 
-    assert kwargs.has_key('binsize') and kwargs.has_key('nlags'), "Need binsize and nlags options."
+    assert kwargs.has_key('binsize')
     assert tls.has_key(feature), "Toelis dict doesn't have feature %s" % feature
-    r,t = fresps.resprate(tls[feature],onset=0,binsize=kwargs['binsize'],
-                          offset=kwargs['binsize']*kwargs['nlags'])
+    #r,t = fresps.resprate(tls[feature],onset=0,binsize=kwargs['binsize'],
+    #                      offset=kwargs['binsize']*kwargs['nlags'])
 
-    assert r.size==lmpred.size, "Response histogram not same size as coefficient vector"
+    #assert r.size==lmpred.size, "Response histogram not same size as coefficient vector"
 
     if fig==None: fig = figure()
 
+    t = nx.arange(0, FRF.shape[1]*kwargs['binsize'], kwargs['binsize'])
+    xmin,xmax = (t[0], t[-1])
+    yrmin,yrmax = nx.nanmin(FRF), nx.nanmax(FRF)
+
     axspec = fig.add_subplot(211)
     motif,featnum = feature.split('_')
-    plotter.plot_feature(axspec, mdb, motif, 0, int(featnum))
-    axspec.set_yticks([])
-    axresp = axspec.twinx()
-    axresp.plot(t,r,t,lmpred)
-    axresp.set_title(feature)
+    h = plotter.plot_feature(axspec, mdb, motif, 0, int(featnum))
+    extent = h.get_extent()
+    h.set_extent((extent[0], extent[1], yrmin, yrmax))
+    #axspec.set_yticks([])
+    #axresp = axspec.twinx()
+    #axresp.plot(t,r,t,lmpred)
+    axspec.hold(1)
+    axspec.plot(t,FRF[index,:])
+    axspec.set_title(feature)
+    axspec.set_xlim((xmin,xmax))
+    axspec.set_ylim((yrmin,yrmax))
 
     axspikes = fig.add_subplot(212)
     x,y = tls[feature].rasterpoints()
     if x.size == 0: return
-    axspikes.plot(x, y, 'k.')
-
-    xmin,xmax = axresp.get_xlim()
+    axspikes.plot(x, y, 'k|',markersize=3,mew=1)
+    
     ymin,ymax = -0.5, tls[feature].nrepeats+0.5
 
     if neighbor_feats!=None and neighbor_feats.has_key(feature):
@@ -363,14 +385,6 @@ def loadstim(stimname):
             return pcmio.sndfile(os.path.join(dir, stimname + '.pcm')).read()
     raise ValueError, "Can't locate stimulus file for %s" % stimname
             
-def motifreconstruction(song, mdb, **kwargs):
-    """
-    Simulate the response to the full song from the responses to the motifs
-    """
-
-    dir = kwargs('dir','')
-    for file in glb:
-        tl = toelis.readfile(file)
 
 def collectfeatures(response_tls, mdb, **kwargs):
     """
@@ -421,9 +435,10 @@ def splittoelis(tl, feattbl, postpad=None, abslen=600, **kwargs):
 
     return tls
 
-def xvalidate(songtl, A, mdb, **kwargs):
+def xvalidate(song, A, mdb, **kwargs):
 
-    #songtl = fresps.loadresponses(song, pattern='*%s.toe_lis', **kwargs)
+    tl = fresps.loadresponses(song, pattern='*%s_recon.toe_lis', **kwargs)
+    songtl = {song : tl['%s_recon' % song]}
     Msong,f,F = fresps.make_additive_model(songtl, mdb, **kwargs)
     return f, A * Msong.T
 
@@ -438,22 +453,18 @@ if __name__=='__main__':
     mdb = db.motifdb(feature_db)
     exampledir = "/z1/users/dmeliza/acute_data/st358/20080129/cell_4_2_2"
     song = 'C0'
-    options = {'binsize' : 30,
-               'nlags' : 10,
-               'meanresp' : True,
-               'stimdir' : _featloc_tables}
 
     opts,args = getopt.getopt(sys.argv[1:], 'b:l:d:')
 
     for o,a in opts:
         if o=='-b':
-            options['binsize'] = int(a)
+            ftable_options['binsize'] = int(a)
         elif o=='-l':
-            options['nlags'] = int(a)
+            ftable_options['nlags'] = int(a)
         elif o=='-d':
-            options['stimdir'] = a
+            ftable_options['stimdir'] = a
 
-    make_pdf(args[2], args[1], mdb, dir=args[0], **options)
+    make_pdf(args[2], args[1], mdb, respdir=args[0], **ftable_options)
 
 ##     rtls = fresps.loadresponses(song, dir=exampledir)
 ##     tls, prec = collectfeatures(rtls, mdb)
