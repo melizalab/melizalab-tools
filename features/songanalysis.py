@@ -54,12 +54,17 @@ The generated pdf has the following panels:
 
 import os, glob, sys, getopt
 import numpy as nx
+
+# force backend to be PS for texplotter
+import matplotlib
+matplotlib.use('PS')
+from matplotlib import cm, rcParams, rcdefaults
+from pylab import figure, setp
+
 from dlab import plotutils, pcmio, datautils
 from mspikes import toelis
 from dlab.signalproc import spectro
-from pylab import figure, setp, draw
 import featureresponses as fresps
-from matplotlib import cm, rcParams, rcdefaults
 from motifdb import db, plotter
 
 # where to look up the feature locations in feature noise
@@ -88,10 +93,10 @@ feature_db = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/motifs_songse
 featset = 0
 
 
-def make_pdf(outfile, song, mdb, respdir='', **kwargs):
+def make_pdf(outfile, song, mdb, respdir='', **ftable_options):
 
     comments = "\\begin{itemize} \\item Directory: %s \\item Song: %s\n" % (respdir.replace('_','\\_'), song) + \
-               "\\item Binsize: %(binsize)3.2f \\item Lags: %(nlags)d\n" % kwargs
+               "\\item Binsize: %(binsize)3.2f \\item Lags: %(nlags)d\n" % ftable_options
 
 
     # load the data and see if there's feature data
@@ -100,13 +105,13 @@ def make_pdf(outfile, song, mdb, respdir='', **kwargs):
 
     if have_feats:
         # compute the model
-        tls, prec = collectfeatures(rtls, mdb, **kwargs)
-        X,Y,P = fresps.make_additive_model(rtls, mdb, **kwargs)
-        A,Aerr = fresps.fit_additive_model(X,Y, **kwargs)
+        tls, prec = collectfeatures(rtls, mdb, **ftable_options)
+        X,Y,P = fresps.make_additive_model(rtls, mdb, **ftable_options)
+        A,Aerr = fresps.fit_additive_model(X,Y, **ftable_options)
         Yhat = A * X.T
         comments += "\\item Fit CC: %3.4f\n" % nx.corrcoef(Y, Yhat)[0,1]
-        if kwargs['meanresp']: comments += "\\item Mean firing rate (fit): %3.4f\n" % A[0]
-        f,fhat = xvalidate(song, A, mdb, respdir=respdir, **kwargs)
+        if ftable_options['meanresp']: comments += "\\item Mean firing rate (fit): %3.4f\n" % A[0]
+        f,fhat = xvalidate(song, A, mdb, fparams=P, respdir=respdir, **ftable_options)
         comments += "\\item Song CC: %3.4f\n" % nx.corrcoef(f, fhat)[0,1]
         #print "Song CC: %3.4f\n" % nx.corrcoef(f, fhat)[0,1]
 
@@ -118,12 +123,12 @@ def make_pdf(outfile, song, mdb, respdir='', **kwargs):
     ctp = plotutils.texplotter()
     ctp.inserttext(comments)
 
-
     fig = figure(figsize=(6.5,7.))
 
     #print "Plot song responses..."
     plot_songresps(song, mdb, fig=fig, respdir=respdir,
-                   songpred=A if have_feats else None, **kwargs)
+                   songpred=A if have_feats else None,
+                   fparams=P if have_feats else None, **ftable_options)
     ctp.plotfigure(fig)
 
     if have_feats:
@@ -143,7 +148,7 @@ def make_pdf(outfile, song, mdb, respdir='', **kwargs):
             fig = figure(figsize=(6.5, 3.0))
             #print "Plot response to %s" % F[i]
             plot_featresp_single(FRF, tls, mdb, F[j], i,
-                                 neighbor_feats=prec, fig=fig, **kwargs)
+                                 neighbor_feats=prec, fig=fig, **ftable_options)
             ctp.plotfigure(fig)
 
     #print "Generating pdf..."
@@ -159,6 +164,7 @@ def plot_songresps(song, mdb, fig=None, **kwargs):
     respdir - the directory to analyze
     postpad - the amount of time after motif offset to keep events (default 200)
     songpred - Supply the coefficients of the linear model to plot predicted response
+    fparams - Supply the names of the parameters (passed to make_additive_model)
     """
 
     respdir = kwargs.get('respdir','')
@@ -325,10 +331,6 @@ def plot_featresp_single(FRF, tls, mdb, feature, index,
 
     assert kwargs.has_key('binsize')
     assert tls.has_key(feature), "Toelis dict doesn't have feature %s" % feature
-    #r,t = fresps.resprate(tls[feature],onset=0,binsize=kwargs['binsize'],
-    #                      offset=kwargs['binsize']*kwargs['nlags'])
-
-    #assert r.size==lmpred.size, "Response histogram not same size as coefficient vector"
 
     if fig==None: fig = figure()
 
@@ -341,9 +343,6 @@ def plot_featresp_single(FRF, tls, mdb, feature, index,
     h = plotter.plot_feature(axspec, mdb, motif, 0, int(featnum))
     extent = h.get_extent()
     h.set_extent((extent[0], extent[1], yrmin, yrmax))
-    #axspec.set_yticks([])
-    #axresp = axspec.twinx()
-    #axresp.plot(t,r,t,lmpred)
     axspec.hold(1)
     axspec.plot(t,FRF[index,:])
     axspec.set_title(feature)
@@ -435,11 +434,11 @@ def splittoelis(tl, feattbl, postpad=None, abslen=600, **kwargs):
 
     return tls
 
-def xvalidate(song, A, mdb, **kwargs):
+def xvalidate(song, A, mdb, **ftable_options):
 
-    tl = fresps.loadresponses(song, pattern='*%s_recon.toe_lis', **kwargs)
+    tl = fresps.loadresponses(song, pattern='*%s_recon.toe_lis', **ftable_options)
     songtl = {song : tl['%s_recon' % song]}
-    Msong,f,F = fresps.make_additive_model(songtl, mdb, **kwargs)
+    Msong,f,F = fresps.make_additive_model(songtl, mdb, **ftable_options)
     return f, A * Msong.T
 
 
