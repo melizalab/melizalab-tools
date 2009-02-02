@@ -10,7 +10,7 @@ CDM, 1/2007
 import db, schema
 import os, re
 from dlab.pcmio import sndfile
-from dlab.datautils import bimatrix
+from dlab.datautils import bimatrix, bomatrix
 import scipy as nx
 import tempfile, shutil
 
@@ -106,6 +106,7 @@ def importfeaturemap(m, symbol, idxfile):
         fmap_srt,old_srt,new_srt = sortfeatures(fmap_dat)
     else:
         fmap_srt = fmap_dat
+        new_srt = None
 
     # check for something that's byte-identical in the db
     defined_fmaps = m.get_featmaps(symbol)
@@ -130,15 +131,26 @@ def importfeaturemap(m, symbol, idxfile):
     print "---> Imported feature map %d from %s" % (fmap_num, idxfile)
 
     # now do the decomposition
+    extractfeatures(m, symbol, fmap_num, idxfile, new_srt)
+
+
+def extractfeatures(m, symbol, fmap_num, idxfile=None, new_srt=None):
 
     # generate a temporary directory for all the crap fog_extract will produce
-    idxdir = os.path.dirname(idxfile)
     tdir = tempfile.mkdtemp()
 
     # copy the signal to a pcm file in the temp dir
     signal = sndfile(m.get_data(symbol)).read()
     pcmname = os.path.join(tdir, "%s.pcm" % symbol)
     sndfile(pcmname, 'w').write(signal)
+
+    # generate the idxfile if necessary
+    if idxfile==None:
+        fmap_dat = m.get_featmap_data(symbol, fmap_num)
+        idxfile = os.path.join(tdir,'%s_feats.bin' % symbol)
+        bomatrix(fmap_dat, idxfile, write_type='i')
+
+    fmap = m.get_featmap(symbol, fmap_num)
 
     cmd = "%s -v --nfft %d --fftshift %d --fbdw %f --tbdw %f --lbfile %s %s" % \
           (_extractor, fmap['nfft'], fmap['shift'],  _fbdw, _tbdw,
@@ -152,7 +164,7 @@ def importfeaturemap(m, symbol, idxfile):
              fields = line.split()
              featnum = int(fields[0])
              s = sndfile(os.path.join(tdir, "%s_sfeature_%03d.pcm" % (symbol, featnum)))
-             if _resort:
+             if new_srt!=None:
                  featnum = new_srt[featnum]
              feat = schema.Feature({
                  'id' : featnum,
