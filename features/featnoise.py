@@ -14,15 +14,16 @@ to 1 if feature j is present at lag s.
 
 Usage:
 
-featnoise.py <celltable> <outfile>
+featnoise.py [-f <fset>] <celltable> <outfile>
 
 Generates <outfile.pdf> with nice graphics, and <outfile.tbl> with
-statistics for each neuron/song pair
+statistics for each neuron/song pair. <fset> is the the featureset
+to use (default 0)
 
 """
 
 from __future__ import with_statement
-import os, sys, glob
+import os, sys, glob, getopt
 import numpy as nx
 # this program sucks down memory if it's not using the PDF backend driver
 import matplotlib
@@ -66,6 +67,7 @@ ftable_options =  {'binsize' : binsize,
                    'prepad' : -500,
                    'meanresp' : True}
 _spon_range = (-2000, 0)
+_featset = 0
 
 example = {'dir': os.path.join(_data_dir, 'st358/20080129/cell_4_2_3'),
            'base' : 'cell_4_2_3',
@@ -73,6 +75,9 @@ example = {'dir': os.path.join(_data_dir, 'st358/20080129/cell_4_2_3'),
 example = {'dir': os.path.join(_data_dir, 'st376/20090107/cell_1_1_6'),
            'base' : 'cell_1_1_6',
            'song' : 'C0'}
+example = {'dir': os.path.join(_data_dir, 'st445/20090202/cell_2_4_5'),
+           'base' : 'cell_2_4_5',
+           'song' : 'B0'}
 
 # used in plotting
 _stimdirs = [os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/'),
@@ -84,7 +89,17 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     """
     Compute ftable model for a song
     """
+
+    featset = ftable_options.get('featset',_featset)
     tls = fresps.loadresponses(song, respdir=respdir)
+    # put cfeats in a separate dict
+    ctls = {}
+    for stim in tls.keys():
+        if stim.find('cfeats') > -1:
+            ctls[stim] = tls.pop(stim)
+
+    if featset==1:
+        tls = ctls
     X,Y,P = fresps.make_additive_model(tls, ndb, stimdir=stimdir,**ftable_options)
     A,XtX = fresps.fit_additive_model(X,Y, **ftable_options)
 
@@ -113,20 +128,27 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     ax.set_ylabel('Song')
 
     # recon responses
-    glb = glob.glob(os.path.join(respdir, '*%s_recon.toe_lis' % song))
-    ax = fig.add_subplot(nplots,1,3)
-    recontl = toelis.readfile(glb[0])
-    plotutils.plot_raster(recontl, start=0, stop=T[-1], ax=ax, mec='k')
-    ax.set_yticks([])
-    ax.set_xticklabels('')
-    ax.set_ylabel('Recon')
+    # stupid hard-coding
+    recon_pattern = '*%s_recon.toe_lis' if featset==0 else '*%s_crecon.toe_lis'
+    glb = glob.glob(os.path.join(respdir, recon_pattern % song))
+    if len(glb) > 0:
+        ax = fig.add_subplot(nplots,1,3)
+        recontl = toelis.readfile(glb[0])
+        plotutils.plot_raster(recontl, start=0, stop=T[-1], ax=ax, mec='k')
+        ax.set_yticks([])
+        ax.set_xticklabels('')
+        ax.set_ylabel('Recon')
+    else:
+        # have to have something to validate against if I forgot to record recon response (B0)
+        recontl = songtl
         
     # prediction vs fnoise 
     Yhat = A * X.T
     cc_fit = nx.corrcoef(Yhat,Y)[1,0]
 
     # validation vs reconstruction
-    vtls = {song : recontl}
+    tbl_name = '%s_%d_recon' % (song, featset)
+    vtls = {tbl_name : recontl}
     Msong,f,F = fresps.make_additive_model(vtls, ndb, fparams=P, stimdir=stimdir, **ftable_options)
     fhat = A * Msong.T
     cc_val = nx.corrcoef(fhat,f)[1,0]
@@ -154,7 +176,7 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
 
     textopts = {'ha' : 'center', 'fontsize' : 10}
     fig.text(0.5, 0.95, '%s (%s)' % (song, respdir), **textopts)
-    fig.text(0.5, 0.93, 'fit CC: %3.4f; xvalid CC: %3.4f; mu: %3.4f' % (cc_fit, cc_val, A[0]), **textopts)
+    fig.text(0.5, 0.93, 'featset: %d; fit CC: %3.4f; xvalid CC: %3.4f; mu: %3.4f' % (featset, cc_fit, cc_val, A[0]), **textopts)
     fig.text(0.5, 0.91, 'binsize=%(binsize)3.2f ms; kernel=%(kernwidth)3.2f ms; postlags=%(nlags)d' % ftable_options,
              **textopts)
 
@@ -183,14 +205,19 @@ def loadstim(stimname):
 
 if __name__=='__main__':
 
-    if len(sys.argv) < 3:
+    ndb = db.motifdb(_notedb,'r')
+
+    opts,args = getopt.getopt(sys.argv[1:], 'f:')
+    for o,a in opts:
+        if o=='-f':
+            _featset = int(a)
+    
+    if len(args) < 2:
         print __doc__
         sys.exit(-1)
 
-    ndb = db.motifdb(_notedb,'r')
-
-    mapfile = sys.argv[1]
-    outfile = os.path.splitext(sys.argv[2])[0]
+    mapfile = args[0]
+    outfile = os.path.splitext(args[1])[0]
     
     infp = open(mapfile,'rt')
     mtp = plotutils.multiplotter()
@@ -207,7 +234,7 @@ if __name__=='__main__':
                 print >> sys.stderr, 'Analyzing %s_%s::%s' % (bird, basename, song)
                 try:
                     respdir = os.path.join(_data_dir, 'st' + bird, date, basename)
-                    fig,m_spon,m_resp,cc_fit,cc_valid = analyze_song(song, ndb, respdir=respdir,
+                    fig,m_spon,m_resp,cc_fit,cc_valid = analyze_song(song, ndb, respdir=respdir, featset=_featset,
                                                                      **ftable_options)
                     mtp.plotfigure(fig)
                     outfp.write('st%s_%s\t%s\t%3.4f\t%3.4f\t%3.4f\t%3.4f\n' % (bird,basename,song,
