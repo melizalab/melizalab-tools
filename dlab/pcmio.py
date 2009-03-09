@@ -152,7 +152,7 @@ class _pcmfile(_sndfile):
         
 
 
-class _sndfilemetaclass(object):
+class _sndfilemetaclass(type):
     def __init__(self, name, bases, attributes):
         # assume no subclasses of _sndfile
         self._cls_dict = {'.wav' : _wavfile,
@@ -168,4 +168,17 @@ class _sndfilemetaclass(object):
         return subclass(filename, *args, **kwargs)
 
 class sndfile:
+    """
+    Wrapper class for reading and writing sound files of various formats.
+    Determines the format of the file from the extension of the file
+
+    Usage:
+    fp = sndfile('sound.pcm','r')  - open a read-only connection to 'sound.pcm'
+    fp = sndfile('sound.wav','w')  - open a write connection to 'sound.wav'
+
+    Supported formats:
+    wave  (.wav)
+    pcm (.pcm)
+    pcmseq2 (.pcm_seq2, .pcmseq2, .pcm_seq)
+    """
     __metaclass__ = _sndfilemetaclass
