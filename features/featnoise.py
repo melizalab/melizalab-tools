@@ -29,13 +29,13 @@ import numpy as nx
 import matplotlib
 matplotlib.use('PDF')
 from matplotlib import cm
-from pylab import figure
+from pylab import figure,close
 
 from motifdb import db
 import features.featureresponses as fresps
 from mspikes import toelis
 from dlab.signalproc import spectro
-from dlab import plotutils, pcmio, datautils
+from dlab import plotutils, pcmio, datautils, pointproc
 import spikes.stat as sstat
 
 # Stim/Response data: I have some early preliminary data and some
@@ -57,9 +57,11 @@ _data_dir = os.path.join(os.environ['HOME'], 'z1/acute_data')
 _notedb = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/motifs_songseg.h5')
 
 # analysis parameters. these are the same as used in the standard ftable analysis
-binsize = 15.
-contin_bandwidth = 30.
+binsize = 5.
+contin_bandwidth = 10.
+fmax = 0.5 / contin_bandwidth
 continwindow = 200
+kernel = 'normal'
 ftable_options =  {'binsize' : binsize,
                    'kernwidth' : contin_bandwidth,
                    'nlags' : int(continwindow / binsize),
@@ -68,21 +70,19 @@ ftable_options =  {'binsize' : binsize,
                    'meanresp' : True}
 _spon_range = (-2000, 0)
 _featset = 0
-
-example = {'dir': os.path.join(_data_dir, 'st358/20080129/cell_4_2_3'),
-           'base' : 'cell_4_2_3',
-           'song' : 'C0'}
-example = {'dir': os.path.join(_data_dir, 'st376/20090107/cell_1_1_6'),
-           'base' : 'cell_1_1_6',
-           'song' : 'C0'}
-example = {'dir': os.path.join(_data_dir, 'st445/20090202/cell_2_4_5'),
-           'base' : 'cell_2_4_5',
-           'song' : 'B0'}
+_do_plot = True
+_do_plot_coh = True
+_err = [2, 0.05]   # determines which points to keep within the fpass window
+_coh_options = { 'mtm_p' : 20,
+                 'fpass' : [0., 0.5 / binsize],
+                 'Fs' : 1./binsize}
 
 # used in plotting
 _stimdirs = [os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/'),
             os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/acute'),]
 _specthresh = 0.1
+_figparams = {'figsize':(5.0,7.0),
+              'dpi':300}
 
 def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
                  compute_err=False, **ftable_options):
@@ -103,45 +103,49 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     X,Y,P = fresps.make_additive_model(tls, ndb, stimdir=stimdir,**ftable_options)
     A,XtX = fresps.fit_additive_model(X,Y, **ftable_options)
 
-    # plot stuff
-    fig = figure(figsize=(7,10))
-
-    nplots = 8
-    # song spectrogram
-    sax = fig.add_subplot(nplots,1,1)
     songos = loadstim(song)
-    (PSD, T, F) = spectro(songos, Fs=20)
-    extent = (T[0], T[-1], F[0], F[-1])
-    sax.imshow(nx.log10(PSD[:,:-1] + _specthresh), cmap=matplotlib.cm.Greys, extent=extent,
-               origin='lower', aspect='auto')
-    sax.set_xticklabels('')
+    mlen = songos.size / 20.
+    
+    if _do_plot:
+        # plot stuff
+        fig = figure(**_figparams)
+        (PSD, T, F) = spectro(songos, Fs=20)
+        nplots = 8
+        # song spectrogram
+        sax = fig.add_subplot(nplots,1,1)
+        extent = (T[0], T[-1], F[0], F[-1])
+        sax.imshow(nx.log10(PSD[:,:-1] + _specthresh), cmap=matplotlib.cm.Greys, extent=extent,
+                   origin='lower', aspect='auto')
+        sax.set_xticklabels('')
 
     # song responses
     glb = glob.glob(os.path.join(respdir, '*%s.toe_lis' % song))
     if len(glb) == 0:
         glb = glob.glob(os.path.join(respdir, '*%s_motifs_000.toe_lis' % song))
-    ax = fig.add_subplot(nplots,1,2)
     songtl = toelis.readfile(glb[0])
-    plotutils.plot_raster(songtl, start=0, stop=T[-1], ax=ax, mec='k')
-    ax.set_yticks([])
-    ax.set_xticklabels('')
-    ax.set_ylabel('Song')
+    if _do_plot:
+        ax = fig.add_subplot(nplots,1,2)
+        plotutils.plot_raster(songtl, start=0, stop=T[-1], ax=ax, mec='k')
+        ax.set_yticks([])
+        ax.set_xticklabels('')
+        ax.set_ylabel('Song')
 
     # recon responses
     # stupid hard-coding
     recon_pattern = '*%s_recon.toe_lis' if featset==0 else '*%s_crecon.toe_lis'
     glb = glob.glob(os.path.join(respdir, recon_pattern % song))
-    if len(glb) > 0:
+    if len(glb) > 0 and _do_plot:
         ax = fig.add_subplot(nplots,1,3)
         recontl = toelis.readfile(glb[0])
         plotutils.plot_raster(recontl, start=0, stop=T[-1], ax=ax, mec='k')
         ax.set_yticks([])
         ax.set_xticklabels('')
         ax.set_ylabel('Recon')
-    else:
+    if len(glb)==0:
         # have to have something to validate against if I forgot to record recon response (B0)
         recontl = songtl
-        
+
+    
     # prediction vs fnoise 
     Yhat = A * X.T
     cc_fit = nx.corrcoef(Yhat,Y)[1,0]
@@ -151,48 +155,89 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     vtls = {tbl_name : recontl}
     Msong,f,F = fresps.make_additive_model(vtls, ndb, fparams=P, stimdir=stimdir, **ftable_options)
     fhat = A * Msong.T
-    cc_val = nx.corrcoef(fhat,f)[1,0]
-
-    # plot fit
-    ax = fig.add_subplot(nplots,1,4)
     t = nx.arange(0,fhat.size*ftable_options['binsize'],ftable_options['binsize'])
-    ax.plot(t,f,t,fhat)
-    ax.set_xlim([0,T[-1]])
-    ax.set_ylabel('Prediction')
 
-    # plot FRF
+    # calculate mean responses, etc
+    m_spon = sstat.meanrate(songtl, _spon_range)
+    m_resp = sstat.meanrate(songtl, (0, t[-1]))
+    coh_recon,coh_song,freq,sig = pointproc.coherenceratio(recontl, songtl, err = _err,
+                                                           tgrid=(0,t[-1]), **_coh_options)
+    sig,bandw,fcut_song = freqcut(freq,sig,mlen+continwindow,fmax)
+    coh_recon_summ = cohsummary(coh_recon,coh_song,sig)
+
+    # calculate prediction similarity
+    cc_val = nx.corrcoef(fhat,f)[1,0]
+    coh_val,coh_self,freq,sig = pointproc.coherenceratio(fhat, recontl, err = _err,
+                                                         **_coh_options)
+    sig,bandw,fcut = freqcut(freq,sig,mlen+continwindow,fmax)
+    coh_val_summ = cohsummary(coh_val,coh_self,sig)
+
+    if _do_plot_coh:
+        fig2 = figure(**_figparams)
+        ax = fig2.add_subplot(111)
+        ax.plot(freq,coh_self,freq,coh_val)
+        ax.vlines(fcut,0,1.0)
+        ax.set_title('%s (%s)' % (song, respdir), ha='center', fontsize=10)
+
     AA,PP = fresps.reshape_parameters(A,P)
     FRF,ind = fresps.makefrf(AA)
-    ax = fig.add_subplot(2,1,2)
-    cmax = max(abs(FRF.max()), abs(FRF.min()))
-    tmax = FRF.shape[1] * ftable_options['binsize']
-    h = ax.imshow(FRF, extent=(0, tmax, 0, FRF.shape[0]),
-                  clim=(-cmax, cmax), interpolation='nearest')
-              #cmap=matplotlib.cm.RdBu_r, )
-    ax.set_ylabel('Note (ranked)')
-    ax.set_xlabel('Time (ms)')
-    ax.set_title('FRF', fontsize=10)
-    fig.colorbar(h, ax=ax)
+    if _do_plot:
+        # plot fit
+        ax = fig.add_subplot(nplots,1,4)
+        ax.plot(t,f,t,fhat)
+        ax.set_xlim([0,T[-1]])
+        ax.set_ylabel('Prediction')
 
-    textopts = {'ha' : 'center', 'fontsize' : 10}
-    fig.text(0.5, 0.95, '%s (%s)' % (song, respdir), **textopts)
-    fig.text(0.5, 0.93, 'featset: %d; fit CC: %3.4f; xvalid CC: %3.4f; mu: %3.4f' % (featset, cc_fit, cc_val, A[0]), **textopts)
-    fig.text(0.5, 0.91, 'binsize=%(binsize)3.2f ms; kernel=%(kernwidth)3.2f ms; postlags=%(nlags)d' % ftable_options,
-             **textopts)
+        # plot FRF
+        ax = fig.add_subplot(2,1,2)
+        cmax = max(abs(FRF.max()), abs(FRF.min()))
+        tmax = FRF.shape[1] * ftable_options['binsize']
+        h = ax.imshow(FRF, extent=(0, tmax, 0, FRF.shape[0]),
+                      clim=(-cmax, cmax), interpolation='nearest')
+                  #cmap=matplotlib.cm.RdBu_r, )
+        ax.set_ylabel('Note (ranked)')
+        ax.set_xlabel('Time (ms)')
+        ax.set_title('FRF', fontsize=10)
+        fig.colorbar(h, ax=ax)
 
-    # mark note offsets
-    axlim = ax.axis()
-    note_offsets = nx.asarray([len(x) for x in AA.values()]) - ftable_options['nlags']
-    note_offsets = note_offsets[ind]*ftable_options['binsize']
-    ax.hold(1)
-    ax.plot(note_offsets, nx.arange(note_offsets.size)+1, 'k|', mew=1, ms=1)
-    ax.axis(axlim)
+        textopts = {'ha' : 'center', 'fontsize' : 10}
+        fig.text(0.5, 0.95, '%s (%s)' % (song, respdir), **textopts)
+        fig.text(0.5, 0.93, 'featset: %d; fit CC: %3.4f; xvalid CC: %3.4f; xvalid coh: %3.4f; mu: %3.4f' % (featset, cc_fit, cc_val, coh_val_summ, A[0]), **textopts)
+        fig.text(0.5, 0.91, 'fcut=%3.2f Hz;' % fcut + \
+                 'binsize=%(binsize)3.2f ms; kernel=%(kernwidth)3.2f ms; postlags=%(nlags)d' % ftable_options,
+                 **textopts)
+
+        # mark note offsets
+        axlim = ax.axis()
+        note_offsets = nx.asarray([len(x) for x in AA.values()]) - ftable_options['nlags']
+        note_offsets = note_offsets[ind]*ftable_options['binsize']
+        ax.hold(1)
+        ax.plot(note_offsets, nx.arange(note_offsets.size)+1, 'k|', mew=1, ms=1)
+        ax.axis(axlim)
 
     # calculate mean FR etc
-    m_spon = sstat.meanrate(songtl, _spon_range).mean()
-    m_resp = sstat.meanrate(songtl, (0, t[-1])).mean()
+    m_feat = FRF.sum() / FRF.shape[0]
+    max_feat = FRF.sum(0).max()
 
-    return fig,m_spon,m_resp,cc_fit,cc_val
+    if not _do_plot: fig = None
+    if not _do_plot_coh: fig2 = None
+    return {'fig':fig,
+            'cohfig':fig2,
+            'song_len':mlen,
+            'm_spon':m_spon.mean(),
+            'm_resp':m_resp.mean(),
+            'm_feat':m_feat,
+            'max_feat':max_feat,
+            'cc_fit':cc_fit,
+            'cc_val':cc_val,
+            'coh_recon':coh_recon_summ,
+            'song_fcut':fcut_song * 1000,
+            'coh_val':coh_val_summ,
+            'coh_fcut':fcut * 1000,
+            'songtl':recontl,
+            'r_pred':fhat,
+            'r_song':f
+            }
 
 def loadstim(stimname):
     for dir in _stimdirs:
@@ -202,6 +247,50 @@ def loadstim(stimname):
             return pcmio.sndfile(os.path.join(dir, stimname + '.pcm')).read()
     raise ValueError, "Can't locate stimulus file for %s" % stimname
 
+def cohsummary(C,Cself,sig):
+    if sig.sum() == 0: return 0.0
+    return (C[sig] / Cself[sig]).mean()
+
+def freqcut(f,sig,mlen,fmax=None):
+    """
+    Determine the frequency cutoff. This is defined as the end of the
+    first contiguous window starting at f[0] and of width at least W.
+    fmax can set an optional upper limit to the frequency cutoff
+    (i.e. if there's a smoothing window involved somewheres)
+
+    Returns sig,bandw,fstop
+    sig is a vector with True values for significant data points
+    bandw is the effective frequency resolution of the coherence
+    fstop is the cutoff, or 0 if there is no significant band
+    """
+    bw = _coh_options['mtm_p'] / mlen * 2
+    if sig.sum() == 0:
+        return sig, bw, 0.0
+
+    bwshort = f.searchsorted(bw/2)
+    sigruns = datautils.runs(sig,True)
+
+    out = nx.zeros_like(sig)
+    runlen = sigruns[0]
+    if runlen < bwshort:
+        return out, bw, 0.0
+
+    if fmax!=None:
+        imax = f.searchsorted(fmax)
+        runlen = min(runlen,imax)
+    if runlen==sig.size:
+        runlen -= 1
+    out[:runlen] = True
+
+    return out, bw, f[runlen]
+
+
+example = {'dir': os.path.join(_data_dir, 'st358/20080129/cell_4_2_3'),
+           'base' : 'cell_4_2_3',
+           'song' : 'C0'}
+example = {'dir': os.path.join(_data_dir, 'st418/20090112/cell_1_4_3'),
+           'base' : 'cell_1_4_3',
+           'song' : 'A8'}
 
 if __name__=='__main__':
 
@@ -218,12 +307,33 @@ if __name__=='__main__':
 
     mapfile = args[0]
     outfile = os.path.splitext(args[1])[0]
+
+    metadata = ['Input file: %s' % mapfile,
+                'Data directory: %s' % _data_dir,
+                'Response smoothing kernel: %s' % kernel,
+                'Response smoothing bandwidth: %3.2f ms' % contin_bandwidth,
+                'Effective upper frequency limit: %3.2f Hz' % fmax,
+                'Model postpadding: %3.2f ms' % continwindow,
+                'Model prepadding : %3.2f ms' % ftable_options['prepad'],
+                'Model lags: %d' % ftable_options['nlags'],
+                'Ragged model parameters: %s' % ftable_options['ragged'],
+                'Lower bound for coherence: %3.2f' % _err[1],
+                'MTM time-bandwidth: %3.1f' % _coh_options['mtm_p'],
+                'Coherence max frequency: %3.2f Hz' % (_coh_options['fpass'][1] * 1000),
+                ]
+
     
     infp = open(mapfile,'rt')
-    mtp = plotutils.multiplotter()
+    if _do_plot:
+        mtp = plotutils.multiplotter()
+    if _do_plot_coh:
+        cohpdf = plotutils.multiplotter()
 
     with open(outfile + '.tbl','wt') as outfp:
-        outfp.write("cell\tsong\tspon.m\tresp.m\tfit.cc\tsong.cc\n")
+        for line in metadata:
+            outfp.write('# ' + line + '\n')
+        outfp.write("cell\tsong\tsong.len\tspon.m\tresp.m\tfeat.m\tfeat.max\t" + \
+                    "fit.cc\tvalid.cc\trecon.coh\tvalid.coh\tsong.fcut\trecon.fcut\n")
         for count,line in enumerate(infp):
             if line.startswith('#') or len(line.strip())==0: continue
             fields = line.split()
@@ -234,13 +344,17 @@ if __name__=='__main__':
                 print >> sys.stderr, 'Analyzing %s_%s::%s' % (bird, basename, song)
                 try:
                     respdir = os.path.join(_data_dir, 'st' + bird, date, basename)
-                    fig,m_spon,m_resp,cc_fit,cc_valid = analyze_song(song, ndb, respdir=respdir, featset=_featset,
+                    Z = analyze_song(song, ndb, respdir=respdir, featset=_featset,
                                                                      **ftable_options)
-                    mtp.plotfigure(fig)
-                    outfp.write('st%s_%s\t%s\t%3.4f\t%3.4f\t%3.4f\t%3.4f\n' % (bird,basename,song,
-                                                                            m_spon,m_resp,cc_fit,cc_valid))
+                    if _do_plot: mtp.plotfigure(Z['fig'])
+                    if _do_plot_coh: cohpdf.plotfigure(Z['cohfig'])
+                    outfp.write('st%s_%s\t%s\t' % (bird,basename,song))
+                    outfp.write('%(song_len)3.4f\t%(m_spon)3.4f\t%(m_resp)3.4f\t%(m_feat)3.4f\t%(max_feat)3.4f\t' % Z)
+                    outfp.write('%(cc_fit)3.4f\t%(cc_val)3.4f\t%(coh_recon)3.4f\t' % Z)
+                    outfp.write('%(coh_val)3.4f\t%(song_fcut)3.4f\t%(coh_fcut)3.4f\n' % Z)
                     outfp.flush()
                 except Exception, e:
                     print >> sys.stderr, 'Error: %s' % e
 
-    mtp.writepdf(outfile + '.pdf')
+    if _do_plot: mtp.writepdf(outfile + '.pdf')
+    if _do_plot_coh: cohpdf.writepdf(outfile + '_coh.pdf')
