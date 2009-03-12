@@ -57,6 +57,7 @@ _data_dir = os.path.join(os.environ['HOME'], 'z1/acute_data')
 _notedb = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/motifs_songseg.h5')
 
 # analysis parameters. these are the same as used in the standard ftable analysis
+Fs = 20.  # this is the sampling rate of the signals
 binsize = 5.
 contin_bandwidth = 10.
 fmax = 0.5 / contin_bandwidth
@@ -71,7 +72,7 @@ ftable_options =  {'binsize' : binsize,
 _spon_range = (-2000, 0)
 _featset = 0
 _do_plot = True
-_do_plot_coh = True
+_do_plot_coh = False
 _err = [2, 0.05]   # determines which points to keep within the fpass window
 _coh_options = { 'mtm_p' : 20,
                  'fpass' : [0., 0.5 / binsize],
@@ -80,9 +81,21 @@ _coh_options = { 'mtm_p' : 20,
 # used in plotting
 _stimdirs = [os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/'),
             os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/acute'),]
-_specthresh = 0.1
-_figparams = {'figsize':(5.0,7.0),
-              'dpi':300}
+_specthresh = 100
+_figparams = {'figsize':(7,10)}
+
+def compute_frf(tls,vtls,ndb,stimdir,ftable_options):
+    X,Y,P = fresps.make_additive_model(tls, ndb, stimdir=stimdir,**ftable_options)
+    A,XtX = fresps.fit_additive_model(X,Y, **ftable_options)
+    # prediction vs fnoise 
+    Yhat = A * X.T
+    AA,PP = fresps.reshape_parameters(A,P)
+    FRF,ind = fresps.makefrf(AA)
+
+    Msong,f,F = fresps.make_additive_model(vtls, ndb, fparams=P, stimdir=stimdir, **ftable_options)
+    fhat = A * Msong.T
+
+    return Y,Yhat,f,fhat,A[0],AA,FRF,ind
 
 def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
                  compute_err=False, **ftable_options):
@@ -100,16 +113,14 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
 
     if featset==1:
         tls = ctls
-    X,Y,P = fresps.make_additive_model(tls, ndb, stimdir=stimdir,**ftable_options)
-    A,XtX = fresps.fit_additive_model(X,Y, **ftable_options)
 
     songos = loadstim(song)
-    mlen = songos.size / 20.
+    mlen = songos.size / Fs
     
     if _do_plot:
         # plot stuff
         fig = figure(**_figparams)
-        (PSD, T, F) = spectro(songos, Fs=20)
+        (PSD, T, F) = spectro(songos, Fs=Fs)
         nplots = 8
         # song spectrogram
         sax = fig.add_subplot(nplots,1,1)
@@ -145,19 +156,16 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
         # have to have something to validate against if I forgot to record recon response (B0)
         recontl = songtl
 
-    
-    # prediction vs fnoise 
-    Yhat = A * X.T
-    cc_fit = nx.corrcoef(Yhat,Y)[1,0]
-
     # validation vs reconstruction
     tbl_name = '%s_%d_recon' % (song, featset)
     vtls = {tbl_name : recontl}
-    Msong,f,F = fresps.make_additive_model(vtls, ndb, fparams=P, stimdir=stimdir, **ftable_options)
-    fhat = A * Msong.T
+
+    # call workhorse fxn
+    Y,Yhat,f,fhat,mu,AA,FRF,ind = compute_frf(tls,vtls,ndb,stimdir,ftable_options)
     t = nx.arange(0,fhat.size*ftable_options['binsize'],ftable_options['binsize'])
 
     # calculate mean responses, etc
+    cc_fit = nx.corrcoef(Yhat,Y)[1,0]
     m_spon = sstat.meanrate(songtl, _spon_range)
     m_resp = sstat.meanrate(songtl, (0, t[-1]))
     coh_recon,coh_song,freq,sig = pointproc.coherenceratio(recontl, songtl, err = _err,
@@ -179,8 +187,6 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
         ax.vlines(fcut,0,1.0)
         ax.set_title('%s (%s)' % (song, respdir), ha='center', fontsize=10)
 
-    AA,PP = fresps.reshape_parameters(A,P)
-    FRF,ind = fresps.makefrf(AA)
     if _do_plot:
         # plot fit
         ax = fig.add_subplot(nplots,1,4)
@@ -202,7 +208,7 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
 
         textopts = {'ha' : 'center', 'fontsize' : 10}
         fig.text(0.5, 0.95, '%s (%s)' % (song, respdir), **textopts)
-        fig.text(0.5, 0.93, 'featset: %d; fit CC: %3.4f; xvalid CC: %3.4f; xvalid coh: %3.4f; mu: %3.4f' % (featset, cc_fit, cc_val, coh_val_summ, A[0]), **textopts)
+        fig.text(0.5, 0.93, 'featset: %d; fit CC: %3.4f; xvalid CC: %3.4f; xvalid coh: %3.4f; mu: %3.4f' % (featset, cc_fit, cc_val, coh_val_summ, mu), **textopts)
         fig.text(0.5, 0.91, 'fcut=%3.2f Hz;' % fcut + \
                  'binsize=%(binsize)3.2f ms; kernel=%(kernwidth)3.2f ms; postlags=%(nlags)d' % ftable_options,
                  **textopts)
