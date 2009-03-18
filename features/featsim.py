@@ -91,6 +91,7 @@ def featsim(song, ndb, featmap=0):
             f2 = fnames[j]
             F2 = spec_cache[f2]
             sys.stdout.write('.')
+            sys.stdout.flush()
             #print "%s vs %s" % (f1, f2)
             sim = specsim(F1,F2)
             out[i,j] = sim
@@ -107,7 +108,7 @@ if __name__=="__main__":
 
     songs = sys.argv[1:]
 
-    ndb = db.songdb(_ndbfile, 'r')
+    ndb = db.motifdb(_ndbfile, 'r')
 
     for song in songs:
 
