@@ -191,6 +191,11 @@ class filecache(dict):
 
     _handler = open
 
+    def __init__(self, handler=_handler):
+        """ Initialize the cache with a handler """
+        super(filecache, self).__init__()
+        self._handler = handler
+
     def __gethandler(self):
         return self._handler
     def __sethandler(self, handler):
