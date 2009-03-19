@@ -374,12 +374,16 @@ def makefrf(AA, ind=None, fill=0, descending=False):
     frf = nx.ones((len(AA), maxlen)) * fill
 
     if ind==None:
-        meanresp = [x.mean() for x in AA.values()]
+        meanresp = [x.max() for x in AA.values()]
         ind = nx.argsort(meanresp)
         if descending: ind = ind[::-1]
+    
 
     for i,j in enumerate(ind):
-        v = AA.values()[j]
+        if isinstance(j, int):
+            v = AA.values()[j]
+        else:
+            v = AA[j]
         frf[i,:v.size] = v
 
     return frf, ind
