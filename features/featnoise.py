@@ -50,7 +50,7 @@ import spikes.stat as sstat
 # set the original song has a different name.
 
 _ftable_dir = os.path.join(os.environ['HOME'], 'z1/acute_data/analysis/feat_noise/tables')
-
+_feat_sim_dir = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/featsim')
 _data_dir = os.path.join(os.environ['HOME'], 'z1/acute_data')
 
 # the motifdb is used to look up feature duration
@@ -84,35 +84,28 @@ _stimdirs = [os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/'),
 _specthresh = 100
 _figparams = {'figsize':(7,10)}
 
-def compute_frf(tls,vtls,ndb,stimdir,ftable_options):
-    X,Y,P = fresps.make_additive_model(tls, ndb, stimdir=stimdir,**ftable_options)
+def compute_frf(tls,vtls,ndb,stimdir=_ftable_dir,
+                featset=_featset,**ftable_options):
+    X,Y,P = fresps.make_additive_model(tls, ndb, stimdir=stimdir,
+                                       featset=featset,**ftable_options)
     A,XtX = fresps.fit_additive_model(X,Y, **ftable_options)
     # prediction vs fnoise 
     Yhat = A * X.T
     AA,PP = fresps.reshape_parameters(A,P)
     FRF,ind = fresps.makefrf(AA)
 
-    Msong,f,F = fresps.make_additive_model(vtls, ndb, fparams=P, stimdir=stimdir, **ftable_options)
+    Msong,f,F = fresps.make_additive_model(vtls, ndb, fparams=P, stimdir=stimdir,
+                                           featset=featset,**ftable_options)
     fhat = A * Msong.T
 
     return Y,Yhat,f,fhat,A[0],AA,FRF,ind
 
 def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
-                 compute_err=False, **ftable_options):
+                 featset=_featset, **ftable_options):
     """
     Compute ftable model for a song
     """
-
-    featset = ftable_options.get('featset',_featset)
-    tls = fresps.loadresponses(song, respdir=respdir)
-    # put cfeats in a separate dict
-    ctls = {}
-    for stim in tls.keys():
-        if stim.find('cfeats') > -1:
-            ctls[stim] = tls.pop(stim)
-
-    if featset==1:
-        tls = ctls
+    tls,ctls = loadresponses(song, respdir)
 
     songos = loadstim(song)
     mlen = songos.size / Fs
@@ -161,7 +154,8 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     vtls = {tbl_name : recontl}
 
     # call workhorse fxn
-    Y,Yhat,f,fhat,mu,AA,FRF,ind = compute_frf(tls,vtls,ndb,stimdir,ftable_options)
+    model = compute_frf(tls,vtls,ndb,stimdir,**ftable_options)
+    Y,Yhat,f,fhat,mu,AA,FRF,ind = model
     t = nx.arange(0,fhat.size*ftable_options['binsize'],ftable_options['binsize'])
 
     # calculate mean responses, etc
@@ -241,8 +235,7 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
             'coh_val':coh_val_summ,
             'coh_fcut':fcut * 1000,
             'songtl':recontl,
-            'r_pred':fhat,
-            'r_song':f
+            'model':model
             }
 
 def loadstim(stimname):
@@ -252,6 +245,15 @@ def loadstim(stimname):
         elif os.path.exists(os.path.join(dir, stimname + '.pcm')):
             return pcmio.sndfile(os.path.join(dir, stimname + '.pcm')).read()
     raise ValueError, "Can't locate stimulus file for %s" % stimname
+
+def loadresponses(song, respdir):
+    tls = fresps.loadresponses(song, respdir=respdir)
+    # put cfeats in a separate dict
+    ctls = {}
+    for stim in tls.keys():
+        if stim.find('cfeats') > -1:
+            ctls[stim] = tls.pop(stim)
+    return tls,ctls
 
 def cohsummary(C,Cself,sig):
     if sig.sum() == 0: return 0.0
@@ -290,10 +292,49 @@ def freqcut(f,sig,mlen,fmax=None):
 
     return out, bw, f[runlen]
 
+#############################
+# Functions involving feature distances.  The spectrotemporal
+# cross-correlations are calculated ahead of time and loaded as
+# needed.
 
-example = {'dir': os.path.join(_data_dir, 'st358/20080129/cell_4_2_3'),
-           'base' : 'cell_4_2_3',
-           'song' : 'C0'}
+def load_similarity(song):
+    """ load similarity matrix """
+    simfile = os.path.join(_feat_sim_dir, '%s_sim.tbl' % song)
+    with open(simfile,'rt') as fp:
+        fnames = nx.asarray(fp.readline().strip().split('\t'))
+        fsim = nx.loadtxt(fp,delimiter='\t')
+    return fnames, fsim
+
+def split_features(AA,fnames,fsim,thresh=0.50):
+    """
+    Split the features into two groups and then calculate
+    inter-feature distance distribution for each group
+    """
+    fr = nx.asarray([AA[x].mean() for x in fnames])
+    # 50% of the range from max FR to min FR
+    #frcut = fr.max() - fr.ptp() * thresh
+    # more than thresh SD above mean FR
+    frcut = fr.mean() + fr.std() * (thresh + 1)
+    
+    fr_ind = fr.argsort()
+    fr = fr[fr_ind]
+    half_fr_ind = fr.searchsorted(frcut)
+    
+    indind = (fr_ind.argsort() >= half_fr_ind)
+    excite_ind = indind.nonzero()[0]
+    other_ind = (~indind).nonzero()[0]
+
+    # extract values
+    fsim_excite = fsim[excite_ind,:][:,excite_ind]
+    fsim_other = fsim[excite_ind,:][:,other_ind]
+    I = nx.tri(fsim_excite.shape[0],fsim_excite.shape[0],-1,dtype=bool)
+    
+    return fsim_excite[I], fsim_other.ravel() #, excite_ind, other_ind, fr
+
+
+example = {'dir': os.path.join(_data_dir, 'st418/20090112/cell_1_4_2'),
+           'base' : 'cell_1_4_2',
+           'song' : 'B8'}
 example = {'dir': os.path.join(_data_dir, 'st418/20090112/cell_1_4_3'),
            'base' : 'cell_1_4_3',
            'song' : 'A8'}
@@ -339,7 +380,8 @@ if __name__=='__main__':
         for line in metadata:
             outfp.write('# ' + line + '\n')
         outfp.write("cell\tsong\tsong.len\tspon.m\tresp.m\tfeat.m\tfeat.max\t" + \
-                    "fit.cc\tvalid.cc\trecon.coh\tvalid.coh\tsong.fcut\trecon.fcut\n")
+                    "fit.cc\tvalid.cc\trecon.coh\tvalid.coh\tsong.fcut\trecon.fcut\t" + \
+                    "fsim.ex.med\tfsim.oth.med\n")
         for count,line in enumerate(infp):
             if line.startswith('#') or len(line.strip())==0: continue
             fields = line.split()
@@ -354,10 +396,17 @@ if __name__=='__main__':
                                                                      **ftable_options)
                     if _do_plot: mtp.plotfigure(Z['fig'])
                     if _do_plot_coh: cohpdf.plotfigure(Z['cohfig'])
+
+                    # calculate feature similarity of strong responses
+                    fnames,fsim = load_similarity(song)
+                    AA = Z['model'][-3]
+                    fsim_ex,fsim_ot = split_features(AA,fnames,fsim)
+                    
                     outfp.write('st%s_%s\t%s\t' % (bird,basename,song))
                     outfp.write('%(song_len)3.4f\t%(m_spon)3.4f\t%(m_resp)3.4f\t%(m_feat)3.4f\t%(max_feat)3.4f\t' % Z)
                     outfp.write('%(cc_fit)3.4f\t%(cc_val)3.4f\t%(coh_recon)3.4f\t' % Z)
-                    outfp.write('%(coh_val)3.4f\t%(song_fcut)3.4f\t%(coh_fcut)3.4f\n' % Z)
+                    outfp.write('%(coh_val)3.4f\t%(song_fcut)3.4f\t%(coh_fcut)3.4f\t' % Z)
+                    outfp.write('%3.4f\t%3.4f\n' % (nx.median(fsim_ex), nx.median(fsim_ot)))
                     outfp.flush()
                 except Exception, e:
                     print >> sys.stderr, 'Error: %s' % e
