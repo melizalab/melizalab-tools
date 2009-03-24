@@ -162,12 +162,14 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     cc_fit = nx.corrcoef(Yhat,Y)[1,0]
     m_spon = sstat.meanrate(songtl, _spon_range)
     m_resp = sstat.meanrate(songtl, (0, t[-1]))
+
     coh_recon,coh_song,freq,sig = pointproc.coherenceratio(recontl, songtl, err = _err,
                                                            tgrid=(0,t[-1]), **_coh_options)
     sig,bandw,fcut_song = freqcut(freq,sig,mlen+continwindow,fmax)
     coh_recon_summ = cohsummary(coh_recon,coh_song,sig)
 
     # calculate prediction similarity
+    fhat = nx.maximum(fhat,0)   # threshold
     cc_val = nx.corrcoef(fhat,f)[1,0]
     coh_val,coh_self,freq,sig = pointproc.coherenceratio(fhat, recontl, err = _err,
                                                          **_coh_options)
