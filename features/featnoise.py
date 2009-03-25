@@ -154,7 +154,7 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
     vtls = {tbl_name : recontl}
 
     # call workhorse fxn
-    model = compute_frf(tls,vtls,ndb,stimdir,**ftable_options)
+    model = compute_frf(tls if featset==0 else ctls,vtls,ndb,featset=featset,**ftable_options)
     Y,Yhat,f,fhat,mu,AA,FRF,ind = model
     t = nx.arange(0,fhat.size*ftable_options['binsize'],ftable_options['binsize'])
 
@@ -400,7 +400,7 @@ if __name__=='__main__':
                     if _do_plot_coh: cohpdf.plotfigure(Z['cohfig'])
 
                     # calculate feature similarity of strong responses
-                    fnames,fsim = load_similarity(song)
+                    fnames,fsim = load_similarity(song, _featset)
                     AA = Z['model'][-3]
                     fsim_ex,fsim_ot = split_features(AA,fnames,fsim)
                     
