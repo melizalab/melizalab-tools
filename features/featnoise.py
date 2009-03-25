@@ -299,9 +299,9 @@ def freqcut(f,sig,mlen,fmax=None):
 # cross-correlations are calculated ahead of time and loaded as
 # needed.
 
-def load_similarity(song):
+def load_similarity(song, featset=0):
     """ load similarity matrix """
-    simfile = os.path.join(_feat_sim_dir, '%s_sim.tbl' % song)
+    simfile = os.path.join(_feat_sim_dir, '%s_%d_sim.tbl' % (song, featset))
     with open(simfile,'rt') as fp:
         fnames = nx.asarray(fp.readline().strip().split('\t'))
         fsim = nx.loadtxt(fp,delimiter='\t')

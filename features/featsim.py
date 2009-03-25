@@ -3,13 +3,13 @@
 """
 Compute pairwise similarity scores for all the features in a song.
 
-Usage: featsim.py <song1> [<song2> <song3>...]
+Usage: featsim.py [-f featset] <song1> [<song2> <song3>...]
 
 Outputs tables of similarity scores to <song1>_sim.tbl, etc
 """
 
 from __future__ import with_statement
-import os,sys
+import os,sys,getopt
 import numpy as nx
 from scipy.fftpack import fftshift, fft2, ifft2
 from scipy.linalg import norm
@@ -31,7 +31,7 @@ _fshift = int(_fshift_max / (_Fs / 2. / _nfft))
 
 # note database
 _ndbfile = os.path.join(os.environ['HOME'], 'z1/stimsets/songseg/motifs_songseg.h5')
-
+_featset = 0
 
 def xcorr2(a2,b2):
     """ 2D cross correlation (unnormalized) """
@@ -106,15 +106,19 @@ if __name__=="__main__":
         print __doc__
         sys.exit(-1)
 
-    songs = sys.argv[1:]
-
+    opts,args = getopt.getopt(sys.argv[1:],'f:')
+    for o,a in opts:
+        if o=='-f':
+            _featset = int(a)
+    
+    songs = args
     ndb = db.motifdb(_ndbfile, 'r')
 
     for song in songs:
 
-        print "Analyzing song %s" % song
-        fsim,fnames = featsim(song, ndb)
-        with open('%s_sim.tbl' % song, 'wt') as fp:
+        print "Analyzing song %s, featset %d" % (song,_featset)
+        fsim,fnames = featsim(song, ndb, _featset)
+        with open('%s_%d_sim.tbl' % (song, _featset), 'wt') as fp:
             for fname in fnames[:-1]: fp.write('%s\t' % fname)
             fp.write('%s\n' % fnames[-1])
 
