@@ -294,6 +294,23 @@ def freqcut(f,sig,mlen,fmax=None):
 
     return out, bw, f[runlen]
 
+def feat_responses(AA, fnames=None):
+    """ Compute total response, excitation, and suppression for each feature"""
+    fr = []
+    fr_ex = []
+    fr_su = []
+    if fnames==None: fnames = AA.keys()
+    for fname in fnames:
+        fresp = AA[fname]
+        fr.append(fresp.sum())
+        fr_ex.append(fresp[fresp > 0].sum())
+        fr_su.append(fresp[fresp < 0].sum())
+
+    return nx.asarray(fr), nx.asarray(fr_ex), nx.asarray(fr_su)
+
+def sparsity(x):
+    return (1 - x.mean()**2/(x**2).mean())/(1-1/x.size)
+
 #############################
 # Functions involving feature distances.  The spectrotemporal
 # cross-correlations are calculated ahead of time and loaded as
@@ -312,7 +329,7 @@ def split_features(AA,fnames,fsim,thresh=0.50):
     Split the features into two groups and then calculate
     inter-feature distance distribution for each group
     """
-    fr = nx.asarray([AA[x].mean() for x in fnames])
+    fr = feat_responses(AA, fnames)[1]
     # 50% of the range from max FR to min FR
     #frcut = fr.max() - fr.ptp() * thresh
     # more than thresh SD above mean FR
@@ -383,7 +400,7 @@ if __name__=='__main__':
             outfp.write('# ' + line + '\n')
         outfp.write("cell\tsong\tsong.len\tspon.m\tresp.m\tfeat.m\tfeat.max\t" + \
                     "fit.cc\tvalid.cc\trecon.coh\tvalid.coh\tsong.fcut\trecon.fcut\t" + \
-                    "fsim.ex.med\tfsim.oth.med\n")
+                    "si.ex\tsi.supp\tfsim.ex.med\tfsim.oth.med\n")
         for count,line in enumerate(infp):
             if line.startswith('#') or len(line.strip())==0: continue
             fields = line.split()
@@ -399,15 +416,19 @@ if __name__=='__main__':
                     if _do_plot: mtp.plotfigure(Z['fig'])
                     if _do_plot_coh: cohpdf.plotfigure(Z['cohfig'])
 
+                    # selectivity index
+                    AA = Z['model'][-3]
+                    fr_mn,fr_ex,fr_su = feat_responses(AA)
+
                     # calculate feature similarity of strong responses
                     fnames,fsim = load_similarity(song, _featset)
-                    AA = Z['model'][-3]
                     fsim_ex,fsim_ot = split_features(AA,fnames,fsim)
                     
                     outfp.write('st%s_%s\t%s\t' % (bird,basename,song))
                     outfp.write('%(song_len)3.4f\t%(m_spon)3.4f\t%(m_resp)3.4f\t%(m_feat)3.4f\t%(max_feat)3.4f\t' % Z)
                     outfp.write('%(cc_fit)3.4f\t%(cc_val)3.4f\t%(coh_recon)3.4f\t' % Z)
                     outfp.write('%(coh_val)3.4f\t%(song_fcut)3.4f\t%(coh_fcut)3.4f\t' % Z)
+                    outfp.write('%3.4f\t%3.4f\t' % sparsity(fr_ex), sparsity(fr_su))
                     outfp.write('%3.4f\t%3.4f\n' % (nx.median(fsim_ex), nx.median(fsim_ot)))
                     outfp.flush()
                 except Exception, e:
