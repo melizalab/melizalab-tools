@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-songsort.py <explog>
+songsort.py [-m <minlength] <explog>
+
+-m         Set minimum song length (default 
 
 This script attempts to compensate for some of the issues arising when
 trying to record starling song with saber.  The automatic triggering
@@ -19,14 +21,12 @@ written to a new pcm_seq2 file, and the questionable episodes to another.
 
 """
 
-import os, sys, pdb
+import os, sys, getopt
 import numpy as nx
 from dlab import datautils
 from mspikes import explog, _pcmseqio
 
-song_min_length = 15. # seconds
-max_out_size = 400
-max_out_entries = 200
+song_min_length = 25. # seconds
 
 if __name__=="__main__":
 
@@ -34,22 +34,23 @@ if __name__=="__main__":
         print __doc__
         sys.exit(-1)
 
-    elogfile = sys.argv[1]
+    opts,args = getopt.getopt(sys.argv[1:],'m:')
+    for o,a in opts:
+        if o=='-m':
+            song_min_length = float(a)
+
+    elogfile = args[0]
 
     # the explogs for song recording are quite short, so just read the text file
     e = explog.readexplog(elogfile, elogfile + '.h5')
 
     # open a filecache for input files
-    fcache = datautils.filecache()
-    fcache.handler = _pcmseqio.pcmfile
+    fcache = datautils.filecache(_pcmseqio.pcmfile)
 
     # open the pcmseq2 files for output
     base,ext = os.path.splitext(elogfile)
     fname_song = base + '_song.pcm_seq2'
     fname_nois = base + '_noise.pcm_seq2'
-##     songname = base + '_song_%d.pcm_seq2'
-##     noisename = base + '_noise_%d.pcm_seq2'
-##     currentfile = 1
     
     fp_song = _pcmseqio.pcmfile(fname_song, 'w')
     fp_nois = _pcmseqio.pcmfile(fname_nois, 'w')
@@ -67,7 +68,7 @@ if __name__=="__main__":
         sout = "%s/%d: start %d, stop %d" % (fentry['filebase'], fentry['entry'],
                                              start, stop)
 
-        elen = 1. * fp.nframes / fp.framerate # > song_min_length
+        elen = 1. * fp.nframes / fp.framerate
         S = fp.read()
         sigmax = 2**(S.dtype.itemsize*8-1) - 10
         if S.max() >= sigmax or S.min() <= -sigmax:
