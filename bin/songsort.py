@@ -27,7 +27,7 @@ from dlab import datautils
 from mspikes import _pcmseqio
 from mspikes.explog import _reg_create, _reg_triggeron, _reg_triggeroff
 
-__version__ = 1.0.2
+__version__ = '1.0.2'
 song_min_length = 25. # seconds
 
 if __name__=="__main__":
