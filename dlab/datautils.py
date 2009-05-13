@@ -439,3 +439,12 @@ def perm_unique_trans(n,startk=0, verbose=False):
             yield k, perm
         elif verbose and k % 10000 == 0: print "Checked to permutation %d" % k
 
+
+def icumsum(x, const=0.0):
+    """
+    Iterable that returns the cumulative sum of the underlying iterable.
+    Optional argument const adds a constant value to the sum AFTER each point
+    """
+    tot = 0
+    for w in x:
+        yield tot + w + const
