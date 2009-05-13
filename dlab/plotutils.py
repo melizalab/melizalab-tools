@@ -445,6 +445,40 @@ def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
 
     return ax
 
+def autogrid(x, max_x, spacing=0.0):
+    """
+    Given a collection of graph objects with varying widths, generate
+    a grid to hold the objects such that each line in the grid
+    contains the maximum number of objects without exceeding some
+    maximum length (max_x)
+
+    x - iterable of positive numbers indicating the widths of the objects
+    max_x - maximum length of each line (same units as x)
+    spacing - spacing between objects (in the same units as x)
+
+    Returns:
+    list of lists; each inner list contains the start points for the objects on that line
+    """
+
+    out = []
+    inner = [0.0]
+    for w in x:
+        xnext = inner[-1] + w + spacing
+        if xnext >= max_x:
+            # note that the new *start* point is on the next line
+            # so we have to remove the last start point on this line
+            inner.pop()
+            out.append(inner)
+            inner = [0.0, w + spacing]
+        else:
+            inner.append(xnext)
+
+    # the last start point doesn't get used; remove it
+    inner.pop()
+    out.append(inner)
+    return out
+    
+
 def setframe(ax, lines=1100):
     """
     Set which borders of the axis are visible.  Note that subsequent calls
