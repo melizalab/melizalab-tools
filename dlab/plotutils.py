@@ -89,8 +89,9 @@ def plot_raster(X, Y=0, start=None, stop=None, ax=None,
     plots = ax.plot(x,y,'|',**kwargs)
 
     if autoscale:
-        ht = ax.get_window_extent().height()
-        for p in plots: p.set_markersize(ht/((maxy-miny)*1.3))
+        fudge = 1.5 * autoscale if isinstance(autoscale,(int,float)) else 1.0
+        ht = ax.get_window_extent().height
+        for p in plots: p.set_markersize(ht/((maxy-miny)*fudge))
     
     ax.axis((minx, maxx, miny - 0.5, maxy + 0.5))
 
