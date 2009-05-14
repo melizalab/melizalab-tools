@@ -10,6 +10,7 @@ import numpy as nx
 import matplotlib.pyplot as mplt
 import tempfile, shutil, os
 import functools
+from itertools import izip
 
 def drawoffscreen(f):
     from matplotlib.pyplot import isinteractive, ion, ioff, draw
@@ -519,20 +520,15 @@ def setframe(ax, lines=1100):
         ax.yaxis.set_ticks_position('both')
     ax.xaxis.set_visible(lines[1] or lines[3])
 
-## def sync_clim(fig):
-##     """
-##     Adjusts the clim property of all the images under fig.
-##     """
-##     im = fig.images
-##     for ax in fig.axes:
-##         im.extend(ax.images)
+def sync_clim(im):
+    """
+    Adjusts the clim property of a bunch of images to be the same
+    """
+    cmin,cmax = izip(*[x.get_clim() for x in im])
+    newclim = (min(cmin), max(cmax))
+    [x.set_clim(newclim) for x in im]
 
-##     clim = [x.get_clim() for x in im]
-##     newclim = (min([x[0] for x in clim]),
-##                max([x[1] for x in clim]))
-##     [x.set_clim(newclim) for x in im]
-
-##     return newclim
+    return newclim
 
 
 if __name__=="__main__":
