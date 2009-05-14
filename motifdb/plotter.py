@@ -7,30 +7,42 @@ CDM, 4/2008
  
 """
 from matplotlib import cm
-from dlab.signalproc import spectro
+from dlab.signalproc import spectro,mtmspec
 from dlab.plotutils import dcontour
 from dlab.pcmio import sndfile
 from numpy import unique, log10
 from scipy.ndimage import center_of_mass
-    
 
-def plot_motif(ax, mdb, symbol, featmap=None, **kwargs):
+_nfft = 320
+_shift = 10
+_mtm_p = 3.5
+_thresh = 100
+_filter = 'catrom'
+_cmap = cm.Greys
+_Fs = 20
+
+def plot_spectrogram(ax, s, nfft=_nfft, shift=_shift, mtm_p=_mtm_p, thresh=_thresh,
+                     interpolation=_filter, cmap=_cmap, Fs=_Fs):
+    S,T,F = spectro(s, fun=mtmspec,
+                    nfft=nfft, shift=shift, mtm_p=mtm_p, Fs=Fs)
+    p = ax.imshow(log10(S+thresh), extent=(T[0], T[-1], F[0]-0.01, F[-1]+0.1),
+                  interpolation=interpolation, cmap=cmap)
+
+    return T,F,p
+
+def plot_motif(ax, mdb, symbol, featmap=None, label=True, **kwargs):
     """
     Plots a motif with its features. Uses matplotlib.
 
     Optional arguments:
     label - if True (default), label each feature with a number
-    pthresh - threshold of PSD (default 0.1 == -10 dB)
+    thresh - threshold of PSD (default 0.1 == -10 dB)
+    additional arguments passed to plot_spectrogram()
     """
 
     # generate the spectrogram
     sig = sndfile(mdb.get_motif_data(symbol)).read()
-    (PSD, T, F) = spectro(sig, **kwargs)
-
-    # set up the axes and plot PSD
-    extent = (T[0], T[-1], F[0], F[-1])
-    ax.imshow(log10(PSD[:,:-1] + kwargs.get('pthresh',0.1)),
-              cmap=cm.Greys, extent=extent, origin='lower', aspect='auto')
+    T,F,p = plot_spectrogram(ax, sig, **kwargs)
 
     # plot annotation if needed
     if featmap != None:
@@ -52,13 +64,8 @@ def plot_motif(ax, mdb, symbol, featmap=None, **kwargs):
             ax.text(T[int(x)], F[int(y)], "%d" % fnum, color='w', fontsize=20)            
 
 
-
-def plot_feature(ax, mdb, symbol, featmap, feature, nfft=320, shift=10):
-
-    Fs = mdb.get(symbol)['Fs'] / 1000
-    sig = mdb.get_feature_data(symbol, featmap, feature)
-    (PSD, T, F) = spectro(sig, NFFT=nfft, shift=shift, Fs=Fs)
-    extent = (T[0], T[-1], F[0], F[-1])
-    return ax.imshow(log10(PSD+0.1), cmap=cm.Greys, extent=extent, origin='lower', aspect='auto',
-                     interpolation='nearest')
-
+def plot_feature(ax, ndb, motif, feature, featset=0, **kwargs):
+    Fs = ndb.get(motif)['Fs'] / 1000
+    sig = ndb.get_feature_data(motif, featset, feature)
+    T,F,p = plot_spectrogram(ax, sig, Fs=Fs, **kwargs)
+    return p
