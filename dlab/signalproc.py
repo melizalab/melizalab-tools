@@ -888,6 +888,31 @@ def getfgrid(Fs,nfft,fpass):
 
     return f[findx], findx
 
+
+def freqcut(f,sig,bandwidth):
+    """
+    Given a spectral function with confidence intervals, determine the
+    last frequency (starting with 0) where the spectrum still has
+    significant power (or coherence or whatever).  The minimum frequency
+    is <bandwidth>.
+
+    Returns the INDEX of the cutoff, or 0 if there is no significant band
+    """
+    from datautils import runs
+    if sig.sum() == 0:
+        return 0
+
+    bwshort = f.searchsorted(bandwidth/2)
+    sigruns = runs(sig,True)
+
+    runlen = sigruns[0]
+    if runlen < bwshort:
+        return 0
+    elif runlen==sig.size:
+        runlen = -1
+    return runlen
+
+
 if __name__=="__main__":
 
     from dlab import pcmio
