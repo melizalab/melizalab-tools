@@ -104,9 +104,10 @@ def xcorr2(a2,b2):
     from scipy import conj
     a2 = a2 - a2.mean()
     b2 = b2 - b2.mean()
-    Nfft = (a2.shape[0] + b2.shape[0] - 1, a2.shape[1] + b2.shape[1] - 1) 
-    c = fftshift(ifft2(fft2(a2,shape=Nfft)*conj(fft2(b2,shape=Nfft))).real,axes=(0,1))
-    return c
+    Nfft = (a2.shape[0] + b2.shape[0] - 1, a2.shape[1] + b2.shape[1] - 1)
+    c = ifft2(fft2(a2,shape=Nfft) * fft2(nx.rot90(b2,2),shape=Nfft))
+    #c = fftshift(ifft2(fft2(a2,shape=Nfft)*conj(fft2(b2,shape=Nfft))).real,axes=(0,1))
+    return c.real
         
 
 ## def xcorr2_win(a2,b2,win):
