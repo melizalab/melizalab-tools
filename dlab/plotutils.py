@@ -524,6 +524,7 @@ def sync_clim(im):
     """
     Adjusts the clim property of a bunch of images to be the same
     """
+    if len(im)==0: return
     cmin,cmax = izip(*[x.get_clim() for x in im])
     newclim = (min(cmin), max(cmax))
     [x.set_clim(newclim) for x in im]
