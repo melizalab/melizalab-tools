@@ -6,7 +6,6 @@ Some statistics and linear algebra functions
 """
 import scipy as nx
 from scipy.linalg import get_blas_funcs, svd
-from datautils import autovectorized
 from scipy import weave
 
 def gemm(a,b,alpha=1.,**kwargs):

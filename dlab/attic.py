@@ -282,3 +282,11 @@ def autocorr(S, **kwargs):
                  type_converters=weave.converters.blitz)
 
     return A / n
+
+def autovectorized(f):
+    """Function wrapper to enable autovectorization of a scalar function."""
+    def wrapper(input):
+        if type(input) == nx.ndarray:
+            return nx.vectorize(f)(input)
+        return f(input)
+    return wrapper

@@ -19,14 +19,6 @@ def isnested(x):
     except TypeError:
         return False
 
-def autovectorized(f):
-    """Function wrapper to enable autovectorization of a scalar function."""
-    def wrapper(input):
-        if type(input) == nx.ndarray:
-            return nx.vectorize(f)(input)
-        return f(input)
-    return wrapper
-
 def tuples(S,k):
     """
     An ordered tuple of length k of set is an ordered selection with
