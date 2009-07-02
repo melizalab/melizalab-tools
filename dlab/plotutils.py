@@ -280,7 +280,6 @@ class multiplotter(object):
         filename - the file to save the pdf to
         options - additional options to pass to the pdf generating command
         """
-
         pwd = os.getcwd()
         if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
         figlist = ' '.join(self.figures)
@@ -292,7 +291,6 @@ class multiplotter(object):
             if status > 0: raise IOError, "Error generating multipage PDF"
         finally:
             os.chdir(pwd)
-
 
 class texplotter(multiplotter):
     """
@@ -319,7 +317,6 @@ class texplotter(multiplotter):
                      set to True to keep the figure
         additional options are passed to savefig()
         """
-
         if plotdims==None:
             plotdims = tuple(fig.get_size_inches())
         figname = "texplotter_%03d.eps" % len(self.figures)
@@ -383,6 +380,103 @@ class texplotter(multiplotter):
             shutil.move('texplotter.pdf', filename)
         finally:
             os.chdir(pwd)
+
+
+def axgriditer(grid=(1,1), figfun=None, **figparams):
+    """
+    Generates axes for multiple gridded plots.  Initial call
+    to generator specifies plot grid (default 1x1).  Yields axes
+    on the grid; when the grid is full, opens a new figure and starts
+    filling that.
+
+    Arguments:
+    grid -    specify the grid layout. Can be a tuple or a function that
+              yields a series of axes [signature grid(fig)]
+
+    figfun -  called when the figure is full or the generator is
+              closed.  Can be used for final figure cleanup or to save
+              the figure.  [signature: figfun(fig)]
+
+    additional arguments are passed to the figure() function
+    """
+    if len(grid)==2:
+        nx,ny = grid
+        grid = lambda fig: (fig.add_subplot(nx,ny,i) for i in range(1,nx*ny+1))
+    elif not callable(grid):
+        raise ValueError, "Grid argument must be length 2 or a function"
+
+    fig = mplt.figure(**figparams)
+    axg = grid(fig)
+    try:
+        while 1:
+            for ax in axg:
+                yield ax
+            if callable(figfun): figfun(fig)
+            fig = mplt.figure(**figparams)
+            axg = grid(fig)
+    except Exception, e:
+        # cleanup and re-throw exception
+        if callable(figfun): figfun(fig)
+        raise e
+
+def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
+               xsize=None, ysize=None, spacing=(0.01, 0.01),
+               normalize=False, **kwargs):
+    """
+    Generate an (ir)regularly gridded plot layout.  Returns a
+    generator which yields the dimensions of each new subplot, filling
+    rows first from the top (like subplot())
+
+    fig - the figure in which to create the plots
+    nrow,ncol - the number of rows and columns in the grid
+    margins - define boundaries of grid: (left,bottom,right,
+    spacing - define spacing between grid elements (rows, cols)
+    xsize,ysize - specify the width/height of each column/row.
+    normalize - adjust xsize and ysize so they fill all
+                the space between the margins
+
+    If xsize and ysize are None (default), this is equivalent to using
+    subplot(), though with finer control over the spacing and margins.
+    Otherwise, xsize and ysize adjust the relative size of each
+    column/row.  A value of 1.0 corresponds the width/height of evenly
+    spaced elements.  By default, no normalization is used, so the
+    plots can overfill or underfill the boundaries.
+
+    Examples:
+
+    * regular grid of plots, 3 rows and 2 columns, spaced by 10% of the figure:
+    >>> [axes(r) for r in gridlayout(3,2,spacing=0.1)]
+    * irregular grid of plots, 2 rows and 2 columns, with first column 50% wider:
+    >>> [axes(r) for r in gridlayout(2,2,xsize=(1.5,.5))]
+    
+    """
+    xstart,ystart,xstop,ystop = margins
+    if hasattr(spacing,'__iter__'):
+        xspacing,yspacing = spacing
+    else:
+        xspacing = yspacing = spacing
+    
+    xwidth = (xstop - xstart - xspacing * (ncol-1))/ ncol
+    ywidth = (ystop - ystart - yspacing * (nrow-1))/ nrow
+    
+    xpos,ypos = xstart,ystop  # fill top down
+    nplots = ncol*nrow
+    if xsize==None: xsize = nx.ones(ncol)
+    if ysize==None: ysize = nx.ones(nrow)
+    if normalize:
+        xsize *= (ncol / xsize.sum())
+        ysize *= (nrow / ysize.sum())
+                  
+    for j in range(nplots):
+        r,c = j / ncol, j % ncol
+        xw = xwidth * xsize[c]
+        yw = ywidth * ysize[r]
+        yield (xpos, ypos-yw, xw, yw)
+        if c<(ncol-1):
+            xpos += xw + xspacing
+        else:
+            xpos = xstart
+            ypos -= yw + yspacing
 
 
 def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
