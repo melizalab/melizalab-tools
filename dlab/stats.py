@@ -55,6 +55,6 @@ def corrcoef_interval(x,y,alpha=0.05):
     IZ = lambda z: nx.tanh(z / nx.sqrt(N-3))
     ci = norm.isf(alpha/2)
     
-    r,r_p = pearsonr(x,y)[0]
+    r,r_p = pearsonr(x,y)
     z = Z(r)
     return r, IZ(z+ci), IZ(z-ci), r_p
