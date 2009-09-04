@@ -334,6 +334,72 @@ def coherenceratio(S, tl, **kwargs):
         return y_BR, y_AR, f, sig
 
 
+def cc_ratio(S, R, **kwargs):
+    """
+    Calculate the correlation coefficient between a predicted and
+    an actual time series.  Uses Hsu et al's (2004) correction for an unbiased
+    estimate of the CC with the mean firing rate.
+
+    S - predicted mean firing rate (N-vector) or second process (toelis)
+    R - actual response rate. can be toelis object, or an NxM array,
+        with smoothed firing rates for each trial in each column
+
+    Optional arguments:
+    Fs - sampling frequency (default 1)
+    tgrid - if S or R are point process data, the time grid (default 0 to end of S)
+    kernwidth - if S or R are point process data, the kernel bandwidth (default 4/Fs)
+    bstrap - If 0 or None, return point estimate; if >0, execute <bstrap> bootstrap
+             samples and return all the results
+    Returns:
+    cc - correlation between R (events) and S (mean rate)
+    itcc - correlation between R (events) and R (mean rate)
+    """
+    dt = 1./kwargs.get('Fs',1)
+    kw = kwargs.get('kernwidth',dt*4)
+    wf = kwargs.get('window','gaussian')
+
+    if isinstance(S, toelis.toelis):
+        mintime,maxtime = kwargs.get('tgrid',S.range)
+        if mintime==None: raise ValueError, "No events in test process; unable to determine time range"
+        S = kernrates(S,dt,kw,wf,mintime,maxtime)[0].mean(1)
+    elif S.ndim==2:
+        S = S.mean(1)
+    N = S.size
+
+    if hasattr(R, 'events'):
+        mintime, maxtime = kwargs.get('tgrid',(0,N*dt))
+        R = kernrates(R,dt,kw,wf,mintime,maxtime)[0]
+    M = R.shape[1]
+    assert N == R.shape[0], "Prediction and response must be the same length"
+
+    if kwargs.get('bstrap',0) < 1:
+        return _cc_ratio(S,R)
+    else:
+        ri = lambda : nx.random.random_integers(0,M-1,M)
+        cc,itcc = zip(*(_cc_ratio(S,R[:,ri()]) for i in range(kwargs['bstrap'])))
+        return nx.asarray(cc), nx.asarray(itcc)
+
+def _cc_ratio(S,R):
+    # split response into two parts for intertrial correlation
+    M = R.shape[1]
+    r1 = R[:,0:M:2].mean(1)
+    r2 = R[:,1:M:2].mean(1)
+    R = R.mean(1)
+
+    Z = nx.corrcoef(r1, r2)[0,1]
+    if Z==0.0: return 0.0, 0.0
+    Z = 1. / Z
+    # Hsu and Theunissen correction:
+    itcc = nx.sqrt(1. / ((-M + M * Z)/2+1))
+
+    # calculate correlation with predicted response; assume that this is already
+    # the correct length; try to get response rate if it's a toelis
+    rr = nx.corrcoef(S, R)[0,1] #nx.asarray(corrcoef_interval(predicted, resp, alpha)[:3])
+    cc = nx.sqrt((1 + Z) / (-M + M * Z + 2)) * rr
+
+    return cc, itcc
+
+
 def mtspectrumpt(tl, **kwargs):
     """
     Multitaper spectrum from point process times
@@ -497,6 +563,7 @@ def ksdist(tl1,tl2, **kwargs):
     Computes the Komolgorov-Smirnoff distance between the spike times in two toelis objects.
     """
     pass
+
 
 def kernfun(name, bandwidth, spacing):
     """
