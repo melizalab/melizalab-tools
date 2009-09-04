@@ -1,16 +1,30 @@
+#!/usr/bin/env python
+# -*- coding: iso-8859-1 -*-
+"""
+Statistical tools not found in the scipy or numpy toolkits.  
 
-from scipy.stats import chi2, pearsonr, norm
-from numpy import dot, shape, eye, trace
-from scipy.linalg import inv, cholesky
-import numpy.random
+Copyright (C) 2009 Daniel Meliza <dmeliza@dylan.uchicago.edu>
+Created 2009-09-03
+"""
+# Functions and classes are written to be cut/paste portable
+# (i.e. with all the import statements in the functions)
 
 def generate_multivariate_gaussian(covariance):
+    """
+    Randomly sample from a gaussian distribution with known covariance
+    structure. Returns an infinite iterator that yields a new sample
+    from the distribution with each iteration.
+    """
+    from numpy import dot, shape
+    from numpy.random import normal
+    from scipy.linalg import cholesky
     p, d = shape(covariance)
     if p!=d:
         raise ValueError, "covariance matrix must be square"
     R = cholesky(covariance).transpose()
     while True:
-        yield dot(R,numpy.random.normal(size=p))
+        yield dot(R,normal(size=p))
+
 
 def T1_test(sample_cov,true_cov,n):
     """
@@ -24,6 +38,10 @@ def T1_test(sample_cov,true_cov,n):
 
     By Anne M. Archibald 2007
     """
+    from numpy import dot, shape, trace, eye
+    from scipy.linalg import inv
+    from scipy.stats import chi2
+    
     p, r = shape(sample_cov)
     if p!=r or (p,r) != shape(true_cov):
         raise ValueError, "Sample covariance matrix (%d by %d) and true covariance matrix (%d by %d) must be square matrices of the same size" % (p,r,shape(true_cov)[0],shape(true_cov)[1])
@@ -45,14 +63,18 @@ def assert_T1_test(sample_cov,true_cov,n,p=1e-3):
 
 def corrcoef_interval(x,y,alpha=0.05):
     """
-    Pearson product-moment correlation between x and y with confidence intervals
+    Pearson product-moment correlation between x and y with confidence
+    intervals and p-value.
 
     Returns r, r_upper, r_lower, r_p
     """
+    from numpy import sqrt, tanh, arctanh
+    from scipy.stats import pearsonr, norm
+    
     assert x.size == y.size, "Input vectors must be the same length"
     N = x.size
-    Z = lambda r: nx.sqrt(N-3) * nx.arctanh(r)
-    IZ = lambda z: nx.tanh(z / nx.sqrt(N-3))
+    Z = lambda r: sqrt(N-3) * arctanh(r)
+    IZ = lambda z: tanh(z / sqrt(N-3))
     ci = norm.isf(alpha/2)
     
     r,r_p = pearsonr(x,y)
