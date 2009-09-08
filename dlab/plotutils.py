@@ -627,6 +627,34 @@ def sync_clim(im):
 
     return newclim
 
+def waterfall_plot(x, y, offsets=(0,0), ax=None, **kwargs):
+    """
+    Make a cascade/waterfall plot with each curve successively offset
+
+    x  - 1D or 2D array with x values (in columns)
+    y  - 1D or 2D array with y values (in columns)
+    offsets - (xo,yo) - x and y offsets for each new data set
+    ax - target axes
+
+    if one of x or y is 2D and the other 1D, the 1D data is used for each line
+    otherwise, if x and y have unequal numbers of columns, only the fully-defined datasets are plotted
+    """
+    from matplotlib.collections import LineCollection
+    from itertools import izip, repeat
+    # do this with magical iterators
+    Nx = 1 if x.ndim==1 else x.shape[1]
+    Ny = 1 if y.ndim==1 else y.shape[1]
+    
+    xit = x.T if Nx>1 else repeat(x,Ny)
+    yit = y.T if Ny>1 else repeat(y,Nx)
+    segs = [nx.column_stack((a,b)) for a,b in izip(xit, yit)]
+
+    col = LineCollection(segs, offsets=offsets, **kwargs)
+    if ax==None:
+        ax = mplt.axes()
+    ax.add_collection(col)
+    return col
+
 
 if __name__=="__main__":
 
