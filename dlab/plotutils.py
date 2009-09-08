@@ -399,10 +399,12 @@ def axgriditer(grid=(1,1), figfun=None, **figparams):
 
     additional arguments are passed to the figure() function
     """
-    if len(grid)==2:
+    if callable(grid):
+        pass
+    elif len(grid)==2:
         nx,ny = grid
         grid = lambda fig: (fig.add_subplot(nx,ny,i) for i in range(1,nx*ny+1))
-    elif not callable(grid):
+    else:
         raise ValueError, "Grid argument must be length 2 or a function"
 
     fig = mplt.figure(**figparams)
