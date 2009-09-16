@@ -27,9 +27,9 @@ def wilcox_test(x,y=None,**kwargs):
     alternative - 'two.sided' (default), 'less', 'greater'
     """
     if y==None:
-        wc = with_mode(NO_CONVERSION, r.wilcox_test)(x, exact=False, **kwargs)
+        wc = with_mode(NO_CONVERSION, r.wilcox_test)(x, **kwargs)
     else:
-        wc = with_mode(NO_CONVERSION, r.wilcox_test)(x,y, exact=False, **kwargs)  
+        wc = with_mode(NO_CONVERSION, r.wilcox_test)(x,y, **kwargs)  
     return r['$'](wc, 'p.value'), r['$'](wc, 'statistic')
 
 
