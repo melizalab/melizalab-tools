@@ -80,3 +80,18 @@ def corrcoef_interval(x,y,alpha=0.05):
     r,r_p = pearsonr(x,y)
     z = Z(r)
     return r, IZ(z+ci), IZ(z-ci), r_p
+
+def ptiles(x, p, na_rm=True):
+    """
+    Return values of x at each percentile in p.
+
+    na_rm - if True (default), remove nans and Infs first; if all values nan, return nan
+    """
+    from numpy import isfinite, nan, ones, asarray
+    from scipy.stats import scoreatpercentile
+
+    if na_rm:
+        x = x[isfinite(x)]
+        if x.size == 0:
+            return ones(len(p)) * nan
+    return asarray(tuple(scoreatpercentile(x, y) for y in p))
