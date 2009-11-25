@@ -485,7 +485,13 @@ def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
             xpos = xstart
             ypos -= yw + yspacing
 
-
+def colindex(i, nrow, ncol):
+    """
+    Convert column-first index to row-first index
+    """
+    r,c = (i-1) % nrow, (i-1) / nrow
+    return r*ncol+c+1
+            
 def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
                 bottom=0.1, top = 0.9, plotw=None, **kwargs):
     """
