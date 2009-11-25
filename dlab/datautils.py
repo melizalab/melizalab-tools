@@ -19,32 +19,72 @@ def isnested(x):
     except TypeError:
         return False
 
-def tuples(S,k):
+def product(*args, **kwds):
     """
-    An ordered tuple of length k of set is an ordered selection with
-    repetition and is represented by a list of length k containing
-    elements of set.
-    tuples returns the set of all ordered tuples of length k of the set.
+    Cartesian product of iterables. For example:
+    product('ABCD', 'xy') --> Ax Ay Bx By Cx Cy Dx Dy
+    product(range(2), repeat=3) --> 000 001 010 011 100 101 110 111
 
-    EXAMPLES:
-    S = [1,2]
-    tuples(S,3)
-    [[1, 1, 1], [2, 1, 1], [1, 2, 1], [2, 2, 1], [1, 1, 2], [2, 1, 2], [1, 2, 2], [2, 2, 2]]
-
-    AUTHOR: Jon Hanke (2006-08?)
+    Deprecate with python 2.6
     """
-    import copy
-    if k<=0:
-        return [[]]
-    if k==1:
-        return [[x] for x in S]
-    ans = []
-    for s in S:
-        for x in tuples(S,k-1):
-            y = copy.copy(x)
-            y.append(s)
-            ans.append(y)
-    return ans
+    pools = map(tuple, args) * kwds.get('repeat', 1)
+    result = [[]]
+    for pool in pools:
+        result = [x+[y] for x in result for y in pool]
+    for prod in result:
+        yield tuple(prod)
+
+
+def permutations(iterable, r=None):
+    """
+    Return successive r length permutations of elements in the iterable.
+
+    If r is not specified or is None, then r defaults to the length of
+    the iterable and all possible full-length permutations are generated.
+
+    Permutations are emitted in lexicographic sort order. So, if the
+    input iterable is sorted, the permutation tuples will be produced
+    in sorted order.
+
+    Elements are treated as unique based on their position, not on
+    their value. So if the input elements are unique, there will be no
+    repeat values in each permutation.
+    # permutations('ABCD', 2) --> AB AC AD BA BC BD CA CB CD DA DB DC
+    # permutations(range(3)) --> 012 021 102 120 201 210
+
+    deprecate with python 2.6
+    """
+    pool = tuple(iterable)
+    n = len(pool)
+    r = n if r is None else r
+    for indices in product(range(n), repeat=r):
+        if len(set(indices)) == r:
+            yield tuple(pool[i] for i in indices)
+
+
+def combinations(iterable, r):
+    """
+    Return r length subsequences of elements from the input iterable.
+
+    Combinations are emitted in lexicographic sort order. So, if the
+    input iterable is sorted, the combination tuples will be produced
+    in sorted order.
+
+    Elements are treated as unique based on their position, not on
+    their value. So if the input elements are unique, there will be no
+    repeat values in each combination.
+
+    combinations('ABCD', 2) --> AB AC AD BC BD CD
+    combinations(range(4), 3) --> 012 013 023 123
+
+    Deprecate with python 2.6
+    """
+    pool = tuple(iterable)
+    n = len(pool)
+    for indices in permutations(range(n), r):
+        if sorted(indices) == list(indices):
+            yield tuple(pool[i] for i in indices)
+
 
 def binomial(n,k):
     """

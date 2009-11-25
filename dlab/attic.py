@@ -290,3 +290,31 @@ def autovectorized(f):
             return nx.vectorize(f)(input)
         return f(input)
     return wrapper
+
+
+def tuples(S,k):
+    """
+    An ordered tuple of length k of set is an ordered selection with
+    repetition and is represented by a list of length k containing
+    elements of set.
+    tuples returns the set of all ordered tuples of length k of the set.
+
+    EXAMPLES:
+    S = [1,2]
+    tuples(S,3)
+    [[1, 1, 1], [2, 1, 1], [1, 2, 1], [2, 2, 1], [1, 1, 2], [2, 1, 2], [1, 2, 2], [2, 2, 2]]
+
+    AUTHOR: Jon Hanke (2006-08?)
+    """
+    import copy
+    if k<=0:
+        return [[]]
+    if k==1:
+        return [[x] for x in S]
+    ans = []
+    for s in S:
+        for x in tuples(S,k-1):
+            y = copy.copy(x)
+            y.append(s)
+            ans.append(y)
+    return ans
