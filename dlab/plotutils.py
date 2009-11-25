@@ -128,6 +128,7 @@ def dcontour(ax, *args, **kwargs):
 
     smooth - specify a float or 2-ple of floats, which are used to gaussian filter
              each data level prior to contouring (which gives smoother contour lines)
+    hold - if False (default), clears the axes prior to plotting
              
     Other keyword arguments are passed to contour()
     """
@@ -144,8 +145,10 @@ def dcontour(ax, *args, **kwargs):
     labels = nx.unique(I[I>-1])
 
     h = []
-
-    kwargs['hold'] = 1
+    hold_previous = kwargs.get('hold',False)
+    if not hold_previous:
+        ax.cla()
+    ax.hold(1)
     for i in labels:
         if smooth!=None:
             data = gaussian_filter((I==i).astype('d'), smooth)
@@ -153,6 +156,8 @@ def dcontour(ax, *args, **kwargs):
             data = I==i
         hh = ax.contour(X, Y, data,1, colors=colorcycle(i), **kwargs)
         h.append(hh)
+    if not hold_previous:
+        ax.hold(0)
 
     return h
 
