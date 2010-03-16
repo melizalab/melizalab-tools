@@ -10,6 +10,7 @@ import numpy as nx
 import matplotlib.pyplot as mplt
 import tempfile, shutil, os
 import functools
+from progutils import consumer
 from itertools import izip
 
 def drawoffscreen(f):
@@ -292,6 +293,7 @@ class multiplotter(object):
 
         try:
             os.chdir(self._tdir)
+            print cmd
             status = os.system(cmd)
             if status > 0: raise IOError, "Error generating multipage PDF"
         finally:
@@ -395,12 +397,14 @@ def axgriditer(grid=(1,1), figfun=None, **figparams):
     filling that.
 
     Arguments:
-    grid -    specify the grid layout. Can be a tuple or a function that
-              yields a series of axes [signature grid(fig)]
+    grid -   specify the grid layout. Can be a tuple or a function that
+             yields a series of axes [signature grid(fig)]
 
-    figfun -  called when the figure is full or the generator is
-              closed.  Can be used for final figure cleanup or to save
-              the figure.  [signature: figfun(fig)]
+    figfun - called when the figure is full or the generator is
+             closed.  Can be used for final figure cleanup or to save
+             the figure.  Can be callable, in which case the
+             signature is figfun(fig); or it can be a generator, in
+             which case its send() method is called.
 
     additional arguments are passed to the figure() function
     """
@@ -419,12 +423,28 @@ def axgriditer(grid=(1,1), figfun=None, **figparams):
             for ax in axg:
                 yield ax
             if callable(figfun): figfun(fig)
+            elif hasattr(figfun,'send'): figfun.send(fig)
             fig = mplt.figure(**figparams)
             axg = grid(fig)
-    except Exception, e:
+    except:
         # cleanup and re-throw exception
         if callable(figfun): figfun(fig)
-        raise e
+        elif hasattr(figfun,'send'): figfun.send(fig)
+        raise
+
+@consumer
+def figwriter(file_template, *args, **kwargs):
+    """
+    Coroutine for writing figures to disk.  Returns a generator; call
+    send(fig) to write the figure to pdf (or whatever the current
+    backend is)
+    """
+    i = 0
+    while True:
+        fig = yield i
+        fig.savefig(file_template % i, *args, **kwargs)
+        mplt.close(fig)
+        i += 1
 
 def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
                xsize=None, ysize=None, spacing=(0.01, 0.01),
@@ -666,6 +686,16 @@ def waterfall_plot(x, y, offsets=(0,0), ax=None, **kwargs):
     ax.add_collection(col)
     return col
 
+def ci_shade_plot(ax,x,y,y_upper,y_lower,alpha=0.5,**kwargs):
+    """
+    Plot a function with confidence intervals indicated by a shaded
+    polygon.
+    """
+    ax.plot(x,y, **kwargs)
+    xs,ys = mplt.mlab.poly_between(x, y_lower, y_upper)
+    for k in ('lw','linewidth','alpha'): kwargs.pop(k,'')
+    ax.fill(xs, ys, lw=0, alpha=0.5, **kwargs)
+    
 
 if __name__=="__main__":
 

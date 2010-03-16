@@ -39,6 +39,17 @@ class defaultdict(_cdefaultdict):
         self[key] = value = self.default_factory(key)
         return value
 
+# from PEP 342
+def _consumer(func, *args, *kw):
+    """ Start a consumer that accepts input through send() """
+    gen = func(*args, **kw)
+    gen.next()
+    return gen
+
+def consumer(func):
+    return decorator(_consumer,func)
+
+
 # Variables:
 # indent-tabs-mode: t
 # End:
