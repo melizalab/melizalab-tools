@@ -40,7 +40,7 @@ class defaultdict(_cdefaultdict):
         return value
 
 # from PEP 342
-def _consumer(func, *args, *kw):
+def _consumer(func, *args, **kw):
     """ Start a consumer that accepts input through send() """
     gen = func(*args, **kw)
     gen.next()
