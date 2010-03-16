@@ -10,6 +10,7 @@ Created 2009-06-08
 """
 
 from decorator import decorator
+from collections import defaultdict as _cdefaultdict
 
 # memoizing functions from http://pypi.python.org/pypi/decorator
 
@@ -29,6 +30,14 @@ def memoize(f):
     f.cache = {}
     return decorator(_memoize, f)
 
+class defaultdict(_cdefaultdict):
+    """
+    Improved defaultdict that passes key value to __missing__
+    """
+    def __missing__(self, key):
+        if self.default_factory is None: raise KeyError((key,))
+        self[key] = value = self.default_factory(key)
+        return value
 
 # Variables:
 # indent-tabs-mode: t
