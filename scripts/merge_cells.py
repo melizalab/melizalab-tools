@@ -8,20 +8,24 @@ Usage: merge_cells.py <cell1> <cell2> [<cell3> ...] <newcell>
 
 The toelis data from <cell1>, ... are merged into new toelis files <newcell>_stim.
 The old directories are renamed <cell1>_unmerged, so one of the old cell names
-can be used for the merged data
+can be used for the merged data.  Toelis files are assumed to contain only one unit.
 """
 
 import os, sys, glob
-from mspikes import toelis
+from arf.io.toelis import toefile, toelis
 
-def collect_tls(oldcells):
+def combine_toelis(*oldcelldirs):
+    """
+    Combine toelis data in multiple directories by stimulus name.
+    Assumes the files are single-unit. Returns a dictionary keyed by
+    stim name.
+    """
     newtls = {}
-    for cell in oldcells:
-        toefiles = glob.glob(os.path.join(cell, '%s_*.toe_lis' % cell))
-        pos = len(cell) * 2 + 2  # position of stimulus name
-        for toefile in toefiles:
-            tl = toelis.readfile(toefile)
-            stim = toefile[pos:-8]
+    for celldir in oldcelldirs:
+        pos = len(celldir) * 2 + 2  # position of stimulus name
+        for tf in glob.iglob(os.path.join(celldir, '%s_*.toe_lis' % celldir)):
+            tl = toefile(tf).read()[0]
+            stim = tf[pos:-8]
             if newtls.has_key(stim):
                 newtls[stim].extend(tl)
             else:
@@ -34,10 +38,10 @@ if __name__=="__main__":
         print __doc__
         sys.exit(-1)
 
-    oldcells = sys.argv[1:-1]
+    oldcells = [os.path.relpath(p) for p in sys.argv[1:-1]]
     newcell = sys.argv[-1]
 
-    newtls = collect_tls(oldcells)
+    newtls = combine_toelis(*oldcells)
 
     if len(newtls) == 0:
         print >> sys.stderr, "No valid toelis files found in any of the supplied directories"
@@ -49,5 +53,5 @@ if __name__=="__main__":
 
     os.mkdir(newcell)
     for stim,tl in newtls.items():
-        tl.writefile(os.path.join(newcell, '%s_%s.toe_lis' % (newcell, stim)))
+        toefile(os.path.join(newcell, '%s_%s.toe_lis' % (newcell, stim))).write(tl)
     print "Wrote %d toelis files to %s" % (len(newtls), newcell)
