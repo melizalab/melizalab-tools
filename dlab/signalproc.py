@@ -162,6 +162,7 @@ def mtfft(S, **kwargs):
     nfft = kwargs.get('nfft', max(2**(nextpow2(N)+pad), N))
     f,findx = getfgrid(Fs,nfft,fpass)
 
+    print NW,K,nfft
     J = libtfr.mtfft(S, NW, K, nfft)
     return J[findx,:],f
 
@@ -576,3 +577,16 @@ def freqcut(f,sig,bandwidth):
         runlen = -1
     return runlen
 
+def overlap_add(S, W, grid):
+    nrows,ncols = S.shape
+    N = grid[-1] + nrows
+
+    W2 = nx.power(W,2)
+    R = nx.zeros(N)
+    diag = nx.zeros(N)
+    for j in range(ncols):
+        offset = grid[j]
+        R[offset:offset+nrows] += W * S[:,j]
+        diag[offset:offset+nrows] += W2
+
+    return R,diag

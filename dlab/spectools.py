@@ -47,10 +47,3 @@ def freq_mean(S, linscale=False):
 
     return (ind[:,nx.newaxis] * S).sum(0) / S.sum(0)
     
-
-def pitchspec(S, F):
-    """
-    Compute the pitch spectrum from a spectrum.
-    """
-
-    pass

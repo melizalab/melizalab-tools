@@ -14,7 +14,7 @@ import numpy as nx
 import scipy.fftpack as sfft
 from scipy.interpolate import interp1d
 from scipy import stats
-from signalproc import getfgrid, dpsschk, mtfft, mtcoherence, specerr, coherr, _default_mtm_p
+from signalproc import getfgrid, mtfft, mtcoherence, specerr, coherr
 from datautils import nextpow2, histogram, runs
 from linalg import outer, gemm
 from mspikes import toelis
@@ -228,7 +228,7 @@ def meancoherence(tl, **kwargs):
     b,r2 = histogram(tl2, binsize=dt, onset=mintime, offset=maxtime)
 
     N = b.size
-    kwargs['tapers'] = dpsschk(N, **kwargs)
+    #kwargs['tapers'] = dpsschk(N, **kwargs)
 
     # catch case with no spikes
     coh_results = mtcoherence(r1,r2,**kwargs)   # user might supply err flag
