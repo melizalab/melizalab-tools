@@ -1,0 +1,19 @@
+!    -*- f90 -*-
+python module convolve
+interface
+   subroutine discreteconv(times, ntimes, kern, nkern, kdt, onset, offset, odt, out)
+     intent(c) discreteconv
+     intent(c)
+
+     double precision intent(in) :: times(ntimes)
+     integer intent(hide), depend(times) :: ntimes = len(times)
+     double precision intent(in) :: kern(nkern)
+     integer intent(hide), depend(kern) :: nkern = len(kern)
+     double precision intent(in) :: kdt
+     double precision intent(in) :: onset
+     double precision intent(in) :: offset
+     double precision intent(in) :: odt
+     double precision intent(out), depend(onset,offset,odt) :: out((offset-onset)/odt)
+   end subroutine discreteconv
+end interface
+end python module convolve
