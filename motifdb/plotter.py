@@ -6,8 +6,9 @@ module with plotting functions for motif databases
 CDM, 4/2008
  
 """
+import os
 from matplotlib import cm
-from dlab.signalproc import spectro,mtmspec
+from dlab.signalproc import spectro
 from dlab.plotutils import dcontour
 from dlab.pcmio import sndfile
 from numpy import unique, log10
@@ -23,25 +24,29 @@ _Fs = 20
 
 def plot_spectrogram(ax, s, nfft=_nfft, shift=_shift, mtm_p=_mtm_p, thresh=_thresh,
                      interpolation=_filter, cmap=_cmap, Fs=_Fs):
-    S,T,F = spectro(s, fun=mtmspec,
+    S,T,F = spectro(s, method='mtm',
                     nfft=nfft, shift=shift, mtm_p=mtm_p, Fs=Fs)
     p = ax.imshow(log10(S+thresh), extent=(T[0], T[-1], F[0]-0.01, F[-1]+0.1),
                   interpolation=interpolation, cmap=cmap)
 
     return T,F,p
 
-def plot_motif(ax, mdb, symbol, featmap=None, label=True, **kwargs):
+def plot_motif(ax, mdb, symbol, featmap=None, label=True, altdir=None, **kwargs):
     """
     Plots a motif with its features. Uses matplotlib.
 
     Optional arguments:
     label - if True (default), label each feature with a number
     thresh - threshold of PSD (default 0.1 == -10 dB)
+    altdir - directory to load pcm data from; otherwise uses default
     additional arguments passed to plot_spectrogram()
     """
 
     # generate the spectrogram
-    sig = sndfile(mdb.get_motif_data(symbol)).read()
+    pcmfile = mdb.get_motif_data(symbol)
+    if altdir:
+        pcmfile = os.path.join(altdir, os.path.split(pcmfile)[-1])
+    sig = sndfile(pcmfile).read()
     T,F,p = plot_spectrogram(ax, sig, **kwargs)
 
     # plot annotation if needed
@@ -58,7 +63,7 @@ def plot_motif(ax, mdb, symbol, featmap=None, label=True, **kwargs):
         dcontour(ax, features, T, F, hold=1, smooth=kwargs.get('smooth',None))  
 
         # locate the centroid of each feature and label it
-        if not kwargs.get('label',True): return 
+        if not label: return 
         for fnum in unique(features[features>-1]):
             y,x = center_of_mass(features==fnum)
             ax.text(T[int(x)], F[int(y)], "%d" % fnum, color='w', fontsize=20)            
