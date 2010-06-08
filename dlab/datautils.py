@@ -141,20 +141,20 @@ def seqshuffle(S):
     return out
 
 
-def bimatrix(filename, read_type='i', **kwargs):
+def bimatrix(filename, read_type='i', order='C'):
     """
     Reads the contents of a .bin file as a matrix. The shape
     of the data is determined from the file, but the data type
     has to be specified as an argument.
+
+    read_type - dtype of the data in the file
+    order  - the rank-order of the data (default 'C'; 'F' for column-major)
     """
-    mem_type = kwargs.get('mem_type', read_type)
-    
     fp = open(filename, 'rb')
-    shape = fread(fp, 2, 'i')
-    data = fread(fp, shape.prod(), read_type, mem_type)
-    data.shape = shape
+    shape = nx.fromfile(fp, 'i', 2)
+    data = nx.fromfile(fp, read_type, shape.prod())
     fp.close()
-    return data.squeeze()
+    return nx.reshape(data, shape, order).squeeze()
 
 def bomatrix(data, filename, write_type=None):
     """
