@@ -438,6 +438,3 @@ if __name__=="__main__":
 
     fhat = A * Msong.T
     print "Song CC: %3.4f" % nx.corrcoef(f, fhat)[0,1]
-
-    
-    
