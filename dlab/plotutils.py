@@ -224,6 +224,17 @@ def cimap(data, cmap=mplt.cm.hsv, thresh=0.2):
     Z[:,:,3] = (M - M.min()) / (M.max() - M.min())
     return Z
 
+class multifigure(object):
+    def __init__(self, template):
+        self.fignum = 0
+        self.template = template
+
+    def plotfigure(self, fig, closefig=True, **kwargs):
+        fig.savefig(self.template % self.fignum, **kwargs)
+        self.fignum += 1
+        if closefig:
+            mplt.close(fig)
+
 class multiplotter(object):
     """
     This class is used to group a bunch of figures into a single pdf
