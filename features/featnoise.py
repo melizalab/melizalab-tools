@@ -23,15 +23,17 @@ to use (default 0)
 """
 
 from __future__ import with_statement
-import os, sys, glob, getopt
+import os, sys, glob, getopt, pdb
 import numpy as nx
 # this program sucks down memory if it's not using the PDF backend driver
 import matplotlib
 matplotlib.use('PDF')
 from matplotlib import cm
-from pylab import figure,close
+from matplotlib.ticker import MultipleLocator, MaxNLocator
+from pylab import figure,close,setp
 
-from motifdb import db
+
+from motifdb import db, plotter
 import features.featureresponses as fresps
 from mspikes import toelis
 from dlab.signalproc import spectro
@@ -73,6 +75,8 @@ _spon_range = (-2000, 0)
 _featset = 0
 _do_plot = True
 _do_plot_coh = False
+_do_plot_feats = True
+
 _err = [2, 0.05]   # determines which points to keep within the fpass window
 _coh_options = { 'mtm_p' : 20,
                  'fpass' : [0., 0.5 / binsize],
@@ -217,14 +221,20 @@ def analyze_song(song, ndb, respdir='', stimdir=_ftable_dir,
         ax.plot(note_offsets, nx.arange(note_offsets.size)+1, 'k|', mew=1, ms=1)
         ax.axis(axlim)
 
+    # plot individual features ranked by strength
+    if _do_plot_feats:
+        featfigs = plot_feats(AA,ndb,featset,ind[::-1])[0]
+
     # calculate mean FR etc
     m_feat = FRF.sum() / FRF.shape[0]
     max_feat = FRF.sum(0).max()
 
     if not _do_plot: fig = None
     if not _do_plot_coh: fig2 = None
+    if not _do_plot_feats: featfigs = None
     return {'fig':fig,
             'cohfig':fig2,
+            'featfigs':featfigs,
             'song_len':mlen,
             'm_spon':m_spon.mean(),
             'm_resp':m_resp.mean(),
@@ -256,6 +266,73 @@ def loadresponses(song, respdir):
         if stim.find('cfeats') > -1:
             ctls[stim] = tls.pop(stim)
     return tls,ctls
+
+def plot_feats(AA,ndb,featset,ind=None,plotw=3000,plotpad=0.02,nrow=4):
+    # these arguments get you 7-8 notes per line (~500 ms per note)
+    fnames = nx.asarray(AA.keys())
+    if not ind==None:
+        fnames = fnames[ind]
+    flens = [ndb.get_feature(x.split('_')[0], featset, int(x.split('_')[1]))['dim'][0] for x in fnames]
+    flens = (nx.asarray(flens) + continwindow) / plotw
+
+    figs = []
+    specax = []
+    respax = []
+    images = []
+
+    plotstart = plotutils.autogrid(flens, 0.95, plotpad)
+    fig = figure(figsize=(6,8))
+    figs.append(fig)
+
+    xstart = 0.05
+    ypos = 0.95
+    rowheight = 0.9 / nrow - plotpad 
+    plotind = 0
+    lnum = 0
+
+    # for scaling plots
+    ymax = ymin = 0
+
+    for line in plotstart:
+        specbottom = ypos - rowheight * 0.6
+        respbottom = ypos - rowheight
+        for i in range(len(line)):
+            f_ind = plotind + i
+            rect1 = [xstart + line[i], specbottom, flens[f_ind], rowheight * 0.6]
+            rect2 = [xstart + line[i], respbottom, flens[f_ind], rowheight * 0.3]
+            specax.append(fig.add_axes(rect1))
+            respax.append(fig.add_axes(rect2))
+
+            # the plotting code:
+            feat = fnames[f_ind]
+            motif,fnum = feat.split('_')
+            resp = AA[feat]
+            ymax = max(ymax,resp.max())
+            ymin = min(ymin,resp.min())
+            t = nx.arange(0,resp.size*ftable_options['binsize'],ftable_options['binsize'])
+            images.append(plotter.plot_feature(specax[-1], ndb, motif, int(fnum), featset, thresh=10000))
+            respax[-1].plot(t,resp,'k')
+            specax[-1].set_xlim((0,t[-1]))
+            respax[-1].set_xlim((0,t[-1]))
+            #ax[i].set_title('%d' % (fnames.size - topind[i]))
+            plotutils.setframe(specax[-1], 1000 if i==0 else 0)
+            plotutils.setframe(respax[-1], 1100 if i==0 else 100)
+            respax[-1].xaxis.set_major_locator(MultipleLocator(250))
+            respax[-1].yaxis.set_major_locator(MaxNLocator(4))
+
+        plotind += len(line)
+        ypos -= rowheight + plotpad
+        lnum += 1
+        
+        if lnum == nrow:
+            fig = figure(figsize=(6,8))
+            figs.append(fig)
+            ypos = 0.95
+            lnum = 0
+            
+    plotutils.sync_clim(images)
+    setp(respax,ylim=(ymin,ymax))
+    return figs
 
 def cohsummary(C,Cself,sig):
     if sig.sum() == 0: return 0.0
@@ -409,31 +486,32 @@ if __name__=='__main__':
 
             for song in songs:
                 print >> sys.stderr, 'Analyzing %s_%s::%s' % (bird, basename, song)
-                try:
-                    respdir = os.path.join(_data_dir, 'st' + bird, date, basename)
-                    Z = analyze_song(song, ndb, respdir=respdir, featset=_featset,
-                                                                     **ftable_options)
-                    if _do_plot: mtp.plotfigure(Z['fig'])
-                    if _do_plot_coh: cohpdf.plotfigure(Z['cohfig'])
+                #try:
+                respdir = os.path.join(_data_dir, 'st' + bird, date, basename)
+                Z = analyze_song(song, ndb, respdir=respdir, featset=_featset,
+                                                                 **ftable_options)
+                if _do_plot: mtp.plotfigure(Z['fig'])
+                if _do_plot_coh: cohpdf.plotfigure(Z['cohfig'])
+                if _do_plot_feats:
+                    for ffig in Z['featfigs']:
+                        mtp.plotfigure(ffig)
 
-                    # selectivity index
-                    AA = Z['model'][-3]
-                    fr_mn,fr_ex,fr_su = feat_responses(AA)
-
-                    # calculate feature similarity of strong responses
-                    fnames,fsim = load_similarity(song, _featset)
-                    fsim_ex,fsim_ot = split_features(AA,fnames,fsim)
-                    
-                    outfp.write('st%s_%s\t%s\t' % (bird,basename,song))
-                    outfp.write('%(song_len)3.4f\t%(m_spon)3.4f\t%(m_resp)3.4f\t%(m_feat)3.4f\t%(max_feat)3.4f\t' % Z)
-                    outfp.write('%(cc_fit)3.4f\t%(cc_val)3.4f\t%(coh_recon)3.4f\t' % Z)
-                    outfp.write('%(coh_val)3.4f\t%(song_fcut)3.4f\t%(coh_fcut)3.4f\t' % Z)
-                    outfp.write('%3.4f\t%3.4f\t%3.4f\t' % (fr_ex.mean() / nx.abs(fr_su).mean(),
-                                                           sparsity(fr_ex), sparsity(fr_su)))
-                    outfp.write('%3.4f\t%3.4f\n' % (nx.median(fsim_ex), nx.median(fsim_ot)))
-                    outfp.flush()
-                except Exception, e:
-                    print >> sys.stderr, 'Error: %s' % e
+                # selectivity index
+                AA = Z['model'][-3]
+                fr_mn,fr_ex,fr_su = feat_responses(AA)
+                # calculate feature similarity of strong responses
+                fnames,fsim = load_similarity(song, _featset)
+                fsim_ex,fsim_ot = split_features(AA,fnames,fsim)
+                outfp.write('st%s_%s\t%s\t' % (bird,basename,song))
+                outfp.write('%(song_len)3.4f\t%(m_spon)3.4f\t%(m_resp)3.4f\t%(m_feat)3.4f\t%(max_feat)3.4f\t' % Z)
+                outfp.write('%(cc_fit)3.4f\t%(cc_val)3.4f\t%(coh_recon)3.4f\t' % Z)
+                outfp.write('%(coh_val)3.4f\t%(song_fcut)3.4f\t%(coh_fcut)3.4f\t' % Z)
+                outfp.write('%3.4f\t%3.4f\t%3.4f\t' % (fr_ex.mean() / nx.abs(fr_su).mean(),
+                                                       sparsity(fr_ex), sparsity(fr_su)))
+                outfp.write('%3.4f\t%3.4f\n' % (nx.median(fsim_ex), nx.median(fsim_ot)))
+                outfp.flush()
+                #except Exception, e:
+                    #print >> sys.stderr, 'Error: %s' % e
 
     if _do_plot: mtp.writepdf(outfile + '.pdf')
     if _do_plot_coh: cohpdf.writepdf(outfile + '_coh.pdf')
