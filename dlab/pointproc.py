@@ -357,6 +357,8 @@ def cc_ratio(S, R, **kwargs):
     dt = 1./kwargs.get('Fs',1)
     kw = kwargs.get('kernwidth',dt*4)
     wf = kwargs.get('window','gaussian')
+    if R is None or S is None:
+        return nx.nan,nx.nan
 
     if isinstance(S, toelis.toelis):
         mintime,maxtime = kwargs.get('tgrid',S.range)

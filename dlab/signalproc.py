@@ -82,9 +82,20 @@ def mtm_spec(signal, **kwargs):
 
     special arguments:
     mtm_p - mtm bandwidth (see dpss) (default 3.5)
-    tapers - number of tapers to use (defaults mtm_p*2-1)
     adapt - whether to use the adaptive method to scale the contributions
             of the different tapers (default).
+
+    Specify the lattice for the time intervals as in stft()
+
+    Most of this code is translated from the MATLAB signal toolkit
+ 
+    References: 
+      [1] Thomson, D.J.'Spectrum estimation and harmonic analysis.'
+          In Proceedings of the IEEE. Vol. 10 (1982). Pgs 1055-1096.
+      [2] Percival, D.B. and Walden, A.T., 'Spectral Analysis For Physical
+          Applications', Cambridge University Press, 1993, pp. 368-370. 
+      [3] Mitra, P.P. and Pesearan, B. 'Analysis of Dynamic Brain
+          Imaging Data', Biophys J 76 (1999), pp 691-708.
     """
     nfft = kwargs.get('nfft', _nfft)
     shift = kwargs.get('shift', _shift)
@@ -95,12 +106,79 @@ def mtm_spec(signal, **kwargs):
     assert signal.ndim == 1
     assert nfft > 0 and mtm_p > 0
 
-    return libtfr.mtm_spec(signal, nfft, shift, mtm_p, tapers, adapt)
+    nrows = (nfft % 2) and nfft/2+1 or (nfft+1)/2
+    
+    # calculate dpss vectors
+    (v,e) = dpss(nfft, mtm_p)
+    ntapers = max(2*mtm_p-1,1)
+    v = v[0:ntapers]
+
+    # generate the grid
+    if kwargs.has_key('grid'):
+        grid = kwargs.get('grid')
+    else:
+        onset = int(kwargs.get('onset',0))
+        offset = signal.size - int(kwargs.get('offset',0))
+        shift = int(kwargs.get('shift', 10))
+        grid = nx.arange(onset, offset, shift)
+
+    ncols = len(grid)
+    S_tmp = nx.array(signal, 'd')
+    S_tmp.resize(len(signal) + nfft-1)    
+    workspace = nx.zeros((nfft, ncols, ntapers),'d')
+    sigpow = nx.zeros(ncols,'d')
+    
+    for i in range(nfft):
+        val = S_tmp[grid+i-1]
+        workspace[i,:,:] = outer(val,e[i,0:ntapers])
+        sigpow += nx.power(val,2)  # dot product of the signal is used in mtm_adapt
+
+    # calculate the windowed FFTs
+    C = nx.power(nx.absolute(sfft.fft(workspace, nfft, axis=0, overwrite_x=1)),2)
+
+    if adapt:
+        S = mtm_adapt(C, v, sigpow / nfft)
+    else:
+        C.shape = (nfft * ncols, ntapers)
+        S = gemm(C,v,alpha=1./ntapers)
+        S.shape = (nfft, ncols)
+
+    # for real signals the spectrogram is one-sided
+    if nx.iscomplexobj(signal):
+        outrows = nfft % 2 and (nfft+1)/2 or nfft/2+1
+        return S[0:outrows+1,:]
+    else:
+        return S
+
+
 
 def tfr_spec(signal, **kwargs):
     """
-    Computes the time-frequency power spectrogram of a signal using the
-    multitaper time-frequency reassignment method
+    Computes an adaptive average for mtm spectrogramtapers. Sk is a 3D
+    array, (nfft, ncols, ntapers) V is a 1D array (ntapers,). Sigpow
+    is a 1D array (ncols,) giving the normalized power in each window
+
+    We have to compute an array of adaptive weights based on an initial
+    estimate:
+    w_{i,j,k}=(S_{i,j}/(S_{i,j}V_k + a_k))^2V_k
+
+    a_k and the error tolerance is determined by the signal power in each window
+
+    And then use the weights to calculate the new estimate:
+    S_{i,j} = \sum_k w_{i,j,k} Sk_{i,j,k} / \sum_k w_{i,j,k}
+
+    """
+    assert Sk.ndim == 3
+    assert len(V) == Sk.shape[2]
+
+    ni,nj,nk = Sk.shape
+    S = (Sk[:,:,0] + Sk[:,:,1])/2
+
+    code = """
+        # line 283 "signalproc.py"
+	int i,j,k;
+	double est, num, den, w;
+        double sig2, tol, err;
 
     special arguments:
     order - number of tapers to use (default 6)
@@ -166,6 +244,19 @@ def mtfft(S, **kwargs):
     J = libtfr.mtfft(S, NW, K, nfft)
     return J[findx,:],f
 
+    ntapers = tapers.shape[1]
+    # "outer product" of data with tapers
+    S = S.reshape((N, 1, C))
+    tapers = tapers.reshape(tapers.shape + (1,))
+    S = nx.tile(S, (1,ntapers,1))
+    tapers = nx.tile(tapers, (1,1,C))
+    S = S * tapers
+    J = sfft.fft(S, nfft, axis=0)/Fs
+    J = J[findx,:,:]
+    if Sdim==1:
+        J = nx.squeeze(J)
+        
+    return J, f
     
 def mtcoherence(S1, S2, **kwargs):
     """
