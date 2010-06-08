@@ -11,6 +11,8 @@ To estimate the parameters of the model we estimate the firing rate of
 the cell to the full motif and compare the firing rate in response to
 residuals.
 
+## Deprecation note: this is the oldest script for calculating FRFs!
+
 """
 import sys,os
 import numpy as nx

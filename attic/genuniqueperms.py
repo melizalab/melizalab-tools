@@ -13,6 +13,8 @@ Output:
 
 Runs until interrupted, or all the permutations are exhausted.
 
+## Deprecation note: not needed currently; code should be usable though
+
 """
 
 from __future__ import with_statement
