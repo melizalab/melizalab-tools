@@ -82,6 +82,7 @@ def mtm_spec(signal, **kwargs):
 
     special arguments:
     mtm_p - mtm bandwidth (see dpss) (default 3.5)
+    tapers - number of tapers to use (defaults mtm_p*2-1)
     adapt - whether to use the adaptive method to scale the contributions
             of the different tapers (default).
 
@@ -134,14 +135,16 @@ def mtm_spec(signal, **kwargs):
         sigpow += nx.power(val,2)  # dot product of the signal is used in mtm_adapt
 
     # calculate the windowed FFTs
-    C = nx.power(nx.absolute(sfft.fft(workspace, nfft, axis=0, overwrite_x=1)),2)
+    C = sfft.fft(workspace, nfft, axis=0, overwrite_x=1)
 
-    if adapt:
+    if adapt==1:
         S = mtm_adapt(C, v, sigpow / nfft)
-    else:
-        C.shape = (nfft * ncols, ntapers)
+    elif adapt==2:
+        C = C.reshape(nfft * ncols, ntapers)
         S = gemm(C,v,alpha=1./ntapers)
         S.shape = (nfft, ncols)
+    else:
+        S = C
 
     # for real signals the spectrogram is one-sided
     if nx.iscomplexobj(signal):
@@ -149,57 +152,6 @@ def mtm_spec(signal, **kwargs):
         return S[0:outrows+1,:]
     else:
         return S
-
-
-
-def tfr_spec(signal, **kwargs):
-    """
-    Computes an adaptive average for mtm spectrogramtapers. Sk is a 3D
-    array, (nfft, ncols, ntapers) V is a 1D array (ntapers,). Sigpow
-    is a 1D array (ncols,) giving the normalized power in each window
-
-    We have to compute an array of adaptive weights based on an initial
-    estimate:
-    w_{i,j,k}=(S_{i,j}/(S_{i,j}V_k + a_k))^2V_k
-
-    a_k and the error tolerance is determined by the signal power in each window
-
-    And then use the weights to calculate the new estimate:
-    S_{i,j} = \sum_k w_{i,j,k} Sk_{i,j,k} / \sum_k w_{i,j,k}
-
-    """
-    assert Sk.ndim == 3
-    assert len(V) == Sk.shape[2]
-
-    ni,nj,nk = Sk.shape
-    S = (Sk[:,:,0] + Sk[:,:,1])/2
-
-    code = """
-        # line 283 "signalproc.py"
-	int i,j,k;
-	double est, num, den, w;
-        double sig2, tol, err;
-
-    special arguments:
-    order - number of tapers to use (default 6)
-    npoints - number of points in the window (default 291)
-    tm - time support of tapers (default 6.0)
-    flock - frequency locking parameter; power is not reassigned
-	    more than this value (in Hz; default 0.01)
-    tlock - time locking parameter (in frames; default 5)
-    """
-    nfft = kwargs.get('nfft', _nfft)
-    shift = kwargs.get('shift', _shift)
-    Np = kwargs.get('npoints',_tfr_np)
-    K  = kwargs.get('order',_tfr_order)
-    tm = kwargs.get('tm',_tfr_tm)
-    flock = kwargs.get('flock',_tfr_flock)
-    tlock = kwargs.get('tlock',_tfr_tlock)
-    
-    assert signal.ndim == 1
-    assert nfft > 0 and K > 0
-
-    return libtfr.tfr_spec(signal, nfft, shift, Np, K, tm, flock, tlock)
 
 def mtfft(S, **kwargs):
     """
@@ -244,19 +196,23 @@ def mtfft(S, **kwargs):
     J = libtfr.mtfft(S, NW, K, nfft)
     return J[findx,:],f
 
-    ntapers = tapers.shape[1]
-    # "outer product" of data with tapers
-    S = S.reshape((N, 1, C))
-    tapers = tapers.reshape(tapers.shape + (1,))
-    S = nx.tile(S, (1,ntapers,1))
-    tapers = nx.tile(tapers, (1,1,C))
-    S = S * tapers
-    J = sfft.fft(S, nfft, axis=0)/Fs
-    J = J[findx,:,:]
-    if Sdim==1:
-        J = nx.squeeze(J)
+## v v v v v v v
+## *************
+##     ntapers = tapers.shape[1]
+##     # "outer product" of data with tapers
+##     S = S.reshape((N, 1, C))
+##     tapers = tapers.reshape(tapers.shape + (1,))
+##     S = nx.tile(S, (1,ntapers,1))
+##     tapers = nx.tile(tapers, (1,1,C))
+##     S = S * tapers
+##     J = sfft.fft(S, nfft, axis=0)/Fs
+##     J = J[findx,:,:]
+##     if Sdim==1:
+##         J = nx.squeeze(J)
         
-    return J, f
+##     return J, f
+
+## ^ ^ ^ ^ ^ ^ ^
     
 def mtcoherence(S1, S2, **kwargs):
     """
