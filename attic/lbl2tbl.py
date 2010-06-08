@@ -8,22 +8,17 @@ Table files are written to the current directory
 Options:
   -h                     Add header to file
   -d                     Drop names for events (i.e. produce a two-column table)
-  
 """
 
 from __future__ import with_statement
 import os, sys, getopt
 import numpy as nx
-from dlab import labelio
+from arf.io import lblfile
 
 _add_header = False
 _drop_names = False
 
 if __name__=="__main__":
-
-    if len(sys.argv) < 2:
-        print __doc__
-        sys.exit(-1)
 
     opts, args = getopt.getopt(sys.argv[1:], "hd")
 
@@ -36,7 +31,6 @@ if __name__=="__main__":
     if len(args) < 1:
         print __doc__
         sys.exit(-1)
-
 
     for fname in args:
         if not os.path.exists(fname):

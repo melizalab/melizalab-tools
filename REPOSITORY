@@ -1,6 +1,6 @@
-Project:	python
+Project:	dlab
 Codebase:	python
-Description:	My repository of python scripts and modules. 
-Official repos:	dmeliza@gigantor.uchicago.edu:/home/dmeliza/src/python
+Description:	A python package with various functions I use frequently
+Official repos:	dmeliza@dylan.uchicago.edu:/Users/dmeliza/Devel/dlab
 Maintainer:	dmeliza@uchicago
-Requires:	
+Requires:	numpy, scipy, probably others
