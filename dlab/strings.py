@@ -1,18 +1,21 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-module with string-processing functions
+String functions
+
+uniquemiddle:          find shared parts of strings
 """
 
 def uniquemiddle(S):
     """
-    Given a list of strings, return the portion of each string
-    in the middle which is unique to the string. For example
-    uniquemiddle(['test123.blah', 'test234.blah']) returns
+    Given a sequence of strings S, return the portion of each string
+    in the middle which is unique to the string.
+
+    Example:
+    >>> uniquemiddle(['test123.blah', 'test234.blah'])
     (['123', '234'], 'test', 'blah')
     """
-    if len(S)<2:
-        raise ValueError, "Input list needs to have at least two elements"
+    if len(S)<2: raise ValueError, "Input list needs to have at least two elements"
 
     slen = min([len(s) for s in S])
 
