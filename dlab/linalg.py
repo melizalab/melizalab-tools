@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-Some statistics and linear algebra functions
+General statistics and linear algebra functions.
 
+Functions
+========================
+gemm:           matrix-matrix or matrix-vector multiplication
+outer:          outer product of two vectors
+cov:            covariance of variables
+pca:            principal components analysis (via svd)
 """
-import scipy as nx
-from scipy.linalg import get_blas_funcs, svd
-from scipy import weave
 
 def gemm(a,b,alpha=1.,**kwargs):
     """
@@ -27,6 +30,7 @@ def gemm(a,b,alpha=1.,**kwargs):
 
     set overwrite_c to 1 to use C's memory for output
     """
+    from scipy.linalg import get_blas_funcs
     _gemm,= get_blas_funcs(('gemm',),(a,b))
     return _gemm(alpha, a, b, **kwargs)
     
@@ -42,279 +46,63 @@ def outer(a,b,alpha=1.,**kwargs):
 
     set overwrite_a to use A's memory for output
     """
+    from scipy.linalg import get_blas_funcs
     _ger, = get_blas_funcs(('ger',),(a,b))
     return _ger(alpha, a, b, **kwargs)
     
 
-def cov(m, y=None, rowvar=1, bias=0):
+def cov(m, trans=False, bias=False):
     """
-    Like scipy.cov, but uses lapack for the matrix product
+    Estimate covariance of two or more variables. Uses lapack for
+    calculation.
+
+    m:      input matrix, with at least two columns or rows
+    trans:  if False (default), observations are in rows and
+            variables in columns; if True, the opposite
+    bias:   if False (default), normalize by N-1, where N is the
+            number of observations. If True, normalize by N
+
+    Returns: 2D array C with C_{i,j} equal to the covariance between
+             variables i and j
     """
-    X = nx.array(m, ndmin=2, dtype=float)
-    if X.shape[0] == 1:
-        rowvar = 1
-    if rowvar:
+    from numpy import array
+    
+    X = nx.array(m, ndmin=2)
+    if not trans:
         axis = 0
         tup = (slice(None),nx.newaxis)
     else:
         axis = 1
         tup = (nx.newaxis, slice(None))
 
-
-    if y is not None:
-        y = nx.array(y, copy=False, ndmin=2, dtype=float)
-        X = nx.concatenate((X,y),axis)
-
     X -= X.mean(axis=1-axis)[tup]
-    if rowvar:
-        N = X.shape[1]
-    else:
-        N = X.shape[0]
+    if not trans: N = X.shape[1]
+    else: N = X.shape[0]
 
-    if bias:
-        fact = N*1.0
-    else:
-        fact = N-1.0
+    if bias: fact = N*1.0
+    else: fact = N-1.0
 
-    if rowvar:
+    if not trans:
         return gemm(X, X.conj(), alpha=1/fact, trans_b=1).squeeze()
     else:
         return gemm(X, X.conj(), alpha=1/fact, trans_a=1).squeeze()
 
-def pcasvd(data, output_dim=None):
+
+def pca(data, output_dim=None):
     """
-    Computes principal components of data using singular value decomposition.
-    Data is centered prior to running svd.
+    Computes principal components of data using singular value
+    decomposition.  Data is centered prior to running svd.
+
+    data:        2D ndarray
+    output_dim:  the number of output projections to include (default all)
+
+    Returns:
+    proj:        projections of data onto the first output_dim PCs
+    load:        loadings of first output_dim PCs
     """
+    from scipy.linalg import svd
     if output_dim==None: output_dim = data.shape[1]
     data = data - data.mean(0)
     u,s,v = svd(data, full_matrices=0)
     v = v[:output_dim,:]
     return gemm(data, v, trans_b=1), v
-
-def squareform(A, dir=None):
-    """
-    Reformat a distance matrix between upper triangular and square form.
-    
-    Z = SQUAREFORM(Y), if Y is a vector as created by the PDIST function,
-    converts Y into a symmetric, square format, so that Z(i,j) denotes the
-    distance between the i and j objects in the original data.
- 
-    Y = SQUAREFORM(Z), if Z is a symmetric, square matrix with zeros along
-    the diagonal, creates a vector Y containing the Z elements below the
-    diagonal.  Y has the same format as the output from the PDIST function.
- 
-    Z = SQUAREFORM(Y,'tovector') forces SQUAREFORM to treat Y as a vector.
-    Y = SQUAREFORM(Z,'tomatrix') forces SQUAREFORM to treat Z as a matrix.
-    These formats are useful if the input has a single element, so it is
-    ambiguous as to whether it is a vector or square matrix.
-
-    Example:  If Y = (1:6) and X = [0  1  2  3
-                                    1  0  4  5
-                                    2  4  0  6
-                                    3  5  6  0],
-              then squareform(Y) is X, and squareform(X) is Y.
-    """
-    A = nx.asarray(A)
-    if dir==None:
-        if A.ndim <2:
-            dir = 'tomatrix'
-        else:
-            dir = 'tovector'
-
-
-
-    if dir=='tomatrix':
-        Y = A.ravel()
-        n = Y.size
-        m = (1 + nx.sqrt(1+8*n))/2
-        if m != nx.floor(m):
-            raise ValueError, "The size of the input vector is not correct"
-        Z = nx.zeros((m,m),dtype=Y.dtype)
-        if m > 1:
-            ind = nx.tril(nx.ones((m,m)),-1).nonzero()
-            Z[ind] = Y
-            Z = Z + Z.T
-    elif dir=='tovector':
-        m,n = A.shape
-        if m != n:
-            raise ValueError, "The input matrix must be square with zeros on the diagonal"
-        ind = nx.tril(nx.ones((m,m)),-1).nonzero()        
-        Z = A[ind]
-    else:
-        raise ValueError, 'Direction argument must be "tomatrix" or "tovector"'
-
-    return Z
-
-def tridisolve(e, d, b):
-    """
-    Solve a tridiagonal system of equations.
-    TRIDISOLVE(e,d,b) is the solution to the system
-         A*X = B
-     where A is an N-by-N symmetric, real, tridiagonal matrix given by
-         A = diag(E,-1) + diag(D,0) + diag(E,1)
-
-    D - 1D vector of length N
-    E - 1D vector of length N (first element is ignored)
-    B - 1D vector of length N
-    
-    raises an exception when A is singular
-    returns X, a 1D vector of length N
-    """
-
-    assert e.ndim == 1 and d.ndim == 1, "Inputs must be vectors"
-    assert e.size == d.size, "Inputs must have the same length"
-        
-    # copy input values
-    dd = d.copy()
-    x = b.copy()
-
-    code = """
-        # line 164 "linalg.py"
-        const double eps = std::numeric_limits<double>::epsilon();
-        int N = dd.size();
-        
-    	for (int j = 0; j < N-1; j++) {
-		double mu = e(j+1)/dd(j);
-		dd(j+1) = dd(j+1) - e(j+1)*mu;
-		x(j+1)  = x(j+1) -  x(j)*mu;
-	}
-
-	if (fabs(dd(N-1)) < eps) {
-		return_val = -1;
-	}
-	else {
-	        x(N-1) = x(N-1)/dd(N-1);
-
-	        for (int j=N-2; j >= 0; j--) {
-		       x(j) = (x(j) - e(j+1)*x(j+1))/dd(j);
-	        }
-                return_val = 0;
-        }
-        """
-
-    rV = weave.inline(code,['dd','e','x'],
-                      type_converters=weave.converters.blitz)
-
-    if rV < 0:
-        raise ValueError, "Unable to solve singular matrix"
-    return x
-
-def tridieig(D,SD,k1,k2,tol=0.0):
-    """
-    Compute eigenvalues of a tridiagonal matrix. Tridiag matrix is defined by
-    two vectors of length N and N-1 (D and E):
-        A = diag(E,-1) + diag(D,0) + diag(E,1)
-
-    @param D  - diagonal of the tridiagonal matrix
-    @param SD - superdiagonal of the matrix. superdiag must be the same
-	        length as diag, but the first element is ignored
-    @param k1 - the minimum index of the eigenvalue to return
-    @param k2 - the maximum index (inclusive) of the eigenvalue to return
-    @param tol - set tolerance for solution (default determine automatically)
-
-    @returns a vector with the eigenvalues between k1 and k2 (inclusive)
-    """
-
-    assert D.ndim==1 and SD.ndim==1, "Inputs must be vectors"
-    assert D.size == SD.size, "Inputs must have the same length"
-    assert k1 < k2, "K2 must be greater than K1"
-    assert k2 < D.size, "K1 and K2 must be <= N"
-
-    N = D.size
-    SD[0] = 0
-    beta = SD * SD;
-    Xmin = min(D[-1] - abs(SD[-1]),
-               min(D[:-1] - nx.absolute(SD[:-1]) - nx.absolute(SD[1:])))
-    Xmax = max(D[-1] - abs(SD[-1]),
-               max(D[:-1] + nx.absolute(SD[:-1]) + nx.absolute(SD[1:])))
-
-
-    x = nx.zeros(N)
-    wu = nx.zeros(N)
-    
-    code = """
-        # line 227 "linalg.py"
-        const double eps = std::numeric_limits<double>::epsilon();
-        double xmax = Xmax;
-        double xmin = Xmin;
-        double eps2 = tol * fmax(xmax,-xmin);
-        double eps1 = (tol <=0) ? eps2 : tol;
-        eps2 = 0.5 * eps1 + 7 * eps2;
-
-    	for (int i = k1; i <= k2; i++) {
-		x(i) = xmax;
-		wu(i) = xmin;
-	}
-
-	int z = 0;
-	double x0 = xmax;
-
-	for (int k = k2; k >= k1; k--) {
-		double xu = xmin;
-		for (int i = k; i >= k1; i--) {
-			if (xu < wu(i)) {
-				xu = wu(i);
-				break;
-			}
-		}
-		if (x0 > x(k)) x0 = x(k);
-		while (1) {
-			double x1 = (xu + x0)/2;
-			if (x0 - xu <= 2*eps*(fabs(xu)+fabs(x0)) + eps1) break;
-
-			z++;
-			int a = -1;
-			double q = 1;
-			for (int i = 0; i < N; i++) {
-				double s = (q == 0) ? fabs(SD(i))/eps : beta(i)/q;
-				q = D(i) - x1 - s;
-				if (q < 0) a++;
-			}
-			if (a < k) {
-				xu = x1;
-				if (a < k1) {
-					wu(k1) = x1;
-				}
-				else {
-					wu(a+1) = x1;
-					if (x(a) > x1) x(a) = x1;
-				}
-			}
-			else 
-				x0 = x1;
-		}
-		x(k) = (x0 + xu)/2;
-	}
-        """
-
-    weave.inline(code,['x','wu','D','SD','N','Xmax','Xmin',
-                       'tol','k1','k2','beta'],
-                 type_converters=weave.converters.blitz)
-
-    return x[k1:k2+1]
-
-if __name__=="__main__":
-
-
-    print "Testing covariance function:"
-    N = 1000
-    M = 10
-    S = nx.randn(N)
-    X = nx.column_stack((S, nx.randn(N), S + nx.randn(N)/5))
-    A1 = nx.cov(X,rowvar=0)
-    A2 = cov(X,rowvar=0)
-
-    print "Testing tridieig functions:"
-    
-    npoints = 256
-    mtm_p = 3.5
-    W = float(mtm_p)/npoints
-    ntapers = int(min(round(2*npoints*W),npoints))
-    d = (nx.power(npoints-1-2*nx.arange(0.,npoints), 2) * .25 * nx.cos(2*nx.pi*W)).real
-    ee = nx.concatenate(([0], nx.arange(1.,npoints) * nx.arange(npoints-1,0.,-1)/2))
-    v = tridieig(d, ee, npoints-ntapers, npoints-1)
-    v = v[::-1]
-    t = nx.arange(0.,npoints)/(npoints-1)*nx.pi
-    e = nx.sin(1.*t)
-    E = tridisolve(ee, d-v[0], e)
