@@ -9,8 +9,9 @@ stats:          statistical functions not found in numpy or scipy
 signal:         signal processing functions
 pointproc:      point process related functions
 io:             input/output functions
+ndimage:        image functions
 
 convolve:       extension module with convolution functions
 """
 
-__all__ = ['tools','mathf','stats','signal','pointproc','io','convolve']
+__all__ = ['tools','mathf','stats','signal','pointproc','io','ndimage','convolve']
