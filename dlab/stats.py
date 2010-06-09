@@ -9,6 +9,7 @@ rmvnorm:           sample from gaussian distribution with known covariance
 T1_test:           test sample covariance matrix from known cov matrix
 corrcoef_ci:       confidence interval for correlation coeffient
 ptiles:            look up percentiles in empirical CDF
+tabulate:          tabulate frequencies of unique values
 
 Copyright (C) 2009 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 Created 2009-09-03
@@ -93,6 +94,7 @@ def corrcoef_ci(x,y,alpha=0.05):
     z = Z(r)
     return r, IZ(z+ci), IZ(z-ci), r_p
 
+
 def ptiles(x, p, na_rm=True):
     """
     Return values of x at each percentile in p.
@@ -109,3 +111,14 @@ def ptiles(x, p, na_rm=True):
         if x.size == 0:
             return ones(len(p)) * nan
     return asarray(tuple(scoreatpercentile(x, y) for y in p))
+
+
+def tabulate(x):
+    """
+    Computes the frequencies of all the unique values in x. Returns
+    the unique levels and their frequencies
+    """
+    from numpy import asarray, unique
+    vals = asarray(x)
+    levels = unique(vals)
+    return levels, asarray([(vals==level).sum() for level in levels])

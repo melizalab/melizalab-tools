@@ -607,3 +607,109 @@ def fftresample(S, npoints, reflect=False, axis=0):
     else:
         return Sr
 
+
+def seqshuffle(S):
+    """
+    Generates shuffled sequences based on a simple positional
+    grammar. S is a numpy 2D character array, with each row in S
+    giving a list of the possible items that can be present in the
+    sequence at that position.
+
+    Returns an array in which each column is a shuffled sequence.
+    Returns all possible sequences (nchoice^nposition)
+    """
+    npos, nchoice = S.shape
+
+    x = range(npos)
+    y = range(nchoice)
+    coords = tuples(y, npos)
+    nout = len(coords)
+
+    out = nx.empty((npos, nout), dtype=S.dtype)
+    i = 0
+    for seq in coords:
+        out[:,i] = S[(x, seq)]
+        i += 1
+
+    return out
+
+
+def read_array(filename, dtype, separator=','):
+    """ Read a file with an arbitrary number of columns.
+        The type of data in each column is arbitrary
+        It will be cast to the given dtype at runtime
+    """
+    cast = nx.cast
+    data = [[] for dummy in xrange(len(dtype))]
+    for line in open(filename, 'r'):
+        fields = line.strip().split(separator)
+        for i, number in enumerate(fields):
+            data[i].append(number)
+    for i in xrange(len(dtype)):
+        data[i] = cast[dtype[i]](data[i])
+    return nx.rec.array(data, dtype=dtype)
+
+
+def flipaxis(data, axis):
+    """
+    Like fliplr and flipud but applies to any axis
+    """
+
+    assert axis < data.ndim
+    slices = []
+    for i in range(data.ndim):
+        if i == axis:
+            slices.append(slice(None,None,-1))
+        else:
+            slices.append(slice(None))
+    return data[slices]
+
+
+def accumarray(subs, val, **kwargs):
+    """
+    Accumulates values in an array based on an associated subscript vector.
+    This function should only be used for output arrays that aren't 2D,
+    since scipy.sparse.coo_matrix() can be used to accumulate over 2 dimensions.
+
+    subs - indices of values. Can be an MxN array or a list of M vectors
+           (or lists) with N elements. The output array will have M dimensions.
+    vals - values to accumulate in the new array. Can be a list or vector.
+
+    Optional arguments:
+
+    dim - sets the dimensions of the output array. defaults to subs.max(0) + 1
+    dtype - sets the data type of the output array. defaults to dtype of val, or
+            if val is a list, double
+    """
+
+    if not isinstance(subs, nx.ndarray):
+        # try to assemble into a 2D array
+        if not nx.iterable(subs): raise ValueError, "subscripts must be an array or list of arrays"
+        if not nx.iterable(subs[0]): subs = [subs]
+        try:
+            subs = nx.column_stack(subs)
+        except ValueError:
+            raise ValueError, "subscript arrays must be the same length"
+
+    # sanity checks
+    assert subs.ndim == 2, "subscript array must be 2 dimensions"
+    ndim = subs.shape[1]
+    nval = len(val)
+    assert nval == subs.shape[0], "value array and subscript array must have the same d_0"
+
+    # try to figure out dimensions
+    maxind = subs.max(0)
+    dims = kwargs.get('dim', maxind + 1)
+    assert all(dims > maxind), "Dimensions of array are not large enough to include all indices"    
+
+    # Try to guess dtype. Default is double
+    dtype = getattr(val, 'dtype', 'd')
+    dtype = kwargs.get('dtype', dtype)
+    out = nx.zeros(dims, dtype=dtype)
+
+    for i,v in enumerate(val):
+        ind = subs[i,:]
+        if not any(nx.isnan(ind)):
+            out[tuple(ind)] += v
+
+    return out
