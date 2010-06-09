@@ -4,14 +4,19 @@
 """
 Signal processing functions
 
-Functions
-==================================
 meanvar:         rapidly calculate mean and variance of a signal
 kernel:          generate smoothing kernel with a given bandwidth and resolution
 mtspectrum:      power spectrum from multitaper complex transformed data
 mtcoherence:     coherence of two signals
 specerr:         confidence intervals of spectrum
 coherr:          confidence intervals of coherence
+freqcut:         cut a frequency scale based on significance
+
+Spectrogram analysis
+=======================
+dynamic_range:   compress a spectrogram's dynamic range
+wiener_entry:    ratio of geometric and arithmetic means
+freq_mean:       mean frequency in each frame
 
 Copyright (C) 2010 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 Created 2010-06-08
@@ -288,6 +293,42 @@ def freqcut(f,sig,bandwidth):
     elif runlen==sig.size:
         runlen = -1
     return runlen
+
+
+def dynamic_range(S, dB):
+    """
+    Compress a spectrogram's dynamic range by thresholding all values
+    dB less than the peak of S (linear scale).
+
+    S:    input spectrogram
+    dB:   dynamic range of output spectrogram (log units)
+    """
+    from numpy import log10,where
+    smax = S.max()
+    thresh = 10**(log10(smax) - dB/10.)
+    return where(S >= thresh, S, thresh)
+    
+
+def wiener_entropy(S):
+    """
+    The Wiener entropy is the ratio of the geometric and additive means
+    of the spectrogram.  It indicates how concentrated the spectral power is.
+
+    S:    spectrogram (linear scale)
+    """
+    from numpy import log, exp
+    return log(exp(log(S).mean(0)) / S.mean(0))
+    
+def freq_mean(S):
+    """
+    The mean frequency is the center of mass of the spectrum
+    
+    S:    spectrogram (linear scale)
+    """
+    from numpy import arange, newaxis
+    ind = arange(S.shape[0], dtype=S.dtype)
+    return (ind[:,newaxis] * S).sum(0) / S.sum(0)
+    
 
 
 # Variables:
