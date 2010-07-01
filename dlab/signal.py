@@ -141,6 +141,16 @@ def mtcoherence(J1, J2, trialave=True):
         S2 = S2.mean(1)
     return S12 / sqrt(S1 * S2)
 
+def intertrial_coherence_correction(C,M):
+    """
+    Correct coherence for number of trials.
+
+    C:       coherence (complex) calculated from 1/2 of trials against the other
+    M:       total number of trials
+    """
+    from numpy import sqrt
+    Z = sqrt(1./(C.conj()*C).real)
+    return 1./ (.5 * (-M + M * Z) + 1)
 
 def specerr(S,J,p=0.05,jackknife=True, Nsp=None):
     """
@@ -209,13 +219,7 @@ def coherr(C,J1,J2,p=0.05,Nsp1=None,Nsp2=None):
     Outputs:
     CI:           confidence interval for C, N x 2 array, (lower, upper)
     phi_std:      stanard deviation of phi, N array
-     Outputs: 
-              confC - confidence level for C - only for err(1)>=1
-              phistd - theoretical or jackknife standard deviation for phi for err(1)=1 and err(1)=2 respectively
-                       returns zero if coherence is 1
-              Cerr  - Jacknife error bars for C  - only for err(1)=2
-
-     """
+    """
     from numpy import iscomplexobj, absolute, fix, zeros, setdiff1d, real, sqrt, absolute,\
          arctanh, tanh
     from scipy.stats import t
@@ -280,7 +284,7 @@ def freqcut(f,sig,bandwidth):
 
     Returns the INDEX of the cutoff, or 0 if there is no significant band
     """
-    from datautils import runs
+    from mathf import runs
     if sig.sum() == 0:
         return 0
 
