@@ -1,34 +1,47 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 """
-module with useful plotting functions
+Collection of general utility functions for plotting
 
-CDM, 1/2007
- 
+Plotting functions
+=======================
+raster:                      produce a raster plot of x values
+bar:                         produce a bar plot with string labels
+dcontour:                    discrete contour map
+waterfall:                   produce a waterfall plot
+err_shade:                    plot a data series with shading to indicate error
+
+Utility functions
+=======================
+colorcycle:                  generates colors from an extended series
+cmap_discrete:               produce a discretely segmented version of a colormap
+zcmap:                       map complex data into a colormap
+autogrid:                    pack a series of heterogeneous objects into a figure
+match_range_prop:            match a ranged property for a collection of axes
+
+Generators
+=======================
+axgriditer:                  iterate through an axis collection
+colindex:                    generate subplot indices based on column-first sequence
+
+
+Decorators
+=======================
+drawoffscreen:               drop into non-interactive mode during a function
+
+
+Copyright (C) 2007-2010 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 """
+import os
 import numpy as nx
 import matplotlib.pyplot as mplt
-import tempfile, shutil, os
 import functools
-from progutils import consumer
-from itertools import izip
+from decorators import deprecated
 
-def drawoffscreen(f):
-    from matplotlib.pyplot import isinteractive, ion, ioff, draw
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        retio = isinteractive()
-        ioff()
-        try:
-            y = f(*args, **kwargs)
-        finally:
-            if retio: ion()
-            draw()
-        return y
-    return wrapper
 
-def plot_raster(X, Y=0, start=None, stop=None, ax=None,
-                autoscale=False, **kwargs):
+
+def raster(X, Y=0, start=None, stop=None, ax=None,
+           autoscale=False, **kwargs):
     """
     Draws a raster plot of a set of point sequences. These can be defined
     as a set of x,y pairs, or as a list of lists of x values; in the latter
@@ -44,13 +57,10 @@ def plot_raster(X, Y=0, start=None, stop=None, ax=None,
     ax - plot to a specified axis, or if None (default), to the current axis
     autoscale - if true (default False), scale marks to match axis size
     **kwargs - additional arguments to plot
-
     """
-
     nreps = len(X)
-    if nreps == 0:
-        # fail gracefully if X is empty
-        return None
+    # fail gracefully if X is empty
+    if nreps == 0:  return None
 
     if Y == None or Y < 0:
         Y = 0
@@ -69,14 +79,14 @@ def plot_raster(X, Y=0, start=None, stop=None, ax=None,
         minx = start
     else:
         minx = x.min()
-        
+
     if stop != None:
         y = y[x<=stop]
         x = x[x<=stop]
         maxx = stop
     else:
         maxx = x.max()
-    
+
     if ax==None:
         ax = mplt.gca()
 
@@ -84,7 +94,7 @@ def plot_raster(X, Y=0, start=None, stop=None, ax=None,
     if x.size == 0:
         ax.axis((minx, maxx, - 0.5, nreps + 0.5))
         return
-    
+
     miny = min(Y)
     maxy = max(Y)
 
@@ -94,12 +104,13 @@ def plot_raster(X, Y=0, start=None, stop=None, ax=None,
         fudge = 1.5 * autoscale if isinstance(autoscale,(int,float)) else 1.0
         ht = ax.get_window_extent().height
         for p in plots: p.set_markersize(ht/((maxy-miny)*fudge))
-    
+
     ax.axis((minx, maxx, miny - 0.5, maxy + 0.5))
 
     return plots
 
-def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
+
+def bar(labels, values, width=0.5, sort_labels=False, **kwargs):
     """
     Produces a bar plot with string labels on the x-axis
 
@@ -111,17 +122,17 @@ def barplot(labels, values, width=0.5, sort_labels=False, **kwargs):
         ind = lbl.argsort()
         lbl.sort()
         values = values[ind]
-    
+
     x = nx.arange(lbl.size,dtype='f')+width
     mplt.bar(x, values, **kwargs)
     mplt.xticks(x+width/2, lbl.tolist())
-    
-    
+
+
 def dcontour(ax, *args, **kwargs):
     """
     Discrete contour function. Given a matrix I with a discrete number
     of unique levels, plots a contour at each unique level.
-    
+
     DCONTOUR(axes, I) plots the unique levels in I
     DCONTOUR(axes, X,Y,I) - X,Y specify the (x,y) coordinates of the points in Z
 
@@ -130,19 +141,20 @@ def dcontour(ax, *args, **kwargs):
     smooth - specify a float or 2-ple of floats, which are used to gaussian filter
              each data level prior to contouring (which gives smoother contour lines)
     hold - if False (default), clears the axes prior to plotting
-             
+
     Other keyword arguments are passed to contour()
     """
     from scipy.ndimage import gaussian_filter
+    from itertools import izip
 
     smooth = kwargs.get('smooth', None)
-    
+
     I = args[0]
     if len(args) > 1:
         (X, Y) = args[1:3]
     else:
         (Y, X) = (nx.arange(I.shape[0]), nx.arange(I.shape[1]))
-    
+
     labels = nx.unique(I[I>-1])
 
     h = []
@@ -150,38 +162,82 @@ def dcontour(ax, *args, **kwargs):
     if not hold_previous:
         ax.cla()
     ax.hold(1)
-    for i in labels:
+    for i,color in izip(labels,colorcycle()):
         if smooth!=None:
             data = gaussian_filter((I==i).astype('d'), smooth)
         else:
             data = I==i
-        hh = ax.contour(X, Y, data,1, colors=colorcycle(i), **kwargs)
+        hh = ax.contour(X, Y, data,1, colors=color, **kwargs)
         h.append(hh)
     if not hold_previous:
         ax.hold(0)
 
     return h
 
+
+def waterfall(x, y, offsets=(0,0), ax=None, **kwargs):
+    """
+    Make a cascade/waterfall plot with each curve successively offset
+
+    x  - 1D or 2D array with x values (in columns)
+    y  - 1D or 2D array with y values (in columns)
+    offsets - (xo,yo) - x and y offsets for each new data set
+    ax - target axes
+
+    if one of x or y is 2D and the other 1D, the 1D data is used for each line
+    otherwise, if x and y have unequal numbers of columns, only the fully-defined datasets are plotted
+    """
+    from matplotlib.collections import LineCollection
+    from itertools import izip, repeat
+    # do this with magical iterators
+    Nx = 1 if x.ndim==1 else x.shape[1]
+    Ny = 1 if y.ndim==1 else y.shape[1]
+
+    xit = x.T if Nx>1 else repeat(x,Ny)
+    yit = y.T if Ny>1 else repeat(y,Nx)
+    segs = [nx.column_stack((a,b)) for a,b in izip(xit, yit)]
+
+    col = LineCollection(segs, offsets=offsets, **kwargs)
+    if ax==None:
+        ax = mplt.axes()
+    ax.add_collection(col)
+    return col
+
+def err_shade(ax,x,y,y_up,y_low,alpha=0.5,**kwargs):
+    """
+    Plot a series with error indicated by a shaded polygon.
+
+    x,y:          coordinates of points (N-vectors)
+    y_up, y_low:  upper and lower bounds of y (N-vectors)
+    alpha:        alpha of polygonal region
+
+    Additional arguments passed to plot
+    """
+    ax.plot(x,y, **kwargs)
+    xs,ys = mplt.mlab.poly_between(x, y_low, y_up)
+    for k in ('lw','linewidth','alpha'): kwargs.pop(k,'')
+    ax.fill(xs, ys, lw=0, alpha=0.5, **kwargs)
+
+
+# default color cycle
 _manycolors = ['b','g','r','#00eeee','m','y',
                'teal',  'maroon', 'olive', 'orange', 'steelblue', 'darkviolet',
                'burlywood','darkgreen','sienna','crimson',
                ]
-    
-def colorcycle(ind=None, colors=_manycolors):
-    """
-    Returns the color cycle, or a color cycle, for manually advancing
-    line colors.
-    """
-    return colors[ind % len(colors)] if ind!=None else colors
 
-    
-def cmap_discretize(cmap, N):
+def colorcycle(colors=_manycolors):
+    """ Returns a generator that cycles through a colormap endlessly """
+    from itertools import cycle
+    return cycle(colors)
+
+
+def cmap_discrete(cmap, N):
     """
     Return a categorical colormap from a continuous colormap cmap.
-    
-        cmap: colormap instance, eg. cm.jet. 
+
+        cmap: colormap instance, eg. cm.jet.
         N: Number of levels.
-    
+
     Example
         x = resize(arange(100), (5,100))
         djet = cmap_discretize(cm.jet, 5)
@@ -213,10 +269,11 @@ def cmap_discretize(cmap, N):
     # Return colormap object.
     return LinearSegmentedColormap('colormap',cdict,1024)
 
-def cimap(data, cmap=mplt.cm.hsv, thresh=0.2):
+
+def zcmap(data, cmap=mplt.cm.hsv, thresh=0.2):
     """
-    Plot complex data using the RGB space for the phase and the
-    alpha for the magnitude
+    Map complex data to a colormap, using the RGB space for phase and
+    the alpha for magnitude.
     """
     phase = nx.angle(data)/2/nx.pi + 0.5
     Z = cmap(phase)
@@ -224,180 +281,56 @@ def cimap(data, cmap=mplt.cm.hsv, thresh=0.2):
     Z[:,:,3] = (M - M.min()) / (M.max() - M.min())
     return Z
 
-class multifigure(object):
-    def __init__(self, template):
-        self.fignum = 0
-        self.template = template
 
-    def plotfigure(self, fig, closefig=True, **kwargs):
-        fig.savefig(self.template % self.fignum, **kwargs)
-        self.fignum += 1
-        if closefig:
-            mplt.close(fig)
-
-class multiplotter(object):
+def autogrid(x, max_x, spacing=0.0):
     """
-    This class is used to group a bunch of figures into a single pdf
-    file. On initialization it creates a temporary directory where
-    each page of the multipage pdf file will be stored. Each call to
-    plotfigure() generates a new file in the temporary
-    directory. Calling makepdf() causes the multipage pdf to be
-    generated and saved in the specific location. Destruction of the
-    object results in cleanup of the temporary directory.
+    Given a collection of graph objects with varying widths, generate
+    a grid to hold the objects such that each line in the grid
+    contains the maximum number of objects without exceeding some
+    maximum length (max_x)
+
+    x - iterable of positive numbers indicating the widths of the objects
+    max_x - maximum length of each line (same units as x)
+    spacing - spacing between objects (in the same units as x)
+
+    Returns:
+    list of lists; each inner list contains the start points for the objects on that line
     """
-    _fig_type = '.pdf'
-    _defparams = params = {'axes.labelsize': 10,
-                           'text.fontsize': 10,
-                           'xtick.labelsize': 8,
-                           'ytick.labelsize': 8,}
-    #_pdf_cmd = 'gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=%s'
-    _pdf_cmd = 'texexec --silent --pdfarrange --result=%s'
 
-    def __init__(self, leavetempdir=False, parameters=None):
-        """
-        Initialize the multiplotter object. This creates the temporary directory.
+    out = []
+    inner = [0.0]
+    for w in x:
+        xnext = inner[-1] + w + spacing
+        if xnext >= max_x:
+            # note that the new *start* point is on the next line
+            # so we have to remove the last start point on this line
+            inner.pop()
+            out.append(inner)
+            inner = [0.0, w + spacing]
+        else:
+            inner.append(xnext)
 
-        Optional arguments:
-        leavetempdir - if true (default false), leave temporary files on object destruction
-        parameters - dictionary used to set values in matplotlib.rcParams
-
-        For instance, tx = multiplotter(parameters={'font.size':8.0})
-        """
-        if parameters!=None:
-            self._defparams.update(parameters)
-        mplt.rcParams.update(self._defparams)
-        self._tdir = tempfile.mkdtemp()
-        print "Temp dir: %s" % self._tdir
-        self._leavetempdir = leavetempdir
-        self.figures = []
-
-    def __del__(self):
-        if hasattr(self, '_tdir') and os.path.isdir(self._tdir) and not self._leavetempdir:
-            shutil.rmtree(self._tdir)
+    # the last start point doesn't get used; remove it
+    inner.pop()
+    out.append(inner)
+    return out
 
 
-    def plotfigure(self, fig, closefig=True, **kwargs):
-        """
-        Calls savefig() on the figure object to save the page. 
-
-        closefig - by default, closes figure after it's done saving it;
-                     set to True to keep the figure
-        additional options are passed to savefig()
-        """
-        figname = "multiplotter_%03d%s" % (len(self.figures), self._fig_type)
-        fig.savefig(os.path.join(self._tdir, figname), **kwargs)
-        self.figures.append(figname)
-        if closefig:
-            mplt.close(fig)
-
-    def writepdf(self, filename, options=''):
-        """
-        Generates a pdf file from the current figure set.
-
-        filename - the file to save the pdf to
-        options - additional options to pass to the pdf generating command
-        """
-        pwd = os.getcwd()
-        if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
-        figlist = ' '.join(self.figures)
-        cmd = self._pdf_cmd % filename + ' ' + options + ' ' + figlist
-
-        try:
-            os.chdir(self._tdir)
-            print cmd
-            status = os.system(cmd)
-            if status > 0: raise IOError, "Error generating multipage PDF"
-        finally:
-            os.chdir(pwd)
-
-class texplotter(multiplotter):
+def match_range_prop(objs, prop):
     """
-    An extension of the multiplotter class that uses latex to join
-    figures together.  Useful when for lots of little figures, or to
-    insert pages with text on them.
+    Match a ranged property for a collection of objects
+
+    Example:
+    >>> plt = [imshow(randn(5,5)) for x in range(5)]
+    >>> match_range_prop(plt,'ylim')
+
+    Raises ValueError if the property is not a range (2-ple)
+    Raises AttributeError if the property does not exist
     """
-    _defparams = params = {'backend': 'ps',
-                           'axes.labelsize': 10,
-                           'text.fontsize': 10,
-                           'xtick.labelsize': 8,
-                           'ytick.labelsize': 8,
-                           'text.usetex': False}
-    _latex_cmd = "latex -halt-on-error -interaction=nonstopmode %s > /dev/null"
-    _pdf_cmd = "dvipdf -dAutoRotatePages=/None %s"
-
-    def plotfigure(self, fig, plotdims=None, closefig=True, **kwargs):
-        """
-        Calls savefig() on the figure object to save an eps file. Adds the figure
-        to the list of plots.
-
-        plotdims - override figure dimensions
-        closefig - by default, closes figure after it's done exporting the EPS file;
-                     set to True to keep the figure
-        additional options are passed to savefig()
-        """
-        if plotdims==None:
-            plotdims = tuple(fig.get_size_inches())
-        figname = "texplotter_%03d.eps" % len(self.figures)
-        fig.savefig(os.path.join(self._tdir, figname), **kwargs)
-        self.figures.append([figname, plotdims])
-        if closefig:
-            mplt.close(fig)
-
-    def pagebreak(self):
-        """ Insert a pagebreak in the file """
-        self.figures.append(None)
-
-    def inserttext(self, text):
-        """
-        Insert text (which can be latex code) into the document.
-
-        Text is inserted as-is into the latex code for the document. Note that
-        in normal strings (non-raw) the backslash character has to be escaped,
-        and there are many characters that are reserved in LaTeX in different modes.
-        Non-text objects are rejected silently.  Use this function with caution
-        or you may render the latex unparseable.
-        """
-        if isinstance(text, basestring):
-            self.figures.append(text)
-        
-    def writepdf(self, filename, margins=(0.5, 0.9)):
-        """
-        Generates a pdf file from the current figure set.
-
-        filename - the file to save the pdf to
-        """
-
-        fp = open(os.path.join(self._tdir, 'texplotter.tex'), 'wt')
-        fp.writelines(['\\documentclass[10pt,letterpaper]{article}\n',
-                       '\\usepackage{graphics, epsfig}\n',
-                       '\\usepackage[top=%fin,bottom=%fin,left=%fin,right=%fin,nohead,nofoot]{geometry}' % \
-                       (margins[1], margins[1], margins[0], margins[0]),
-                       '\\setlength{\\parindent}{0in}\n',
-                       '\\begin{document}\n',
-                       '\\begin{center}\n'])
-        for fig in self.figures:
-            if fig==None:
-                fp.write('\\clearpage\n')
-            elif isinstance(fig, list):
-                figname, plotdims = fig
-                fp.write('\\includegraphics[width=%fin,height=%fin]{%s}\n' % (plotdims +  (figname,)))
-            elif isinstance(fig, basestring):
-                fp.write(fig)
-
-        fp.write('\\end{center}\n\\end{document}\n')
-        fp.close()
-
-        pwd = os.getcwd()
-        if not os.path.isabs(filename): filename = os.path.join(pwd, filename)
-        try:
-            os.chdir(self._tdir)
-            status = os.system(self._latex_cmd % 'texplotter.tex')
-            if status > 0 or not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
-            status = os.system(self._pdf_cmd % 'texplotter.dvi')
-            if status > 0 or not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
-            shutil.move('texplotter.pdf', filename)
-        finally:
-            os.chdir(pwd)
+    pmin,pmax = zip(*(getp(x,prop) for x in objs])
+    new_range = (min(pmin), max(pmax))
+    for x in objs: setp(x,prop,new_range)
+    return new_range
 
 
 def axgriditer(grid=(1,1), figfun=None, **figparams):
@@ -443,20 +376,32 @@ def axgriditer(grid=(1,1), figfun=None, **figparams):
         elif hasattr(figfun,'send'): figfun.send(fig)
         raise
 
-@consumer
-def figwriter(file_template, *args, **kwargs):
-    """
-    Coroutine for writing figures to disk.  Returns a generator; call
-    send(fig) to write the figure to pdf (or whatever the current
-    backend is)
-    """
-    i = 0
-    while True:
-        fig = yield i
-        fig.savefig(file_template % i, *args, **kwargs)
-        mplt.close(fig)
-        i += 1
 
+def colindex(nrow, ncol):
+    """ Generate subplot indices based on column-first indexing """
+    for i in xrange(nrow*ncol):
+        r,c = (i-1) % nrow, (i-1) / nrow
+        yield r*ncol+c+1
+
+
+def drawoffscreen(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        retio = mplt.isinteractive()
+        mplt.ioff()
+        try:
+            y = f(*args, **kwargs)
+        finally:
+            if retio: mplt.ion()
+            mplt.draw()
+        return y
+    return wrapper
+
+
+########## DEPRECATED #############
+
+# deprecated in mpl 1.0
+@deprected
 def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
                xsize=None, ysize=None, spacing=(0.01, 0.01),
                normalize=False, **kwargs):
@@ -486,17 +431,17 @@ def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
     >>> [axes(r) for r in gridlayout(3,2,spacing=0.1)]
     * irregular grid of plots, 2 rows and 2 columns, with first column 50% wider:
     >>> [axes(r) for r in gridlayout(2,2,xsize=(1.5,.5))]
-    
+
     """
     xstart,ystart,xstop,ystop = margins
     if hasattr(spacing,'__iter__'):
         xspacing,yspacing = spacing
     else:
         xspacing = yspacing = spacing
-    
+
     xwidth = (xstop - xstart - xspacing * (ncol-1))/ ncol
     ywidth = (ystop - ystart - yspacing * (nrow-1))/ nrow
-    
+
     xpos,ypos = xstart,ystop  # fill top down
     nplots = ncol*nrow
     if xsize==None: xsize = nx.ones(ncol)
@@ -504,7 +449,7 @@ def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
     if normalize:
         xsize *= (ncol / xsize.sum())
         ysize *= (nrow / ysize.sum())
-                  
+
     for j in range(nplots):
         r,c = j / ncol, j % ncol
         xw = xwidth * xsize[c]
@@ -516,13 +461,10 @@ def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
             xpos = xstart
             ypos -= yw + yspacing
 
-def colindex(i, nrow, ncol):
-    """
-    Convert column-first index to row-first index
-    """
-    r,c = (i-1) % nrow, (i-1) / nrow
-    return r*ncol+c+1
-            
+
+
+# use gridspec
+@deprecated
 def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
                 bottom=0.1, top = 0.9, plotw=None, **kwargs):
     """
@@ -542,13 +484,13 @@ def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
             boundaries specified by xstart and xstop
     kwargs - passed to axes command
     """
-    
+
     ax = []
     xwidth = (xstop - xstart - spacing * (nplots-1))/ nplots
     xpos = xstart
     yheight = top - bottom
     if plotw==None: plotw = nx.ones(nplots)
-    
+
     for j in range(nplots):
         xw = xwidth * plotw[j]
         rect = [xpos, bottom, xw, yheight]
@@ -558,6 +500,9 @@ def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
 
     return ax
 
+
+# use gridspec
+@deprecated
 def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
                 left=0.1, right=0.9, plotw=None, **kwargs):
     """
@@ -568,13 +513,13 @@ def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
             plot will be changed by this factor.  Make sure they add up to less than nplots.
     kwargs - passed to axes command
     """
-    
+
     ax = []
     yheight = (ystop - ystart - spacing * (nplots-1))/ nplots
     ypos = ystart
     xwidth = right - left
     if plotw==None: plotw = nx.ones(nplots)
-    
+
     for j in range(nplots):
         yh = yheight * plotw[j]
         rect = [left, ypos, xwidth, yh]
@@ -584,40 +529,9 @@ def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
 
     return ax
 
-def autogrid(x, max_x, spacing=0.0):
-    """
-    Given a collection of graph objects with varying widths, generate
-    a grid to hold the objects such that each line in the grid
-    contains the maximum number of objects without exceeding some
-    maximum length (max_x)
 
-    x - iterable of positive numbers indicating the widths of the objects
-    max_x - maximum length of each line (same units as x)
-    spacing - spacing between objects (in the same units as x)
-
-    Returns:
-    list of lists; each inner list contains the start points for the objects on that line
-    """
-
-    out = []
-    inner = [0.0]
-    for w in x:
-        xnext = inner[-1] + w + spacing
-        if xnext >= max_x:
-            # note that the new *start* point is on the next line
-            # so we have to remove the last start point on this line
-            inner.pop()
-            out.append(inner)
-            inner = [0.0, w + spacing]
-        else:
-            inner.append(xnext)
-
-    # the last start point doesn't get used; remove it
-    inner.pop()
-    out.append(inner)
-    return out
-    
-
+# deprecated by AxesGrid
+@deprecated
 def setframe(ax, lines=1100):
     """
     Set which borders of the axis are visible.  Note that subsequent calls
@@ -646,7 +560,7 @@ def setframe(ax, lines=1100):
         ax.xaxis.set_ticks_position('bottom')
     if lines[2]:
         ax.add_line(Line2D([0, 1], [1-val, 1-val], transform=ax.transAxes, c='k'))
-        ax.yaxis.set_ticks_position('right')        
+        ax.yaxis.set_ticks_position('right')
     if lines[3]:
         ax.add_line(Line2D([1-val, 1-val], [1, 0], transform=ax.transAxes, c='k'))
         ax.xaxis.set_ticks_position('top')
@@ -658,61 +572,6 @@ def setframe(ax, lines=1100):
         ax.yaxis.set_ticks_position('both')
     ax.xaxis.set_visible(lines[1] or lines[3])
 
-def sync_clim(im):
-    """
-    Adjusts the clim property of a bunch of images to be the same
-    """
-    if len(im)==0: return
-    cmin,cmax = izip(*[x.get_clim() for x in im])
-    newclim = (min(cmin), max(cmax))
-    [x.set_clim(newclim) for x in im]
 
-    return newclim
-
-def waterfall_plot(x, y, offsets=(0,0), ax=None, **kwargs):
-    """
-    Make a cascade/waterfall plot with each curve successively offset
-
-    x  - 1D or 2D array with x values (in columns)
-    y  - 1D or 2D array with y values (in columns)
-    offsets - (xo,yo) - x and y offsets for each new data set
-    ax - target axes
-
-    if one of x or y is 2D and the other 1D, the 1D data is used for each line
-    otherwise, if x and y have unequal numbers of columns, only the fully-defined datasets are plotted
-    """
-    from matplotlib.collections import LineCollection
-    from itertools import izip, repeat
-    # do this with magical iterators
-    Nx = 1 if x.ndim==1 else x.shape[1]
-    Ny = 1 if y.ndim==1 else y.shape[1]
-    
-    xit = x.T if Nx>1 else repeat(x,Ny)
-    yit = y.T if Ny>1 else repeat(y,Nx)
-    segs = [nx.column_stack((a,b)) for a,b in izip(xit, yit)]
-
-    col = LineCollection(segs, offsets=offsets, **kwargs)
-    if ax==None:
-        ax = mplt.axes()
-    ax.add_collection(col)
-    return col
-
-def ci_shade_plot(ax,x,y,y_upper,y_lower,alpha=0.5,**kwargs):
-    """
-    Plot a function with confidence intervals indicated by a shaded
-    polygon.
-    """
-    ax.plot(x,y, **kwargs)
-    xs,ys = mplt.mlab.poly_between(x, y_lower, y_upper)
-    for k in ('lw','linewidth','alpha'): kwargs.pop(k,'')
-    ax.fill(xs, ys, lw=0, alpha=0.5, **kwargs)
-    
-
-if __name__=="__main__":
-
-    from matplotlib.pyplot import plot, gcf
-    tp = texplotter()
-    plot(range(20))
-    tp.plotfigure(gcf())
-    tp.writepdf('test_texplotter.pdf')
-    
+# Variables:
+# End:

@@ -65,6 +65,7 @@ class defaultdict(defaultdict):
         self[key] = value = self.default_factory(key)
         return value
 
+
 # from PEP 342
 def _consumer(func, *args, **kw):
     gen = func(*args, **kw)

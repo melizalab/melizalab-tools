@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 # -*- mode: python -*-
-from distribute_setup import use_setuptools
-use_setuptools()
 from setuptools import setup, find_packages
 from numpy.distutils.core import setup, Extension
 import os,sys
