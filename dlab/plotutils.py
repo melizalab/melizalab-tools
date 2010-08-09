@@ -13,6 +13,8 @@ err_shade:                    plot a data series with shading to indicate error
 
 Utility functions
 =======================
+adjust_spines:               adjust spine position and tick visibility
+tidy_axes:                   adjust spine position and tick visibility for a group of axes
 colorcycle:                  generates colors from an extended series
 cmap_discrete:               produce a discretely segmented version of a colormap
 zcmap:                       map complex data into a colormap
@@ -36,7 +38,7 @@ import os
 import numpy as nx
 import matplotlib.pyplot as mplt
 import functools
-from decorators import deprecated
+from decorator import deprecated
 
 
 
@@ -203,6 +205,7 @@ def waterfall(x, y, offsets=(0,0), ax=None, **kwargs):
     ax.add_collection(col)
     return col
 
+
 def err_shade(ax,x,y,y_up,y_low,alpha=0.5,**kwargs):
     """
     Plot a series with error indicated by a shaded polygon.
@@ -217,6 +220,56 @@ def err_shade(ax,x,y,y_up,y_low,alpha=0.5,**kwargs):
     xs,ys = mplt.mlab.poly_between(x, y_low, y_up)
     for k in ('lw','linewidth','alpha'): kwargs.pop(k,'')
     ax.fill(xs, ys, lw=0, alpha=0.5, **kwargs)
+
+
+def adjust_spines(ax,spines,displace=0):
+    """
+    Adjust spine location and visibility for an axis.
+
+    spines: which spines to show
+    displace: how much to displace spines; scalar
+
+    From the matplotlib tutorial.
+    """
+    for loc, spine in ax.spines.iteritems():
+        if loc in spines:
+            if displace > 0: spine.set_position(('outward',displace))
+        else:
+            spine.set_color('none')
+
+    if 'left' in spines:
+        ax.yaxis.set_ticks_position('left')
+    else:
+        ax.yaxis.set_ticks([])
+
+    if 'bottom' in spines:
+        ax.xaxis.set_ticks_position('bottom')
+    else:
+        ax.xaxis.set_ticks([])
+
+
+def tidy_axes(axesfamily, corner_only=False, displace=0):
+    """
+    Tidies up ticks and spines in a group of linked axes so that only
+    the left and bottom axes have spines.
+
+    axesfamily: a 2D ndarray of axes, such as that produced by
+                subplots()
+    corner_only: if True, only the bottom left corner has spines
+
+    Note: if the axes are sharing a scale, the tick positions cannot
+    be controlled independently, and it is not possible to hide only a
+    subset of tick labels.
+    """
+    nr,nc = axesfamily.shape
+    for r in xrange(nr):
+        for c in xrange(nc):
+            sp = []
+            if not (c > 0 or r < (nr-1) and corner_only):
+                sp.append('left')
+            if not (r < (nr-1) or c > 0 and corner_only):
+                sp.append('bottom')
+            adjust_spines(axesfamily[r,c], sp, displace)
 
 
 # default color cycle
@@ -327,7 +380,7 @@ def match_range_prop(objs, prop):
     Raises ValueError if the property is not a range (2-ple)
     Raises AttributeError if the property does not exist
     """
-    pmin,pmax = zip(*(getp(x,prop) for x in objs])
+    pmin,pmax = zip(*(getp(x,prop) for x in objs))
     new_range = (min(pmin), max(pmax))
     for x in objs: setp(x,prop,new_range)
     return new_range
@@ -401,7 +454,7 @@ def drawoffscreen(f):
 ########## DEPRECATED #############
 
 # deprecated in mpl 1.0
-@deprected
+@deprecated
 def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
                xsize=None, ysize=None, spacing=(0.01, 0.01),
                normalize=False, **kwargs):
