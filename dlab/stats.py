@@ -17,7 +17,7 @@ Created 2009-09-03
 # Functions and classes are written to be cut/paste portable
 # (i.e. with all the import statements in the functions)
 
-def generate_multivariate_gaussian(covariance):
+def rmvnorm(covariance):
     """
     Randomly sample from a gaussian distribution with known covariance
     structure. Returns an infinite iterator that yields a new sample
@@ -122,3 +122,7 @@ def tabulate(x):
     vals = asarray(x)
     levels = unique(vals)
     return levels, asarray([(vals==level).sum() for level in levels])
+
+
+# Variables:
+# End:
