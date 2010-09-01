@@ -118,7 +118,7 @@ def mtspectrum(J, trialave=True):
         S = S.mean(1)
     return S
 
-def mtcoherence(J1, J2, trialave=True):
+def mtcoherence(J1, J2, trialave=True, min_power=0.001):
     """
     Multitaper coherence
 
@@ -126,20 +126,25 @@ def mtcoherence(J1, J2, trialave=True):
     J2:        complex multitaper transform of second data source
                dimensions:
                freq x tapers x trials [trials optional]
-    trialave:  if True (default), average across trials
+    trialave:  if True (default), average across trials.
+    min_power: In calculating trial-averaged coherence, trials
+               with power < min_power are excluded
 
     Output:
     C          Complex coherence(freq) of J1 and J2
     """
-    from numpy import sqrt
+    from numpy import sqrt, zeros_like
     S12 = (J1.conj() * J2).mean(1)
     S1 =  (J1.conj() * J1).mean(1)
     S2 =  (J2.conj() * J2).mean(1)
-    if trialave:
-        S12 = S12.mean(1)
-        S1 = S1.mean(1)
-        S2 = S2.mean(1)
-    return S12 / sqrt(S1 * S2)
+    if trialave and S12.ndim > 1:
+        den = S1.mean * S2.mean
+        ind = (den.mean(0) >= min_power).nonzero()[0]
+        if len(ind)==0:
+            return zeros_like(S12)
+        return S12[:,ind].mean(1) / sqrt(den[:,ind].mean(1))
+    else:
+        return S12 / sqrt(S1 * S2)
 
 def intertrial_coherence_correction(C,M):
     """
