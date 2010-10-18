@@ -240,7 +240,7 @@ def _mtfft(tl, tapers, nfft, t, f, findx):
 
     return J,Msp,Nsp
 
-def convolve(tl, kernel, kdt, dt=None):
+def convolve(tl, kernel, kdt, time_range=None, dt=None):
     """
     Estimate the rate of a multi-trial point process S by convolving
     event times with a kernel W.
@@ -266,10 +266,14 @@ def convolve(tl, kernel, kdt, dt=None):
     from numpy import arange, column_stack
     from convolve import discreteconv
     if dt is None: dt = kdt
-    onset,offset = tl.range
+
+    t1,t2 = tl.range
+    onset,offset = time_range
+    if onset is None: onset = t1
+    if offset is None: offset = t2
     grid = arange(onset, offset, dt)
-    rate = [discreteconv(x, kernel, kdt, onset, offset, dt) for x in tl]
-    return column_stack(rate),grid
+    rate = [discreteconv(x, kernel, kdt, grid[0], grid[-1], dt) for x in tl]
+    return column_stack(rate),grid[:-1]
 
 # Variables:
 # End:
