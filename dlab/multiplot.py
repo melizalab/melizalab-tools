@@ -3,7 +3,10 @@
 # -*- mode: python -*-
 """
 Classes for making multiple plots to a sequence of files, and for
-organizing plots within a figure.
+organizing plots within a figure. This module is deprecated by
+matplotlib 1.0.0, which finally supports multi-page PDF files.
+
+See http://matplotlib.sourceforge.net/api/backend_pdf_api.html#matplotlib.backends.backend_pdf.PdfPages
 
 Classes
 =======================
@@ -38,6 +41,14 @@ def figwriter(file_template, *args, **kwargs):
         fig.savefig(file_template % i, *args, **kwargs)
         mplt.close(fig)
         i += 1
+
+@consumer
+def figshower(prompt="Press Return for next figure:", *args, **kwargs):
+    while True:
+        fig = yield i
+        fig.show()
+        s = raw_input(prompt)
+        mplt.close(fig)
 
 
 class multifigure(object):
