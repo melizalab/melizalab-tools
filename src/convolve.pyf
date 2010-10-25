@@ -13,7 +13,7 @@ interface
      double precision intent(in) :: onset
      double precision intent(in) :: offset
      double precision intent(in) :: odt
-     double precision intent(out), depend(onset,offset,odt) :: out((offset-onset)/odt)
+     double precision intent(out), depend(onset,offset,odt) :: out(ceil((offset-onset)/odt))
    end subroutine discreteconv
 end interface
 end python module convolve

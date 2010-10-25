@@ -252,6 +252,7 @@ def convolve(tl, kernel, kdt, time_range=None, dt=None):
     kernel:    the convolution kernel
     kdt:       the temporal resolution of the kernel
     dt:        the resolution of the output. Defaults to kdt
+    time_range: the range of spikes to include. This is *exclusive*
 
     Returns:
     rmat:  rate matrix, dimensions time by trial
@@ -272,8 +273,8 @@ def convolve(tl, kernel, kdt, time_range=None, dt=None):
     if onset is None: onset = t1
     if offset is None: offset = t2
     grid = arange(onset, offset, dt)
-    rate = [discreteconv(x, kernel, kdt, grid[0], grid[-1], dt) for x in tl]
-    return column_stack(rate),grid[:-1]
+    rate = [discreteconv(x, kernel, kdt, onset, offset, dt) for x in tl]
+    return column_stack(rate),grid
 
 # Variables:
 # End:
