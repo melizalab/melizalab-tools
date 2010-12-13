@@ -17,6 +17,7 @@ Functions
 =======================
 isnested:             test if a sequence is fully nested
 mergedicts:           merge two dictionary using some rules
+subset:               return a subset of a recarray
 
 Iterators
 =======================
@@ -186,6 +187,24 @@ def mergedicts(dicts, collect=list, fun='append', **kwargs):
             fun(merged[k], x)
     return merged
 
+def subset(rec, **kwargs):
+    """
+    Return a subset of a recarray using keyword notation, like the
+    function of the same name in R. The fields must exist or an error
+    will be thrown.
+
+    Examples
+    -------------
+    >>> a = np.rec.fromarrays([('a','a','b','b'),(1,2,1,2),(1.2,1.3,1.4,1.5)],names=('A','B','C'))
+    >>> subset(a, A='a', B=2)
+    rec.array([('a', 1, 1.2)], 
+      dtype=[('A', '|S1'), ('B', '<i8'), ('C', '<f8')])
+    """
+    from numpy import ones
+    ind = ones(rec.size, dtype='bool')
+    for k,v in kwargs.items():
+        ind &= rec[k]==v
+    return rec[ind]
 
 def icumsum(x, const=0.0):
     """

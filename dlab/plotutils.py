@@ -66,8 +66,8 @@ def raster(X, Y=0, start=None, stop=None, ax=None,
 
     if Y == None or Y < 0:
         Y = 0
-    if isinstance(Y, int):
-        Y = range(Y, Y+nreps)
+    if nx.isscalar(Y):
+        Y = nx.arange(Y, Y+nreps)
 
     assert len(X) == len(Y), "X and Y must be the same length"
 
