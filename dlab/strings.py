@@ -4,6 +4,7 @@
 String functions
 
 uniquemiddle:          find shared parts of strings
+sort_and_compress:     return numbers in order, compressing continuous runs
 """
 
 def uniquemiddle(S):
@@ -32,3 +33,30 @@ def uniquemiddle(S):
     stop = -i+1
 
     return [s[start:stop] for s in S], S[0][:start], S[0][stop:]
+
+
+def sort_and_compress(numbers):
+    """
+    Converts a sequence of numbers to a tuple of strings. Continuous
+    runs are indicated by dashes, and larger gaps by commas
+
+    Example:
+    >>> "".join(sort_and_compress((1,2,3,4,7,10,11,12)))
+    '1-4,7,10-12'
+    """
+    
+    out = []
+    last= None
+    for n in sorted(numbers):
+        if last==None:
+            out.append(n)
+        elif n > last+1:
+            if out[-1]=='-':
+                out.append(last)
+            out.extend((',',n))
+        elif out[-1]!='-':
+            out.append('-')
+        last = n
+    if out[-1]=='-':
+        out.append(last)
+    return [str(x) for x in out]
