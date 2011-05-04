@@ -12,6 +12,7 @@ Decorators
 Classes
 =======================
 defaultdict:          improved default dict that calls factory with key
+diskcache:            a dictionary with a disk-based cache as backend
 
 Functions
 =======================
@@ -27,8 +28,13 @@ Copyright (C) 2009,  Daniel Meliza <dmeliza@meliza-laptop-1.uchicago.edu>
 Created 2009-06-08
 """
 
-from decorator import decorator, deprecated
+import os
+from decorator import decorator
 from collections import defaultdict
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
 
 # memoizing functions from http://pypi.python.org/pypi/decorator
 
@@ -49,6 +55,61 @@ def memoize(f):
     f.cache = {}
     return decorator(_memoize, f)
 
+class diskcache(defaultdict):
+    """
+    Stores data on the disk in a directory using filenames based on a
+    hash of the key.  Key lookup is as follows: memory[key],
+    cache[key], default_factory(*key).  Assigning a value to a key
+    causes it to be cached.  Use items_cached to iterate through the
+    key,value pairs in the cache. All other methods inherited form
+    defaultdict (e.g. iterators) only access the memory store; the
+    object has no way of knowing what keys have been cached without
+    accessing the files.
+    """
+    fname_template  = "dkc_%ld"
+    
+    def __init__(self, cache_dir, default_factory=None):
+        """ Initialize the cache with a directory and an optional default factory """
+        defaultdict.__init__(self, default_factory)
+        self.cache_dir = os.path.abspath(cache_dir)
+        if not (os.path.exists(self.cache_dir)):
+            os.mkdir(self.cache_dir)
+
+    def fname(self, key):
+        """ The file in which the data associated with a key is stored """
+        return os.path.join(self.cache_dir, self.fname_template % hash(key))
+        
+    def __missing__(self, key):
+        fname = self.fname(key)
+        if os.path.exists(fname):
+            k,value = pickle.load(open(fname, 'rb'))
+            self[key] = value
+        else:
+            if self.default_factory is None: raise KeyError((key,))
+            self[key] = value = self.default_factory(*key)
+            pickle.dump((key,value), open(fname, 'wb'))
+        return value
+
+    def __setitem__(self, key, value):
+        fname = self.fname(key)
+        pickle.dump((key,value), open(fname, 'wb'))
+        defaultdict.__setitem__(self, key, value)
+
+    def has_cached(self, key):
+        """ Return true if the data associated with key is cached on disk """
+        fname = self.fname(key)
+        return os.path.exists(fname)
+
+    def items_cached(self):
+        """ Iterate through files in the cache directory yielding key, value pairs """
+        for f in os.listdir(self.cache_dir):
+            key,value = pickle.load(open(f,'rb'))
+            yield key,value
+
+    def __repr__(self):
+        return "%s(%s, %s, elements=%d)" % (self.__class__.__name__, self.cache_dir,
+                                            self.default_factory, len(os.listdir(self.cache_dir)))
+
 class defaultdict(defaultdict):
     """
     Improved defaultdict that passes key value to __missing__
@@ -67,6 +128,8 @@ class defaultdict(defaultdict):
         return value
 
 
+
+
 # from PEP 342
 def _consumer(func, *args, **kw):
     gen = func(*args, **kw)
@@ -83,7 +146,6 @@ def isnested(x):
     return all(hasattr(xx,'__iter__') for xx in x)
 
 
-@deprecated
 def product(*args, **kwds):
     """
     Cartesian product of iterables. For example:
@@ -100,7 +162,6 @@ def product(*args, **kwds):
         yield tuple(prod)
 
 
-@deprecated
 def permutations(iterable, r=None):
     """
     Return successive r length permutations of elements in the iterable.
@@ -128,7 +189,6 @@ def permutations(iterable, r=None):
             yield tuple(pool[i] for i in indices)
 
 
-@deprecated
 def combinations(iterable, r):
     """
     Return r length subsequences of elements from the input iterable.
