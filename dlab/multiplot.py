@@ -18,7 +18,8 @@ latexgroup:           group figures into a single pdf, using latex
 
 Generators
 =======================
-figwriter:            duplicates the functionality of multifigure, as a coroutine 
+figwriter:            duplicates the functionality of multifigure, as a coroutine
+figshower:            plots a series of figures
 
 Copyright (C) 2010 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 Created 2010-08-06
@@ -44,6 +45,13 @@ def figwriter(file_template, *args, **kwargs):
 
 @consumer
 def figshower(prompt="Press Return for next figure:", *args, **kwargs):
+    """
+    Coroutine for plotting a series of figures, with user input
+    between each plot. For each figure object passed to the generator,
+    its show method is called.  When the user presses Return the
+    figure is closed and the next is shown.
+    """
+    
     while True:
         fig = yield i
         fig.show()
@@ -108,6 +116,25 @@ class sequentialfigure(multifigure):
         self.fignum += 1
         if closefig:
             mplt.close(fig)
+
+class pdfpager(multifigure):
+    """
+    Plots a set of figures in a single multi-page PDF file. Uses
+    matplotlib's PdfPages backend, present in version 1.0+.  For
+    previous versions use pdfplotter.
+    """
+    def __init__(self, filename):
+        from matplotlib.backends.backend_pdf import PdfPages as multipdf
+        """ Open a new PDF file for output with name @param filename """
+        self.filename = filename
+        self.handle = multipdf(filename)
+
+    def __exit__(self, type, value, traceback):
+        self.handle.close()
+
+    def push(self, fig, closefig=True, **kwargs):
+        self.handle.savefig(fig, **kwargs)
+        if closefig: mplt.close(fig)
 
 
 class pdfplotter(multifigure):

@@ -26,7 +26,6 @@ Generators
 axgriditer:                  iterate through an axis collection
 colindex:                    generate subplot indices based on column-first sequence
 
-
 Decorators
 =======================
 drawoffscreen:               drop into non-interactive mode during a function
@@ -38,9 +37,6 @@ import os
 import numpy as nx
 import matplotlib.pyplot as mplt
 import functools
-from decorator import deprecated
-
-
 
 def raster(X, Y=0, start=None, stop=None, ax=None,
            autoscale=False, **kwargs):
@@ -386,7 +382,7 @@ def match_range_prop(objs, prop):
     return new_range
 
 
-def axgriditer(grid=(1,1), figfun=None, **figparams):
+def axgriditer(gridfun=None, figfun=None, **figparams):
     """
     Generates axes for multiple gridded plots.  Initial call
     to generator specifies plot grid (default 1x1).  Yields axes
@@ -394,8 +390,8 @@ def axgriditer(grid=(1,1), figfun=None, **figparams):
     filling that.
 
     Arguments:
-    grid -   specify the grid layout. Can be a tuple or a function that
-             yields a series of axes [signature grid(fig)]
+    gridfun - function to open figure and specify subplots. Needs to to return
+              fig, axes. Default function creates one subplot in a figure.
 
     figfun - called when the figure is full or the generator is
              closed.  Can be used for final figure cleanup or to save
@@ -405,24 +401,18 @@ def axgriditer(grid=(1,1), figfun=None, **figparams):
 
     additional arguments are passed to the figure() function
     """
-    if callable(grid):
-        pass
-    elif len(grid)==2:
-        nx,ny = grid
-        grid = lambda fig: (fig.add_subplot(nx,ny,i) for i in range(1,nx*ny+1))
-    else:
-        raise ValueError, "Grid argument must be length 2 or a function"
+    if gridfun is None:
+        from matplotlib.pyplot import subplots
+        gridfun = lambda : subplots(1,1)
 
-    fig = mplt.figure(**figparams)
-    axg = grid(fig)
+    fig,axg = gridfun(**figparams)
     try:
         while 1:
-            for ax in axg:
+            for ax in axg.flat:
                 yield ax
             if callable(figfun): figfun(fig)
             elif hasattr(figfun,'send'): figfun.send(fig)
-            fig = mplt.figure(**figparams)
-            axg = grid(fig)
+            fig, axg = gridfun(**figparams)
     except:
         # cleanup and re-throw exception
         if callable(figfun): figfun(fig)
@@ -454,7 +444,6 @@ def drawoffscreen(f):
 ########## DEPRECATED #############
 
 # deprecated in mpl 1.0
-@deprecated
 def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
                xsize=None, ysize=None, spacing=(0.01, 0.01),
                normalize=False, **kwargs):
@@ -517,7 +506,6 @@ def gridlayout(nrow, ncol, margins=(0.05, 0.05, 0.95, 0.95),
 
 
 # use gridspec
-@deprecated
 def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
                 bottom=0.1, top = 0.9, plotw=None, **kwargs):
     """
@@ -555,7 +543,6 @@ def xplotlayout(fig, nplots, xstart=0.05, xstop=1.0, spacing=0.01,
 
 
 # use gridspec
-@deprecated
 def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
                 left=0.1, right=0.9, plotw=None, **kwargs):
     """
@@ -584,7 +571,6 @@ def yplotlayout(fig, nplots, ystart=0.05, ystop=1.0, spacing=0.01,
 
 
 # deprecated by AxesGrid
-@deprecated
 def setframe(ax, lines=1100):
     """
     Set which borders of the axis are visible.  Note that subsequent calls

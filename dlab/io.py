@@ -11,7 +11,7 @@ read_table:       load data in tabular format with custom conversion
 Copyright (C) 2010 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 Created 2010-12-01
 """
-from decorator import decorator, deprecated
+from decorator import decorator
 
 def skipcomments(f):
     """ Fix broken numpy.recfromtxt with respect to locating header """
