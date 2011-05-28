@@ -9,7 +9,8 @@ raster:                      produce a raster plot of x values
 bar:                         produce a bar plot with string labels
 dcontour:                    discrete contour map
 waterfall:                   produce a waterfall plot
-err_shade:                    plot a data series with shading to indicate error
+err_shade:                   plot a data series with shading to indicate error
+specgram:                    vastly improved replacement for pylab.specgram
 
 Utility functions
 =======================
@@ -217,6 +218,18 @@ def err_shade(ax,x,y,y_up,y_low,alpha=0.5,**kwargs):
     for k in ('lw','linewidth','alpha'): kwargs.pop(k,'')
     ax.fill(xs, ys, lw=0, alpha=0.5, **kwargs)
 
+def specgram(x, NFFT=256, shift=128, Fs=1.0, drange=60,
+             ax=None, cmap=mplt.cm.gray_r, **kwargs):
+    from numpy import hanning
+    from libtfr import stft, fgrid, tgrid, dynamic_range
+    w = hanning(NFFT)
+    S = stft(x, w, shift)
+    F,ind = fgrid(Fs,NFFT,(0,Fs/2))
+    T = tgrid(x.size, Fs, shift)
+    S = nx.log10(dynamic_range(S, drange))
+    if ax is None: ax = mplt.gca()
+    ax.imshow(S, extent = (T[0],T[-1],F[0]-0.01,F[-1]), cmap=cmap, **kwargs)
+    return S
 
 def adjust_spines(ax,spines,displace=0):
     """
