@@ -11,6 +11,7 @@ mtcoherence:     coherence of two signals
 specerr:         confidence intervals of spectrum
 coherr:          confidence intervals of coherence
 freqcut:         cut a frequency scale based on significance
+ramp_signal:     apply a squared cosine window function to the start and stop of a signal
 
 Spectrogram analysis
 =======================
@@ -58,7 +59,7 @@ def kernel(name, bandwidth, spacing):
     name:      the name of the kernel. can be anything supported
                by scipy.signal.get_window, plus the following functions:
         epanech, biweight, triweight, cosinus, exponential
-               
+
     bandwidth: the bandwidth of the kernel
     dt:        the resolution of the kernel
 
@@ -70,7 +71,7 @@ def kernel(name, bandwidth, spacing):
     """
     from numpy import exp, absolute, arange, minimum, maximum, cos, pi, floor
     from scipy.signal import get_window
-    
+
     if name in ('normal', 'gaussian'):
         D = 3.75*bandwidth
     elif name == 'exponential':
@@ -81,7 +82,7 @@ def kernel(name, bandwidth, spacing):
     N = floor(D/spacing)  # number of grid points in half the support
     G = (arange(1, 2*N+2)-1-N)*spacing # grid support
     xv =  G/bandwidth
-    
+
     if name in ('gaussian', 'normal'):
         W = exp(-xv * xv/2)
     elif name == 'exponential':
@@ -161,7 +162,7 @@ def specerr(S,J,p=0.05,jackknife=True, Nsp=None):
     """
     Computes lower and upper confidence intervals for a multitaper
     spectrum.
- 
+
     S:            power spectrum of data (dimension N frequencies)
     J:            complex multitapered transform of data (dim N x K tapers
                   or N x K x T trials; in latter case, trials are treated
@@ -184,7 +185,7 @@ def specerr(S,J,p=0.05,jackknife=True, Nsp=None):
     dof = 2*K
     if Nsp is not None:
         dof = fix(1/(1./dof + 1./(2*Nsp)))
-    
+
     Serr = zeros((N,2))
     if not jackknife:
         chidist = chi2(dof)
@@ -213,9 +214,9 @@ def coherr(C,J1,J2,p=0.05,Nsp1=None,Nsp2=None):
     """
     Function to compute lower and upper confidence intervals on
     coherency (absolute value of coherence).
-    
+
     C:            coherence (real or complex)
-    J1,J2:        tapered fourier transforms 
+    J1,J2:        tapered fourier transforms
     p:            the target P value (default 0.05)
     Nsp1:         number of spikes in J1, used for finite size correction.
     Nsp2:         number of spikes in J2, used for finite size correction.
@@ -228,14 +229,14 @@ def coherr(C,J1,J2,p=0.05,Nsp1=None,Nsp2=None):
     from numpy import iscomplexobj, absolute, fix, zeros, setdiff1d, real, sqrt, absolute,\
          arctanh, tanh
     from scipy.stats import t
-    
+
     J1 = _combine_trials(J1)
     J2 = _combine_trials(J2)
     N,K = J1.shape
     assert J1.shape==J2.shape, "J1 and J2 must have the same dimensions."
     assert N == C.size, "S and J lengths don't match"
     if iscomplexobj(C): C = absolute(C)
-    
+
     pp = 1 - p/2
     dof = 2*K
     dof1 = dof if Nsp1 is None else fix(2.*Nsp1*dof/(2.*Nsp1+dof))
@@ -246,7 +247,7 @@ def coherr(C,J1,J2,p=0.05,Nsp1=None,Nsp2=None):
     tcrit = t(dof-1).ppf(pp).tolist()
     atanhCxyk = zeros((N,K))
     phasefactorxyk = zeros((N,K),dtype='complex128')
-        
+
     for k in xrange(K):
         indxk = setdiff1d(range(K),[k])
         J1k = J1[:,indxk]
@@ -316,7 +317,7 @@ def dynamic_range(S, dB):
     smax = S.max()
     thresh = 10**(log10(smax) - dB/10.)
     return where(S >= thresh, S, thresh)
-    
+
 
 def wiener_entropy(S):
     """
@@ -327,17 +328,24 @@ def wiener_entropy(S):
     """
     from numpy import log, exp
     return log(exp(log(S).mean(0)) / S.mean(0))
-    
+
 def freq_mean(S):
     """
     The mean frequency is the center of mass of the spectrum
-    
+
     S:    spectrogram (linear scale)
     """
     from numpy import arange, newaxis
     ind = arange(S.shape[0], dtype=S.dtype)
     return (ind[:,newaxis] * S).sum(0) / S.sum(0)
-    
+
+def ramp_signal(s, Fs, ramp):
+    """ Apply a squared cosine ramp to a signal. Modifies the signal in place. """
+    n = ramp * Fs / 1000.
+    t = nx.linspace(0, nx.pi/2, n)
+    s[:n] *= nx.sin(t)**2
+    s[-n:] *= nx.cos(t)**2
+
 
 
 # Variables:
