@@ -340,9 +340,15 @@ def freq_mean(S):
     return (ind[:,newaxis] * S).sum(0) / S.sum(0)
 
 def ramp_signal(s, Fs, ramp):
-    """ Apply a squared cosine ramp to a signal. Modifies the signal in place. """
-    from numpy import linspace, sin, cos, pi
-    n = ramp * Fs / 1000.
+    """
+    Apply a squared cosine ramp to a signal. Modifies the signal in place.
+
+    s:    signal (1D, any type)
+    Fs:   sampling rate (in units^-1)
+    ramp: duration of ramp (in units)
+    """
+    from numpy import linspace, pi, sin, cos
+    n = ramp * Fs
     t = linspace(0, pi/2, n)
     s[:n] *= sin(t)**2
     s[-n:] *= cos(t)**2
