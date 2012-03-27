@@ -341,10 +341,11 @@ def freq_mean(S):
 
 def ramp_signal(s, Fs, ramp):
     """ Apply a squared cosine ramp to a signal. Modifies the signal in place. """
+    from numpy import linspace, sin, cos, pi
     n = ramp * Fs / 1000.
-    t = nx.linspace(0, nx.pi/2, n)
-    s[:n] *= nx.sin(t)**2
-    s[-n:] *= nx.cos(t)**2
+    t = linspace(0, pi/2, n)
+    s[:n] *= sin(t)**2
+    s[-n:] *= cos(t)**2
 
 
 
