@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 # -*- mode: python -*-
 """
@@ -31,13 +30,14 @@ def binomial(n,k):
 
 def gcd(n,d):
     """ Return the greatest common denominator of n,d """
+    from numpy import floor
     if d == 0.: return 1.
     if n == 0.: return d
 
     n = abs(n)
     d = abs(d)
     while d > 0.5:
-        q = nx.floor( n/d );
+        q = floor( n/d );
         r = n - d * q;
         n = d;
         d = r;

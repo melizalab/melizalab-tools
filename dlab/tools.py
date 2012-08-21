@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 # -*- mode: python -*-
 """
@@ -67,7 +66,7 @@ class diskcache(defaultdict):
     accessing the files.
     """
     fname_template  = "dkc_%ld"
-    
+
     def __init__(self, cache_dir, default_factory=None):
         """ Initialize the cache with a directory and an optional default factory """
         defaultdict.__init__(self, default_factory)
@@ -78,7 +77,7 @@ class diskcache(defaultdict):
     def fname(self, key):
         """ The file in which the data associated with a key is stored """
         return os.path.join(self.cache_dir, self.fname_template % hash(key))
-        
+
     def __missing__(self, key):
         fname = self.fname(key)
         if os.path.exists(fname):
@@ -257,7 +256,7 @@ def subset(rec, **kwargs):
     -------------
     >>> a = np.rec.fromarrays([('a','a','b','b'),(1,2,1,2),(1.2,1.3,1.4,1.5)],names=('A','B','C'))
     >>> subset(a, A='a', B=2)
-    rec.array([('a', 1, 1.2)], 
+    rec.array([('a', 1, 1.2)],
       dtype=[('A', '|S1'), ('B', '<i8'), ('C', '<f8')])
     """
     from numpy import ones

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -*- mode: python -*-
 # -*- coding: iso-8859-1 -*-
 """
 Statistical tools not found in the scipy or numpy toolkits.

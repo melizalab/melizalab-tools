@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 # -*- mode: python -*-
 """
@@ -51,7 +50,7 @@ def figshower(prompt="Press Return for next figure:", *args, **kwargs):
     its show method is called.  When the user presses Return the
     figure is closed and the next is shown.
     """
-    
+
     while True:
         fig = yield i
         fig.show()
@@ -169,7 +168,7 @@ class pdfplotter(multifigure):
 
     def push(self, fig, closefig=True, **kwargs):
         """
-        Calls savefig() on the figure object to save the page. 
+        Calls savefig() on the figure object to save the page.
 
         closefig:  if True, close the figure after writing to disk
 
@@ -200,7 +199,7 @@ class pdfplotter(multifigure):
             if status > 0: raise IOError, "Error generating multipage PDF"
         finally:
             os.chdir(pwd)
-            
+
 
 class texplotter(pdfplotter):
     """
@@ -245,7 +244,7 @@ class texplotter(pdfplotter):
         """
         if isinstance(text, basestring):
             self.figures.append(text)
-        
+
     def flush(self, filename, margins=(0.5, 0.9)):
         """
         Generates a pdf file from the current figure set.

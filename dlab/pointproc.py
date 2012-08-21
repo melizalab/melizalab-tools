@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -*- mode: python -*-
 # -*- coding: iso-8859-1 -*-
 """
 Statistical functions for point process data.
@@ -49,6 +49,8 @@ def rate(tl, time_range=None):
 
     To get an unnormalized count of events in a range, use the
     toelis.subrange() method.
+
+    4/2012: deprecated; use version in mspikes.events
     """
     if time_range is not None:
         tl = tl.subrange(*time_range)
@@ -142,7 +144,7 @@ def mtfft(tl, **kwargs):
     Multitaper fourier transform from point process times
 
     [J,Msp,Nsp,f]=mtfftpt(tl, **kwargs)
-    
+
     Input:
           tl        toelis object
     Optional keyword arguments:
@@ -166,7 +168,7 @@ def mtfft(tl, **kwargs):
     """
     from libtfr import fgrid, dpss
     from numpy import arange
-    
+
     NW = kwargs.get('nw',3)
     K = kwargs.get('k',NW*2-1)
     df = kwargs.get('df',1)

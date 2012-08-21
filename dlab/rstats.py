@@ -1,8 +1,8 @@
-#!/usr/bin/env python
+# -*- mode: python -*-
 # -*- coding: iso-8859-1 -*-
 """
 Module with some wrappers for various statistics functions in R
-Requires rpy.
+Requires rpy (1.0 I think)
 
 Copyright (C) 2009 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 Created 2009-09-03
@@ -29,7 +29,7 @@ def wilcox_test(x,y=None,**kwargs):
     if y==None:
         wc = with_mode(NO_CONVERSION, r.wilcox_test)(x, **kwargs)
     else:
-        wc = with_mode(NO_CONVERSION, r.wilcox_test)(x,y, **kwargs)  
+        wc = with_mode(NO_CONVERSION, r.wilcox_test)(x,y, **kwargs)
     return r['$'](wc, 'p.value'), r['$'](wc, 'statistic')
 
 

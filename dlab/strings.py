@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -*- mode: python -*-
 # -*- coding: iso-8859-1 -*-
 """
 String functions
@@ -44,7 +44,7 @@ def sort_and_compress(numbers):
     >>> "".join(sort_and_compress((1,2,3,4,7,10,11,12)))
     '1-4,7,10-12'
     """
-    
+
     out = []
     last= None
     for n in sorted(numbers):

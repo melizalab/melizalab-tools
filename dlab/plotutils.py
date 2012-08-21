@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+# -*- mode: python -*-
 # -*- coding: iso-8859-1 -*-
 """
 Collection of general utility functions for plotting
@@ -21,6 +21,7 @@ cmap_discrete:               produce a discretely segmented version of a colorma
 zcmap:                       map complex data into a colormap
 autogrid:                    pack a series of heterogeneous objects into a figure
 match_range_prop:            match a ranged property for a collection of axes
+add_scalebar:                replaces external axes with scalebars
 
 Generators
 =======================
@@ -34,7 +35,6 @@ drawoffscreen:               drop into non-interactive mode during a function
 
 Copyright (C) 2007-2010 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 """
-import os
 import numpy as nx
 import matplotlib.pyplot as mplt
 import functools
@@ -280,6 +280,74 @@ def tidy_axes(axesfamily, corner_only=False, displace=0):
                 sp.append('bottom')
             adjust_spines(axesfamily[r,c], sp, displace)
 
+# gist 3251476
+from matplotlib.offsetbox import AnchoredOffsetbox
+class AnchoredScaleBar(AnchoredOffsetbox):
+    def __init__(self, transform, sizex=0, sizey=0, labelx=None, labely=None, loc=4,
+                 pad=0.1, borderpad=0.1, sep=2, prop=None, **kwargs):
+        """
+        Draw a horizontal and/or vertical  bar with the size in data coordinate
+        of the give axes. A label will be drawn underneath (center-aligned).
+
+        - transform : the coordinate frame (typically axes.transData)
+        - sizex,sizey : width of x,y bar, in data units. 0 to omit
+        - labelx,labely : labels for x,y bars; None to omit
+        - loc : position in containing axes
+        - pad, borderpad : padding, in fraction of the legend font size (or prop)
+        - sep : separation between labels and bars in points.
+        - **kwargs : additional arguments passed to base class constructor
+        """
+        from matplotlib.patches import Rectangle
+        from matplotlib.offsetbox import AuxTransformBox, VPacker, HPacker, TextArea
+        bars = AuxTransformBox(transform)
+        if sizex:
+            bars.add_artist(Rectangle((0,0), sizex, 0, fc="none"))
+        if sizey:
+            bars.add_artist(Rectangle((0,0), 0, sizey, fc="none"))
+
+        if sizex and labelx:
+            bars = VPacker(children=[bars, TextArea(labelx, minimumdescent=False)],
+                           align="center", pad=0, sep=sep)
+        if sizey and labely:
+            bars = HPacker(children=[TextArea(labely), bars],
+                            align="center", pad=0, sep=sep)
+
+        AnchoredOffsetbox.__init__(self, loc, pad=pad, borderpad=borderpad,
+                                   child=bars, prop=prop, frameon=False, **kwargs)
+
+def add_scalebar(ax, matchx=True, matchy=True, hidex=True, hidey=True, **kwargs):
+    """ Add scalebars to axes
+
+    Adds a set of scale bars to *ax*, matching the size to the ticks of the plot
+    and optionally hiding the x and y axes
+
+    - ax : the axis to attach ticks to
+    - matchx,matchy : if True, set size of scale bars to spacing between ticks
+                    if False, size should be set using sizex and sizey params
+    - hidex,hidey : if True, hide x-axis and y-axis of parent
+    - **kwargs : additional arguments passed to AnchoredScaleBars
+
+    Returns created scalebar object
+    """
+    def f(axis):
+        l = axis.get_majorticklocs()
+        return len(l)>1 and (l[1] - l[0])
+
+    if matchx:
+        kwargs['sizex'] = f(ax.xaxis)
+        kwargs['labelx'] = str(kwargs['sizex'])
+    if matchy:
+        kwargs['sizey'] = f(ax.yaxis)
+        kwargs['labely'] = str(kwargs['sizey'])
+
+    sb = AnchoredScaleBar(ax.transData, **kwargs)
+    ax.add_artist(sb)
+
+    if hidex : ax.xaxis.set_visible(False)
+    if hidey : ax.yaxis.set_visible(False)
+    if hidex and hidey: ax.set_frame_on(False)
+
+    return sb
 
 # default color cycle
 _manycolors = ['b','g','r','#00eeee','m','y',
@@ -379,16 +447,20 @@ def autogrid(x, max_x, spacing=0.0):
 
 
 def match_range_prop(objs, prop):
-    """
-    Match a ranged property for a collection of objects
+    """ Match a ranged property for a collection of objects.
 
     Example:
     >>> plt = [imshow(randn(5,5)) for x in range(5)]
     >>> match_range_prop(plt,'ylim')
 
+    As an alternative, use sharex or sharey to link scales dynamically.
+    >>> ax1 = subplot(211)
+    >>> ax2 = subplot(212,sharex=ax1)
+
     Raises ValueError if the property is not a range (2-ple)
     Raises AttributeError if the property does not exist
     """
+    from matplotlib.pyplot import getp,setp
     pmin,pmax = zip(*(getp(x,prop) for x in objs))
     new_range = (min(pmin), max(pmax))
     for x in objs: setp(x,prop,new_range)
@@ -397,22 +469,43 @@ def match_range_prop(objs, prop):
 
 def axgriditer(gridfun=None, figfun=None, **figparams):
     """
-    Generates axes for multiple gridded plots.  Initial call
-    to generator specifies plot grid (default 1x1).  Yields axes
-    on the grid; when the grid is full, opens a new figure and starts
-    filling that.
+    Generator for making a series of plots to multiple axes in multiple figures.
 
-    Arguments:
-    gridfun - function to open figure and specify subplots. Needs to to return
-              fig, axes. Default function creates one subplot in a figure.
+    This function provides a coroutine to handle tasks involved in
+    creating a figure with one or more axes and saving the figure when
+    all the axes have been used (or all the data has been used),
+    repeating as needed.
 
-    figfun - called when the figure is full or the generator is
-             closed.  Can be used for final figure cleanup or to save
-             the figure.  Can be callable, in which case the
-             signature is figfun(fig); or it can be a generator, in
-             which case its send() method is called.
+    Keyword arguments:
 
-    additional arguments are passed to the figure() function
+    gridfun : callable, or None
+      function to open figure and create axes, with signature
+         fig,axes = gridfun(**kwargs)
+      If None, a default function creates one subplot in a figure.
+
+    figfun : callable or generator
+
+      function called when the figure is full or the generator is
+      closed. Should write the figure to disk (if desired) and close
+      it.  If a callable, the signature is figfun(fig).  If a
+      generator, figfun.send(fig) is called.
+
+    kwargs : passed to gridfun()
+
+    Yields : elements of gridfun()[1] (matplotlib.axes.AxesSubplot objects or equivalent)
+
+    **Examples:**
+
+    import numpy as nx
+    axg  = axgriditer( lambda : matplotlib.pyplot.subplots(2,1),
+                       lambda fig : fig.show() )
+    data = [nx.random.randn(100) for i in range(4)]
+    for d,ax in zip(data,axg):
+        ax.plot(d)
+    axg.close()         # ensure last figure is closed
+
+    Copyright 2009-2012 Daniel Meliza (dan at meliza\org)
+    License: Gnu Public License version 3
     """
     if gridfun is None:
         from matplotlib.pyplot import subplots
@@ -427,9 +520,11 @@ def axgriditer(gridfun=None, figfun=None, **figparams):
             elif hasattr(figfun,'send'): figfun.send(fig)
             fig, axg = gridfun(**figparams)
     except:
-        # cleanup and re-throw exception
-        if callable(figfun): figfun(fig)
-        elif hasattr(figfun,'send'): figfun.send(fig)
+        ## catches StopIteration as well as other "real" exceptions.
+        ## only calls figfun if there are unsaved axes
+        if fig and hasattr(fig,'axes') and len(fig.axes):
+            if callable(figfun): figfun(fig)
+            elif hasattr(figfun,'send'): figfun.send(fig)
         raise
 
 

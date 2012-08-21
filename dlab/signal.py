@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 # -*- mode: python -*-
 """
@@ -30,9 +29,10 @@ def signalstats(S):
     S:     input signal (1D)
     Returns:   mean,variance
     """
+    from numpy import zeros
     from scipy import weave
     assert S.ndim == 1, "signalstats() can only handle 1D arrays"
-    out = nx.zeros((2,))
+    out = zeros((2,))
     code = """
          #line 28 "signal.py"
          double e = 0;
@@ -226,7 +226,7 @@ def coherr(C,J1,J2,p=0.05,Nsp1=None,Nsp2=None):
     CI:           confidence interval for C, N x 2 array, (lower, upper)
     phi_std:      stanard deviation of phi, N array
     """
-    from numpy import iscomplexobj, absolute, fix, zeros, setdiff1d, real, sqrt, absolute,\
+    from numpy import iscomplexobj, absolute, fix, zeros, setdiff1d, real, sqrt,\
          arctanh, tanh
     from scipy.stats import t
 

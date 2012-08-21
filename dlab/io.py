@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 # -*- mode: python -*-
 """
@@ -37,6 +36,6 @@ def readbin(fname, dtype='d'):
         data = fromfile(fp,dtype=dtype)
         data.shape = dims
         return data
-    
+
 # Variables:
 # End:
