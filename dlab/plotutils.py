@@ -39,6 +39,16 @@ import numpy as nx
 import matplotlib.pyplot as mplt
 import functools
 
+def expand_range(r, proportion=0.1):
+    """
+    Extends a range equally on either side. Nice for adding padding to axis limits.
+
+    proportion:  the proportion to expand the range
+    """
+    s = sum(r)
+    p = (proportion/2., -proportion/2.)
+    return [a+s*b for a,b in zip(r,p)]
+
 def raster(X, Y=0, start=None, stop=None, ax=None,
            autoscale=False, **kwargs):
     """
