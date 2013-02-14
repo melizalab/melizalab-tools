@@ -1,10 +1,11 @@
+# -*- coding: utf-8 -*-
 # -*- mode: python -*-
-# -*- coding: iso-8859-1 -*-
 """
 String functions
 
 uniquemiddle:          find shared parts of strings
 sort_and_compress:     return numbers in order, compressing continuous runs
+alnumkey:              split a string into numerical and alphabetical parts for sorting
 """
 
 def uniquemiddle(S):
@@ -60,3 +61,15 @@ def sort_and_compress(numbers):
     if out[-1]=='-':
         out.append(last)
     return [str(x) for x in out]
+
+def alnumkey(s):
+    """
+    Turn a string into component string and number chunks.
+    "z23a" -> ("z", 23, "a")
+
+    Use as a key in sorting filenames naturally. For example:
+    sorted(["z_10","z_9"], key=alnumkey) -> ["z_9","z_10"]
+    """
+    import re
+    convert = lambda text: int(text) if text.isdigit() else text
+    return [convert(c) for c in re.split('([0-9]+)', s)]

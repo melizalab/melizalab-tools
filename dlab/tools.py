@@ -1,4 +1,4 @@
-# -*- coding: iso-8859-1 -*-
+# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """
 Programming tools.  Decorators, iterators, etc.
@@ -18,7 +18,6 @@ Functions
 isnested:             test if a sequence is fully nested
 mergedicts:           merge two dictionary using some rules
 subset:               return a subset of a recarray
-alnumkey:             split a string into numerical and alphabetical parts for sorting
 
 Iterators
 =======================
@@ -275,20 +274,6 @@ def icumsum(x, const=0.0):
     for w in x:
         yield tot + w + const
 
-def alnumkey(s):
-    """
-    Turn a string into component string and number chunks.
-    "z23a" -> ("z", 23, "a")
-
-    Use as a key in sorting filenames naturally. For example:
-    sorted(["z_10","z_9"], key=alnumkey) -> ["z_9","z_10"]
-    """
-    import re
-    convert = lambda text: int(text) if text.isdigit() else text
-    return [convert(c) for c in re.split('([0-9]+)', s)]
-
-
 
 # Variables:
-# indent-tabs-mode: t
 # End:

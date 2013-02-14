@@ -1,5 +1,5 @@
 # -*- mode: python -*-
-# -*- coding: iso-8859-1 -*-
+# -*- coding: utf-8 -*-
 """
 Module with some wrappers for various statistics functions in R
 Requires rpy (1.0 I think)

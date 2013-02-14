@@ -1,5 +1,5 @@
 # -*- mode: python -*-
-# -*- coding: iso-8859-1 -*-
+# -*- coding: utf-8 -*-
 """
 Collection of general utility functions for plotting
 

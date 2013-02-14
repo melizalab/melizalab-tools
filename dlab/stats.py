@@ -1,5 +1,5 @@
 # -*- mode: python -*-
-# -*- coding: iso-8859-1 -*-
+# -*- coding: utf-8 -*-
 """
 Statistical tools not found in the scipy or numpy toolkits.
 
