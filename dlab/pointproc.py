@@ -271,9 +271,12 @@ def convolve(tl, kernel, kdt, time_range=None, dt=None):
     if dt is None: dt = kdt
 
     t1,t2 = tl.range
-    onset,offset = time_range
-    if onset is None: onset = t1
-    if offset is None: offset = t2
+    if time_range is None:
+        onset,offset = t1,t2
+    else:
+        onset,offset = time_range
+        if onset is None: onset = t1
+        if offset is None: offset = t2
     grid = arange(onset, offset, dt)
     rate = [discreteconv(x, kernel, kdt, onset, offset, dt) for x in tl]
     return column_stack(rate),grid

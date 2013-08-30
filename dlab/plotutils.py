@@ -193,8 +193,11 @@ def waterfall(x, y, offsets=(0,0), ax=None, **kwargs):
     offsets - (xo,yo) - x and y offsets for each new data set
     ax - target axes
 
-    if one of x or y is 2D and the other 1D, the 1D data is used for each line
-    otherwise, if x and y have unequal numbers of columns, only the fully-defined datasets are plotted
+    If one of x or y is 2D and the other 1D, the 1D data is used for each line.
+    Otherwise, if x and y have unequal numbers of columns, only the
+    fully-defined datasets are plotted.
+
+    Returns LineCollection of plotted lines.
     """
     from matplotlib.collections import LineCollection
     from itertools import izip, repeat
