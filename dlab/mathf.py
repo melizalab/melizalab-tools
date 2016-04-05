@@ -81,7 +81,7 @@ def perm_unique_trans(n,startk=0, verbose=False):
             out.append(perm)
             seqpairs.append(permpairs)
             yield k, perm
-        elif verbose and k % 10000 == 0: print "Checked to permutation %d" % k
+        elif verbose and k % 10000 == 0: print("Checked to permutation %d" % k)
 
 
 def runs(x, val):

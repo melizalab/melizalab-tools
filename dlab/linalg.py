@@ -33,7 +33,7 @@ def gemm(a,b,alpha=1.,**kwargs):
     from scipy.linalg import get_blas_funcs
     _gemm,= get_blas_funcs(('gemm',),(a,b))
     return _gemm(alpha, a, b, **kwargs)
-    
+
 def outer(a,b,alpha=1.,**kwargs):
     """
     Calculates the outer product of two vectors. A wrapper for GER
@@ -49,7 +49,7 @@ def outer(a,b,alpha=1.,**kwargs):
     from scipy.linalg import get_blas_funcs
     _ger, = get_blas_funcs(('ger',),(a,b))
     return _ger(alpha, a, b, **kwargs)
-    
+
 
 def cov(m, trans=False, bias=False):
     """
@@ -65,15 +65,15 @@ def cov(m, trans=False, bias=False):
     Returns: 2D array C with C_{i,j} equal to the covariance between
              variables i and j
     """
-    from numpy import array
-    
-    X = nx.array(m, ndmin=2)
+    from numpy import array, newaxis
+
+    X = array(m, ndmin=2)
     if not trans:
         axis = 0
-        tup = (slice(None),nx.newaxis)
+        tup = (slice(None),newaxis)
     else:
         axis = 1
-        tup = (nx.newaxis, slice(None))
+        tup = (newaxis, slice(None))
 
     X -= X.mean(axis=1-axis)[tup]
     if not trans: N = X.shape[1]
