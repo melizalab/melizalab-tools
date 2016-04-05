@@ -214,8 +214,8 @@ def mtstft(tl, window, step, **kwargs):
           nfft        number of frequency bins for transform
 
     Output:
-          J       complex spectrum with dimensions (freq x chan x tapers x time)
-          Nsp     total spike count in each trial, with dimension (chan, time)
+          J       complex spectrum with dimensions (freq x time x tapers x chan)
+          Nsp     total spike count in each trial, with dimension (time, chan)
           f       frequency grid, with dimension (freq,)
           t       time grid, with dimension (time,)
 
@@ -232,6 +232,7 @@ def mtstft(tl, window, step, **kwargs):
     dt = 1./ Fs
     fpass = kwargs.get('fpass', (0, Fs/2.))
 
+    C = len(tl)
     twin = arange(0, window, dt)
     N = len(twin)
     nfft = kwargs.get('nfft', N)
@@ -247,12 +248,12 @@ def mtstft(tl, window, step, **kwargs):
         maxtime += 2*dt
     tgrid = arange(mintime, maxtime, step)
 
-    J = zeros((f.size, K, len(tl), tgrid.size), dtype='D')
-    Nsp = zeros((len(tl), tgrid.size), dtype='i')
+    J = zeros((f.size, tgrid.size, K, C), dtype='D')
+    Nsp = zeros((tgrid.size, C), dtype='i')
     for i, offset in enumerate(tgrid):
         j,n = _mtfft(tl, tapers, nfft, twin + offset, f, findx)
-        J[:,:,:,i] = j
-        Nsp[:,i] = n
+        J[:,i,:,:] = j
+        Nsp[i,:] = n
 
     return J, Nsp, f, tgrid
 
@@ -271,8 +272,8 @@ def _mtfft(tl, tapers, nfft, t, f, findx):
           f           (frequencies of evaluation)
           findx       (index corresponding to frequencies f)
     Output:
-          J   (fft in form frequency index x taper index x channels/trials)
-          Nsp (number of spikes in each channel)
+          J   complex transform, dimension (freq, trial, taper)
+          Nsp number of spikes in each channel/trial
     """
     from numpy import zeros, exp, pi
     from scipy.fftpack import fft
@@ -292,20 +293,16 @@ def _mtfft(tl, tapers, nfft, t, f, findx):
     Msp = zeros(C)
     J = zeros((nfreq,K,C), dtype='D')
 
-    chan = 0
     interpolator = interp1d(t, tapers.T, axis=1)
-    for events in tl:
+    for i, events in enumerate(tl):
         idx = (events >= t.min()) & (events <= t.max())
         ev = events[idx]
-        Nsp[chan] = ev.size
+        Nsp[i] = ev.size
         Msp = 1. * ev.size / t.size
         if ev.size > 0:
             data_proj = interpolator(ev)
             Y = exp(outer(-1j*w, ev - t[0]))
-            J[:,:,chan] = gemm(Y, data_proj, trans_b=1) - H * Msp
-        else:
-            J[:,:,chan] = 0
-        chan += 1
+            J[:,:,i] = gemm(Y, data_proj, trans_b=1) - H * Msp
 
     return J, Nsp
 
