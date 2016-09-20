@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
-"""
-Some simple math functions
+"""Some simple math functions
 
 nextpow2:             next power of 2
 binomial:             binomial coefficient
@@ -20,6 +19,7 @@ def nextpow2(n):
     if n==0.0:
         return 0
     return int(ceil(log2(abs(n))));
+
 
 def binomial(n,k):
     """  Returns the binomial coefficient n choose k  """
