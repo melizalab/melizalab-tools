@@ -42,8 +42,10 @@ setup(
     version=VERSION,
     packages= find_packages(exclude=["*test*"]),
     ext_package = 'dlab',
-    ext_modules = [Extension('convolve',sources=['src/convolve.pyf','src/convolve.c'])],
-    install_requires = ["numpy>=1.9"],
+    ext_modules = [Extension('convolve',sources=['src/convolve.pyf','src/convolve.c']),
+                   Extension('_chebyfit',sources=['src/chebyfit.c'])],
+
+    install_requires = ["numpy>=1.9", "toelis>=2.0"],
     scripts = ['scripts/compress_toelis.py'],
 
     description=short_desc,

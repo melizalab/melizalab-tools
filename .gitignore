@@ -2,3 +2,4 @@
 /dlab.egg-info/
 *.so
 *.pyc
+.ipynb_checkpoints/
