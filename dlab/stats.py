@@ -124,5 +124,104 @@ def tabulate(x):
     return levels, asarray([(vals==level).sum() for level in levels])
 
 
+def randfixedsum(n, m, s, a, b):
+    """
+    Generates an n by m array x, each of whose m columns
+    contains n random values lying in the interval [a,b], but
+    subject to the condition that their sum be equal to s.  The
+    scalar value s must accordingly satisfy n*a <= s <= n*b.  The
+    distribution of values is uniform in the sense that it has the
+    conditional probability distribution of a uniform distribution
+    over the whole n-cube, given that the sum of the x's is s.
+
+    The scalar v, if requested, returns with the total
+    n-1 dimensional volume (content) of the subset satisfying
+    this condition.  Consequently if v, considered as a function
+    of s and divided by sqrt(n), is integrated with respect to s
+    from s = a to s = b, the result would necessarily be the
+    n-dimensional volume of the whole cube, namely (b-a)^n.
+
+    This algorithm does no "rejecting" on the sets of x's it
+    obtains.  It is designed to generate only those that satisfy all
+    the above conditions and to do so with a uniform distribution.
+    It accomplishes this by decomposing the space of all possible x
+    sets (columns) into n-1 dimensional simplexes.  (Line segments,
+    triangles, and tetrahedra, are one-, two-, and three-dimensional
+    examples of simplexes, respectively.)  It makes use of three
+    different sets of 'rand' variables, one to locate values
+    uniformly within each type of simplex, another to randomly
+    select representatives of each different type of simplex in
+    proportion to their volume, and a third to perform random
+    permutations to provide an even distribution of simplex choices
+    among like types.  For example, with n equal to 3 and s set at,
+    say, 40    of the way from a towards b, there will be 2 different
+    types of simplex, in this case triangles, each with its own
+    area, and 6 different versions of each from permutations, for
+    a total of 12 triangles, and these all fit together to form a
+    particular planar non-regular hexagon in 3 dimensions, with v
+    returned set equal to the hexagon's area.
+
+    Roger Stafford - Jan. 19, 2006. Adapted from MATLAB code by C D Meliza.
+    """
+    from numpy import floor, zeros, ones, finfo, double, arange, repeat
+    from numpy.random import rand, shuffle
+    assert n > 1, "Vector size must be 2 or larger"
+    assert m > 0, "Number of draws must be at least 1"
+    assert a < b, "a must be less than b"
+    assert (n*a <= s) and (s <= n*b), "n*a <= s <= n*b not true"
+
+    realmax = finfo(double).max
+    # rescale to unit cube
+    s = (s-n*a)/(b-a)
+
+    # Construct the transition probability table, t.
+    # t(i,j) will be utilized only in the region where j <= i + 1.
+    k = max(min(floor(s), n-1), 0)  # must have 0 <= k <= n-1
+    s = max(min(s, k+1), k)         # must have k <= s <= k+1
+    s1 = s - arange(k, k-n, -1)     # s1 & s2 will never be negative
+    s2 = arange(k+n, k, -1) - s
+    w = zeros((n, n+1))
+    w[0,1] = realmax                # scale for full double range
+    t = zeros((n-1, n))
+    tiny = 2**(-1074)               # the smallest positive double
+    for i in range(1, n):
+        tmp1 = w[i-1, 1:i+2] * s1[:i+1] / (i + 1)
+        tmp2 = w[i-1, :i+1] * s2[n-i-1:] / (i + 1)
+        w[i, 1:i+2] = tmp1 + tmp2
+        tmp3 = w[i, 1:i+2] + tiny       # in case tmp1 and tmp2 are both zero
+        tmp4 = (s2[n-i-1:] > s1[:i+1])    # then t is 0 on left & 1 on right
+        t[i-1, :i+1] = (tmp2 / tmp3) * tmp4 + (1 - tmp1 / tmp3) * (~tmp4)
+
+    # # Derive the polytope volume v from the appropriate
+    # # element in the bottom row of w.
+    # v = n**(3/2) * (w[n-1,k+2-1] / realmax) * (0. + b - a)**(n-1)
+
+    # Now compute the matrix x.
+    x = zeros((n, m))
+    rt = rand(n-1, m)           # For random selection of simplex type
+    rs = rand(n-1, m)           # For random location within a simplex
+    s = repeat(s, m)
+    j = repeat(int(k), m)            # For indexing in the t table
+    sm = zeros((1, m))          # Start with sum zero & product 1
+    pr = ones((1, m))
+    # Work backwards in the t table
+    for ifwd in range(n-1):
+        i = n - ifwd - 2
+        e = rt[ifwd,:] <= t[i,j]        # Use rt to choose a transition
+        sx = rs[ifwd,:] ** (1/(i+1))    # Use rs to compute next simplex coord.
+        sm = sm + (1-sx) * pr * s / (i+2)  # Update sum
+        pr = sx *pr                        # Update product
+        x[ifwd,:] = sm + pr *e           # Calculate x using simplex coords.
+        s -= e
+        j -= e               # Transition adjustment
+    x[n-1,:] = sm + pr * s   # Compute the last x
+
+    # Randomly permute the order in x and rescale.
+    # This could be done a bit better; values maybe somewhat correlated
+    rows = arange(n)
+    shuffle(rows)
+    return ((b - a) * x[rows,:] + a).squeeze()
+
+
 # Variables:
 # End:
