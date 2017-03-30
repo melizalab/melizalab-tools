@@ -119,6 +119,7 @@ def mtspectrum(J, trialave=True):
         S = S.mean(1)
     return S
 
+
 def mtcoherence(J1, J2, trialave=True, min_power=0.001):
     """
     Multitaper coherence
@@ -157,6 +158,7 @@ def intertrial_coherence_correction(C,M):
     from numpy import sqrt
     Z = sqrt(1./(C.conj()*C).real)
     return 1./ (.5 * (-M + M * Z) + 1)
+
 
 def specerr(S,J,p=0.05,jackknife=True, Nsp=None):
     """
@@ -270,6 +272,7 @@ def coherr(C,J1,J2,p=0.05,Nsp1=None,Nsp2=None):
     phistd = (2*K-2) * (1 - absolute(phasefactorxyk.mean(1)))
     return Cerr, phistd
 
+
 def _combine_trials(J):
     """
     Reshape a 3D array to be 2D, treating trials (dim 3) and tapers
@@ -280,6 +283,7 @@ def _combine_trials(J):
         N,K,T = J.shape
         J = reshape(J, (N,K*T))
     return J
+
 
 def freqcut(f,sig,bandwidth):
     """

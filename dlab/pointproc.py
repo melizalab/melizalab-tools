@@ -227,16 +227,16 @@ def mtstft(tl, window, step, **kwargs):
     import toelis
 
     NW = kwargs.get('NW', 3)
-    K = kwargs.get('k', NW*2-1)
+    K = int(kwargs.get('k', NW*2-1))
     Fs = kwargs.get('Fs', 1)
-    dt = 1./ Fs
+    dt = 1. / Fs
     fpass = kwargs.get('fpass', (0, Fs/2.))
 
     C = len(tl)
     twin = arange(0, window, dt)
     N = len(twin)
     nfft = kwargs.get('nfft', N)
-    f,findx = fgrid(Fs, nfft, fpass)
+    f, findx = fgrid(Fs, nfft, fpass)
     tapers = dpss(N, NW, K)[0].T * sqrt(Fs)
 
     try:
@@ -251,7 +251,7 @@ def mtstft(tl, window, step, **kwargs):
     J = zeros((f.size, tgrid.size, K, C), dtype='D')
     Nsp = zeros((tgrid.size, C), dtype='i')
     for i, offset in enumerate(tgrid):
-        j,n = _mtfft(tl, tapers, nfft, twin + offset, f, findx)
+        j, n = _mtfft(tl, tapers, nfft, twin + offset, f, findx)
         J[:,i,:,:] = j
         Nsp[i,:] = n
 
@@ -332,7 +332,7 @@ def convolve(tl, kernel, kdt, time_range=None, dt=None):
     help in constructing kernels with a fixed bandwidth.
     """
     from numpy import arange, column_stack
-    from convolve import discreteconv
+    from _convolve import discreteconv
     if dt is None: dt = kdt
 
     t1,t2 = tl.range

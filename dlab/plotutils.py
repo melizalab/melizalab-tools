@@ -39,6 +39,7 @@ import numpy as nx
 import matplotlib.pyplot as mplt
 import functools
 
+
 def expand_range(r, proportion=0.1):
     """
     Extends a range equally on either side. Nice for adding padding to axis limits.
@@ -50,74 +51,43 @@ def expand_range(r, proportion=0.1):
     return [a+s*b for a,b in zip(r,p)]
 
 
-def raster(X, Y=0, start=None, stop=None, ax=None,
-           autoscale=False, **kwargs):
+def raster(X, Y=0, ax=None, **kwargs):
     """
     Draws a raster plot of a set of point sequences. These can be defined
     as a set of x,y pairs, or as a list of lists of x values; in the latter
     case the y offset of the x values is taken from the position within
     the containing list.
 
-    X - a list of arrays
+    X - a sequence of arrays
     Y - an optional offset for the entries in X.  For a scalar, the rasters
         will be plotted started at Y; for a vector (length the same as X) each
         entry in X will be plotted at that Y offset.
-    start - only plot events after this value
-    stop - only plot events before this value
     ax - plot to a specified axis, or if None (default), to the current axis
-    autoscale - if true (default False), scale marks to match axis size
-    **kwargs - additional arguments to plot
+    gap - if not None (the default), scale marks so that they have a gap pixels between
+    **kwargs - additional arguments to plot function
     """
-    nreps = len(X)
-    # fail gracefully if X is empty
-    if nreps == 0:  return None
-
-    if Y == None or Y < 0:
-        Y = 0
-    if nx.isscalar(Y):
-        Y = nx.arange(Y, Y+nreps)
-
-    assert len(X) == len(Y), "X and Y must be the same length"
-
-    y = nx.concatenate([nx.ones(X[i].shape) * Y[i] for i in range(nreps)])
-    x = nx.concatenate(X)
-
-    # filter events
-    if start != None:
-        y = y[x>=start]
-        x = x[x>=start]
-        minx = start
-    else:
-        minx = x.min()
-
-    if stop != None:
-        y = y[x<=stop]
-        x = x[x<=stop]
-        maxx = stop
-    else:
-        maxx = x.max()
-
-    if ax==None:
+    import itertools
+    if ax is None:
         ax = mplt.gca()
 
-    # if the filter eliminates all the events, fail gracefully
-    if x.size == 0:
-        ax.axis((minx, maxx, - 0.5, nreps + 0.5))
-        return
+    if not nx.iterable(Y):
+        Y = itertools.count(Y)
 
-    miny = min(Y)
-    maxy = max(Y)
+    for x, y in zip(X, Y):
+        yy = y * nx.ones(len(x))
+        ax.plot(x, yy, 'k|', **kwargs)
 
-    plots = ax.plot(x,y,'|',**kwargs)
+    miny, maxy = ax.get_ylim()
+    ax.set_ylim((miny - 0.5, maxy + 0.5))
 
-    if autoscale:
-        fudge = 1.5 * autoscale if isinstance(autoscale,(int,float)) else 1.0
-        ht = ax.get_window_extent().height
-        for p in plots: p.set_markersize(ht/((maxy-miny)*fudge))
+    return ax.lines
 
-    ax.axis((minx, maxx, miny - 0.5, maxy + 0.5))
 
-    return plots
+def adjust_raster_ticks(ax, gap=0):
+    miny, maxy = ax.get_ylim()
+    ht = ax.get_window_extent().height
+    for p in ax.lines:
+        p.set_markersize(ht / ((maxy - miny)) - gap)
 
 
 def bar(labels, values, width=0.5, sort_labels=False, **kwargs):
