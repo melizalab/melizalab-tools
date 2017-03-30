@@ -4,7 +4,6 @@ import sys
 if sys.hexversion < 0x02060000:
     raise RuntimeError("Python 2.6 or higher required")
 
-
 try:
     from setuptools import setup, find_packages
 except ImportError:
@@ -20,7 +19,7 @@ except AttributeError:
 
 from numpy.distutils.core import setup, Extension
 
-VERSION = '1.1.0'
+VERSION = '1.3.0'
 
 cls_txt = """
 Development Status :: 4 - Beta
@@ -42,8 +41,8 @@ setup(
     version=VERSION,
     packages= find_packages(exclude=["*test*"]),
     ext_package = 'dlab',
-    ext_modules = [Extension('convolve',sources=['src/convolve.pyf','src/convolve.c']),
-                   Extension('_chebyfit',sources=['src/chebyfit.c'])],
+    ext_modules = [Extension('_convolve',sources=['src/convolve.pyf','src/convolve.c']),
+                   Extension('_chebyshev',sources=['src/chebyshev.c'])],
 
     install_requires = ["numpy>=1.9", "toelis>=2.0"],
     scripts = ['scripts/compress_toelis.py'],
@@ -52,7 +51,7 @@ setup(
     long_description=short_desc,
     classifiers=[x for x in cls_txt.split("\n") if x],
 
-    url="https://github.com/melizalab/neurobank",
+    url="https://github.com/melizalab/dlab",
     author = "CD Meliza",
     author_email = "dan AT the domain 'meliza.org'",
     maintainer = "CD Meliza",

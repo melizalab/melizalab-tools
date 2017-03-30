@@ -1,5 +1,5 @@
 !    -*- f90 -*-
-python module convolve
+python module _convolve
 interface
    subroutine discreteconv(times, ntimes, kern, nkern, kdt, onset, offset, odt, out)
      intent(c) discreteconv

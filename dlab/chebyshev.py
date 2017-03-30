@@ -59,98 +59,73 @@ Examples
 
 """
 
-from __future__ import division, print_function
+from __future__ import division, print_function, absolute_import
 
-import numpy
-
-import _chebyfit
-
-__version__ = '2013.01.18'
-__docformat__ = 'restructuredtext en'
-__all__ = []
+from dlab._chebyshev import forward_transform, inverse_transform, polynomials
+from dlab._chebyshev import normalization_factors, polynomial_roots
 
 
-def forward_transform(data, numcoef=-1):
-    """
+def fit_exponentials(data, n_exps, n_coef=6, dt=1.0, axis=-1):
+    """Fit data to a sum of one or more exponential functions
 
-    >>>
+    Parameters
+    ----------
+    data : 1-D or 2-D array
+         The data to be fit
+    n_exps : int
+         The number of exponentials to fit to the data
+    n_coef : int
+         The number of coefficients used to fit the data. Must be >=6 and < 64.
+    dt : float
+         The sampling rate of the data. Used to scale the returned time constant(s)
+    axis : int
+         If data.dim is > 1, specify the time dimension
 
-    """
-    return _chebyfit.chebyfwd(data, numcoef)
-
-
-def invers_transform(coef, numdata):
-    """
-
-    >>>
-
-    """
-    return _chebyfit.chebyinv(coef, numdata)
-
-
-def chebyshev_polynom(numdata, numcoef, norm=False):
-    """
-
-    >>>
+    Returns
+    -------
+        dict
+           {offset, amplitude, lifetime}
+        array
+           The fitted data
 
     """
-    return _chebyfit.chebypoly(numdata, numcoef, norm)
+    from dlab._chebyshev import fitexps
+    params, fitted = fitexps(data, n_exps, n_coef, deltat=dt, axis=axis)
+    return (
+        {
+            "offset": params[..., 0],
+            "amplitude": params[..., 1:(1 + n_exps)],
+            "lifetime": params[..., (1 + n_exps):(1 + 2 * n_exps)]
+        },
+        fitted)
 
 
-def fit_exponentials(data, numexps, numcoef, deltat=1.0, axis=-1):
-    """Return fitted parameters and data for multi exponential function.
+def fit_harmonic_decay(data, n_coef=6, dt=1.0, axis=-1):
+    """Fit data to a harmonic exponential decay function
 
-    Return tuple of fitted parameters and fitted data.
+    Parameters
+    ----------
+    data : 1-D or 2-D array
+         The data to be fit
+    n_coef : int
+         The number of coefficients used to fit the data. Must be >= 6. More is better.
+    dt : float
+         The sampling rate of the data. Used to scale the returned time constant(s)
+    axis : int
+         If data.dim is > 1, specify the time dimension
 
-    fitted parameters : numpy array
-
-        offset: [..., 0]
-        amplitudes:  [..., 1 : 1+numexps]
-        lifetimes:   [..., 1+numexps : 1+2*numexps]
-        frequencies: [..., 1+2*numexps : 1+3*numexps]
-
-
-    >>> data = ...
-    >>> params, fitted = mulexpfit(data, numexps, numcoef)
-
+    Returns
+    -------
+        dict
+           {offset, amplitude, lifetime, frequency}
+        array
+           The fitted data
     """
-    return _chebyfit.fitexps(data, numexps, numcoef, deltat=deltat, axis=axis)
-
-
-def fit_harmonic_decay(data, numcoef, deltat=1.0, axis=-1):
-    """Return fitted parameters and data for multi exponential function.
-
-    Return tuple of fitted parameters and fitted data.
-
-    fitted parameters : numpy array
-
-        offset: [..., 0]
-        amplitudes:  [..., 1 : 1+numexps]
-        lifetimes:   [..., 1+numexps : 1+2*numexps]
-        frequencies: [..., 1+2*numexps : 1+3*numexps]
-
-
-    >>> data = ...
-    >>> params, fitted = mulexpfit(data, numexps, numcoef)
-
-    """
-    return _chebyfit.fitexpsin(data, numcoef, deltat=deltat, axis=axis)
-
-
-class MultiExpFitParams(object):
-    """Wrapper for outputting results returned by fit_multiple_exponentials().
-
-    """
-    __slots__ = ['offset', 'amplitudes', 'lifetimes', 'frequencies']
-
-    def __init__(self, fitresult, numexps):
-        """ """
-        numexps = abs(numexps)
-        self.offset = fitresult[..., 0]
-        self.amplitudes = fitresult[..., 1: 1+numexps]
-        self.lifetimes = fitresult[..., 1+numexps: 1+2*numexps]
-        self.frequencies = fitresult[..., 1+2*numexps: 1+3*numexps]
-
-    def __str__(self):
-        return '\n'.join('%-12s %s' % (s, getattr(self, s))
-                         for s in self.__slots__)
+    from dlab._chebyshev import fitexpsin
+    params, fitted = fitexpsin(data, n_coef, deltat=dt, axis=axis)
+    return params, fitted
+    return ({"offset": params[..., 0],
+             "amplitude": params[..., 1:3],
+             "lifetime": params[..., 3],
+             "frequency": params[..., 4]},
+            fitted)

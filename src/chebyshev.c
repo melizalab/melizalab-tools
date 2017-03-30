@@ -1,9 +1,9 @@
-/* chebyfit.c
+/* chebyshev.c
 
 A Python C extension module for fitting multiple exponential and harmonic
 functions using Chebyshev polynomials.
 
-Refer to the chebyfit.py module for documentation and tests.
+Refer to the chebyshev.py module for documentation and tests.
 
 For theoretical background see
 Analytic solutions to modelling exponential and harmonic functions using
@@ -33,8 +33,8 @@ Use this Python distutils setup script to build the extension module::
   # Usage: ``python setup.py build_ext --inplace``
   from distutils.core import setup, Extension
   import numpy
-  setup(name='_chebyfit',
-        ext_modules=[Extension('_chebyfit', ['chebyfit.c'],
+  setup(name='_chebyshev',
+        ext_modules=[Extension('_chebyshev', ['chebyshev.c'],
                                include_dirs=[numpy.get_include()])])
 
 License
@@ -1681,7 +1681,7 @@ static PyObject* py_polyroots(PyObject *obj, PyObject *args, PyObject *kwds)
 
 char module_doc[] =
     "Fit exponential and harmonic functions using Chebyshev polynomials.\n\n"
-    "Refer to the associated chebyfit.py module for documentation and tests."
+    "Refer to the associated chebyshev.py module for documentation and tests."
     "\n";
 
 static PyMethodDef module_methods[] = {
@@ -1689,15 +1689,15 @@ static PyMethodDef module_methods[] = {
         METH_VARARGS|METH_KEYWORDS, py_fitexps_doc},
     {"fitexpsin", (PyCFunction)py_fitexpsin,
         METH_VARARGS|METH_KEYWORDS, py_fitexpsin_doc},
-    {"chebyfwd", (PyCFunction)py_chebyfwd,
+    {"forward_transform", (PyCFunction)py_chebyfwd,
         METH_VARARGS|METH_KEYWORDS, py_chebyfwd_doc},
-    {"chebyinv", (PyCFunction)py_chebyinv,
+    {"inverse_transform", (PyCFunction)py_chebyinv,
         METH_VARARGS|METH_KEYWORDS, py_chebyinv_doc},
-    {"chebypoly", (PyCFunction)py_chebypoly,
+    {"polynomials", (PyCFunction)py_chebypoly,
         METH_VARARGS|METH_KEYWORDS, py_chebypoly_doc},
-    {"chebynorm", (PyCFunction)py_chebynorm,
+    {"normalization_factors", (PyCFunction)py_chebynorm,
         METH_VARARGS|METH_KEYWORDS, py_chebynorm_doc},
-    {"polyroots", (PyCFunction)py_polyroots,
+    {"polynomial_roots", (PyCFunction)py_polyroots,
         METH_VARARGS|METH_KEYWORDS, py_polyroots_doc},
     {NULL, NULL, 0, NULL} /* Sentinel */
 };
@@ -1722,7 +1722,7 @@ static int module_clear(PyObject *m) {
 
 static struct PyModuleDef moduledef = {
         PyModuleDef_HEAD_INIT,
-        "_chebyfit",
+        "_chebyshev",
         NULL,
         sizeof(struct module_state),
         module_methods,
@@ -1735,14 +1735,14 @@ static struct PyModuleDef moduledef = {
 #define INITERROR return NULL
 
 PyMODINIT_FUNC
-PyInit__chebyfit(void)
+PyInit__chebyshev(void)
 
 #else
 
 #define INITERROR return
 
 PyMODINIT_FUNC
-init_chebyfit(void)
+init_chebyshev(void)
 #endif
 {
     PyObject *module;
@@ -1755,7 +1755,7 @@ init_chebyfit(void)
     moduledef.m_doc = doc;
     module = PyModule_Create(&moduledef);
 #else
-    module = Py_InitModule3("_chebyfit", module_methods, doc);
+    module = Py_InitModule3("_chebyshev", module_methods, doc);
 #endif
 
     PyMem_Free(doc);
