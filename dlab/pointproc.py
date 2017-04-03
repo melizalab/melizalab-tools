@@ -307,44 +307,44 @@ def _mtfft(tl, tapers, nfft, t, f, findx):
     return J, Nsp
 
 
-def convolve(tl, kernel, kdt, time_range=None, dt=None):
-    """
-    Estimate the rate of a multi-trial point process S by convolving
-    event times with a kernel W.
+def convolve(tl, kernel, kdt, start=None, stop=None, dt=None):
+    """Convolve a multi-trial point process with a kernel.
 
     R(x) = SUM   W(s-x)
           s in S
 
-    tl:        a toelis object or list of event time sequences
+    tl:        a list of event time arrays
     kernel:    the convolution kernel
     kdt:       the temporal resolution of the kernel
     dt:        the resolution of the output. Defaults to kdt
-    time_range: the range of spikes to include. This is *exclusive*
+    start:     the first time point in the output. This is *exclusive*
+    stop:      the last time point in the output. Also exclusive.
 
     Returns:
-    rmat:  rate matrix, dimensions time by trial
-    grid:  the time grid
+       result of convolution (array, time x trial);
+       time grid (array, time)
 
-    The kernel function can be any 1D sequence of values. It's assumed
-    to be centered around tau=0 on an evenly spaced grid (kdt). To
-    ensure that the integral of rmat is equal to the spike count, the
-    sum(kernel)*kdt should be equal to 1.0. See signal.kernel() for
-    help in constructing kernels with a fixed bandwidth.
+    The kernel function can be any 1D sequence of values. It's assumed to start
+    at tau=0 on an evenly spaced grid (kdt). To ensure that the integral of the
+    output is equal to the spike count, sum(kernel)*kdt should be equal to
+    1.0. See signal.kernel() for help in constructing kernels with a fixed
+    bandwidth.
+
+    For acausal kernels (i.e., with support at t<0), shift the output.
+
     """
+    from toelis import range
     from numpy import arange, column_stack
-    from _convolve import discreteconv
-    if dt is None: dt = kdt
+    from dlab._convolve import discreteconv
+    if dt is None:
+        dt = kdt
 
-    t1,t2 = tl.range
-    if time_range is None:
-        onset,offset = t1,t2
-    else:
-        onset,offset = time_range
-        if onset is None: onset = t1
-        if offset is None: offset = t2
+    t1, t2 = range(tl)
+    onset = start if start is not None else t1
+    offset = stop if stop is not None else t2
     grid = arange(onset, offset, dt)
     rate = [discreteconv(x, kernel, kdt, onset, offset, dt) for x in tl]
-    return column_stack(rate),grid
+    return column_stack(rate), grid
 
 # Variables:
 # End:
