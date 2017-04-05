@@ -51,7 +51,7 @@ def expand_range(r, proportion=0.1):
     return [a+s*b for a,b in zip(r,p)]
 
 
-def raster(X, Y=0, ax=None, **kwargs):
+def raster(X, Y=0, ax=None, gap=0.2, **kwargs):
     """
     Draws a raster plot of a set of point sequences. These can be defined
     as a set of x,y pairs, or as a list of lists of x values; in the latter
@@ -63,7 +63,7 @@ def raster(X, Y=0, ax=None, **kwargs):
         will be plotted started at Y; for a vector (length the same as X) each
         entry in X will be plotted at that Y offset.
     ax - plot to a specified axis, or if None (default), to the current axis
-    gap - if not None (the default), scale marks so that they have a gap pixels between
+    gap - set the gap (in data units) between rasters
     **kwargs - additional arguments to plot function
     """
     import itertools
@@ -75,12 +75,13 @@ def raster(X, Y=0, ax=None, **kwargs):
 
     for x, y in zip(X, Y):
         yy = y * nx.ones(len(x))
-        ax.plot(x, yy, 'k|', **kwargs)
+        # ax.plot(x, yy, 'k|', **kwargs)
+        ax.vlines(x, yy - 0.5 + gap, yy + 0.5 - gap, **kwargs)
 
-    miny, maxy = ax.get_ylim()
-    ax.set_ylim((miny - 0.5, maxy + 0.5))
+    # miny, maxy = ax.get_ylim()
+    # ax.set_ylim((miny - 0.5, maxy + 0.5))
 
-    return ax.lines
+    return ax.collections
 
 
 def adjust_raster_ticks(ax, gap=0):

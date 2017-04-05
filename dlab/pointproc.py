@@ -187,7 +187,7 @@ def mtfft(tl, **kwargs):
 
     N = len(t)
     nfft = kwargs.get('nfft', N)
-    f,findx = fgrid(Fs, nfft, fpass)
+    f, findx = fgrid(Fs, nfft, fpass)
     tapers = dpss(N, NW, K)[0].T * sqrt(Fs)
 
     J, Nsp = _mtfft(tl, tapers, nfft, t, f, findx)
