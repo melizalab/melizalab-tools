@@ -19,7 +19,7 @@ except AttributeError:
 
 from numpy.distutils.core import setup, Extension
 
-VERSION = '1.3.0'
+VERSION = '1.3.1'
 
 cls_txt = """
 Development Status :: 4 - Beta
@@ -44,7 +44,7 @@ setup(
     ext_modules = [Extension('_convolve',sources=['src/convolve.pyf','src/convolve.c']),
                    Extension('_chebyshev',sources=['src/chebyshev.c'])],
 
-    install_requires = ["numpy>=1.9", "toelis>=2.0"],
+    install_requires = ["numpy>=1.11", "toelis>=2.0"],
     scripts = ['scripts/compress_toelis.py'],
 
     description=short_desc,

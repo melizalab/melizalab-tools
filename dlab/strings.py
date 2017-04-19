@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """
@@ -8,6 +7,10 @@ uniquemiddle:          find shared parts of strings
 sort_and_compress:     return numbers in order, compressing continuous runs
 alnumkey:              split a string into numerical and alphabetical parts for sorting
 """
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
+
 
 def uniquemiddle(S):
     """
@@ -18,21 +21,22 @@ def uniquemiddle(S):
     >>> uniquemiddle(['test123.blah', 'test234.blah'])
     (['123', '234'], 'test', 'blah')
     """
-    if len(S)<2: raise ValueError, "Input list needs to have at least two elements"
+    if len(S) < 2:
+        raise ValueError("Input list needs to have at least two elements")
 
     slen = min([len(s) for s in S])
 
     for i in range(slen):
         c = set([s[i] for s in S])
-        if len(c)>1:
+        if len(c) > 1:
             break
     start = i
 
     for i in range(slen):
         c = set([s[-i] for s in S])
-        if len(c)>1:
+        if len(c) > 1:
             break
-    stop = -i+1
+    stop = -i + 1
 
     return [s[start:stop] for s in S], S[0][:start], S[0][stop:]
 
@@ -48,20 +52,21 @@ def sort_and_compress(numbers):
     """
 
     out = []
-    last= None
+    last = None
     for n in sorted(numbers):
-        if last==None:
+        if last is None:
             out.append(n)
-        elif n > last+1:
-            if out[-1]=='-':
+        elif n > last + 1:
+            if out[-1] == '-':
                 out.append(last)
-            out.extend((',',n))
-        elif out[-1]!='-':
+            out.extend((', ',n))
+        elif out[-1] != '-':
             out.append('-')
         last = n
-    if out[-1]=='-':
+    if out[-1] == '-':
         out.append(last)
     return [str(x) for x in out]
+
 
 def alnumkey(s):
     """
@@ -72,5 +77,4 @@ def alnumkey(s):
     sorted(["z_10","z_9"], key=alnumkey) -> ["z_9","z_10"]
     """
     import re
-    convert = lambda text: int(text) if text.isdigit() else text
-    return [convert(c) for c in re.split('([0-9]+)', s)]
+    return [(int(c) if c.isdigit() else c) for c in re.split('([0-9]+)', s)]

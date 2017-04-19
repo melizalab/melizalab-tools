@@ -23,7 +23,12 @@ figshower:            plots a series of figures
 Copyright (C) 2010 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 Created 2010-08-06
 """
-import abc, os
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
+
+import abc
+import os
 from tools import consumer
 import matplotlib.pyplot as mplt
 
@@ -41,6 +46,7 @@ def figwriter(file_template, *args, **kwargs):
         fig.savefig(file_template % i, *args, **kwargs)
         mplt.close(fig)
         i += 1
+
 
 @consumer
 def figshower(prompt="Press Return for next figure:", *args, **kwargs):
@@ -86,6 +92,7 @@ class multifigure(object):
         """ Output data to file """
         pass
 
+
 class sequentialfigure(multifigure):
     """
     Write a series of figures to disk as separate files, named
@@ -115,6 +122,7 @@ class sequentialfigure(multifigure):
         self.fignum += 1
         if closefig:
             mplt.close(fig)
+
 
 class pdfpager(multifigure):
     """
@@ -194,9 +202,10 @@ class pdfplotter(multifigure):
 
         try:
             os.chdir(self._tdir)
-            print cmd
+            print(cmd)
             status = os.system(cmd)
-            if status > 0: raise IOError, "Error generating multipage PDF"
+            if status > 0:
+                raise IOError("Error generating multipage PDF")
         finally:
             os.chdir(pwd)
 
@@ -220,7 +229,7 @@ class texplotter(pdfplotter):
                      set to True to keep the figure
         additional options are passed to fig.savefig()
         """
-        if plotdims==None:
+        if plotdims is None:
             plotdims = tuple(fig.get_size_inches())
         figname = "texplotter_%03d.pdf" % len(self.figures)
         fig.savefig(os.path.join(self._tdir, figname), **kwargs)
@@ -242,7 +251,8 @@ class texplotter(pdfplotter):
         Non-text objects are rejected silently.  Use this function with caution
         or you may render the latex unparseable.
         """
-        if isinstance(text, basestring):
+        from six import string_types
+        if isinstance(text, string_types):
             self.figures.append(text)
 
     def flush(self, filename, margins=(0.5, 0.9)):
@@ -251,22 +261,24 @@ class texplotter(pdfplotter):
 
         filename - the file to save the pdf to
         """
+        from six import string_types
+        import shutil
 
         fp = open(os.path.join(self._tdir, 'texplotter.tex'), 'wt')
         fp.writelines(['\\documentclass[10pt,letterpaper]{article}\n',
                        '\\usepackage{graphics, epsfig}\n',
-                       '\\usepackage[top=%fin,bottom=%fin,left=%fin,right=%fin,nohead,nofoot]{geometry}' % \
+                       '\\usepackage[top=%fin,bottom=%fin,left=%fin,right=%fin,nohead,nofoot]{geometry}' %
                        (margins[1], margins[1], margins[0], margins[0]),
                        '\\setlength{\\parindent}{0in}\n',
                        '\\begin{document}\n',
                        '\\begin{center}\n'])
         for fig in self.figures:
-            if fig==None:
+            if fig is None:
                 fp.write('\\clearpage\n')
             elif isinstance(fig, list):
                 figname, plotdims = fig
-                fp.write('\\includegraphics[width=%fin,height=%fin]{%s}\n' % (plotdims +  (figname,)))
-            elif isinstance(fig, basestring):
+                fp.write('\\includegraphics[width=%fin,height=%fin]{%s}\n' % (plotdims + (figname,)))
+            elif isinstance(fig, string_types):
                 fp.write(fig)
 
         fp.write('\\end{center}\n\\end{document}\n')
@@ -277,9 +289,11 @@ class texplotter(pdfplotter):
         try:
             os.chdir(self._tdir)
             status = os.system(self._latex_cmd % 'texplotter.tex')
-            if status > 0 or not os.path.exists('texplotter.dvi'): raise IOError, "Latex command failed"
+            if status > 0 or not os.path.exists('texplotter.dvi'):
+                raise IOError("Latex command failed")
             status = os.system(self._pdf_cmd % 'texplotter.dvi')
-            if status > 0 or not os.path.exists('texplotter.pdf'): raise IOError, "dvipdf command failed"
+            if status > 0 or not os.path.exists('texplotter.pdf'):
+                raise IOError("dvipdf command failed")
             shutil.move('texplotter.pdf', filename)
         finally:
             os.chdir(pwd)

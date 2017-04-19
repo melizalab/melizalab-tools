@@ -58,8 +58,9 @@ Examples
 >>> import chebyfit
 
 """
-
-from __future__ import division, print_function, absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
 
 from dlab._chebyshev import forward_transform, inverse_transform, polynomials
 from dlab._chebyshev import normalization_factors, polynomial_roots

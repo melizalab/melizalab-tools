@@ -10,8 +10,12 @@ outer:          outer product of two vectors
 cov:            covariance of variables
 pca:            principal components analysis (via svd)
 """
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
 
-def gemm(a,b,alpha=1.,**kwargs):
+
+def gemm(a, b, alpha=1., **kwargs):
     """
     Wrapper for gemm in scipy.linalg.  Detects which precision to use,
     and alpha (result multiplier) is default 1.0.
@@ -31,10 +35,11 @@ def gemm(a,b,alpha=1.,**kwargs):
     set overwrite_c to 1 to use C's memory for output
     """
     from scipy.linalg import get_blas_funcs
-    _gemm,= get_blas_funcs(('gemm',),(a,b))
+    _gemm, = get_blas_funcs(('gemm',), (a, b))
     return _gemm(alpha, a, b, **kwargs)
 
-def outer(a,b,alpha=1.,**kwargs):
+
+def outer(a, b, alpha=1., **kwargs):
     """
     Calculates the outer product of two vectors. A wrapper for GER
     in the BLAS library.
@@ -47,7 +52,7 @@ def outer(a,b,alpha=1.,**kwargs):
     set overwrite_a to use A's memory for output
     """
     from scipy.linalg import get_blas_funcs
-    _ger, = get_blas_funcs(('ger',),(a,b))
+    _ger, = get_blas_funcs(('ger',), (a, b))
     return _ger(alpha, a, b, **kwargs)
 
 
@@ -70,22 +75,26 @@ def cov(m, trans=False, bias=False):
     X = array(m, ndmin=2)
     if not trans:
         axis = 0
-        tup = (slice(None),newaxis)
+        tup = (slice(None), newaxis)
     else:
         axis = 1
         tup = (newaxis, slice(None))
 
-    X -= X.mean(axis=1-axis)[tup]
-    if not trans: N = X.shape[1]
-    else: N = X.shape[0]
+    X -= X.mean(axis=1 - axis)[tup]
+    if not trans:
+        N = X.shape[1]
+    else:
+        N = X.shape[0]
 
-    if bias: fact = N*1.0
-    else: fact = N-1.0
+    if bias:
+        fact = N * 1.0
+    else:
+        fact = N - 1.0
 
     if not trans:
-        return gemm(X, X.conj(), alpha=1/fact, trans_b=1).squeeze()
+        return gemm(X, X.conj(), alpha=1 / fact, trans_b=1).squeeze()
     else:
-        return gemm(X, X.conj(), alpha=1/fact, trans_a=1).squeeze()
+        return gemm(X, X.conj(), alpha=1 / fact, trans_a=1).squeeze()
 
 
 def pca(data, output_dim=None):
@@ -101,8 +110,9 @@ def pca(data, output_dim=None):
     load:        loadings of first output_dim PCs
     """
     from scipy.linalg import svd
-    if output_dim==None: output_dim = data.shape[1]
+    if output_dim == None:
+        output_dim = data.shape[1]
     data = data - data.mean(0)
-    u,s,v = svd(data, full_matrices=0)
-    v = v[:output_dim,:]
+    u, s, v = svd(data, full_matrices=0)
+    v = v[:output_dim, :]
     return gemm(data, v, trans_b=1), v

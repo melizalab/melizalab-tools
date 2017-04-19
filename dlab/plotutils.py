@@ -35,6 +35,10 @@ drawoffscreen:               drop into non-interactive mode during a function
 
 Copyright (C) 2007-2010 Daniel Meliza <dmeliza@dylan.uchicago.edu>
 """
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
+
 import numpy as nx
 import matplotlib.pyplot as mplt
 import functools
@@ -43,12 +47,11 @@ import functools
 def expand_range(r, proportion=0.1):
     """
     Extends a range equally on either side. Nice for adding padding to axis limits.
-
     proportion:  the proportion to expand the range
     """
     s = sum(r)
-    p = (proportion/2., -proportion/2.)
-    return [a+s*b for a,b in zip(r,p)]
+    p = (proportion / 2., -proportion / 2.)
+    return [a + s * b for a, b in zip(r, p)]
 
 
 def raster(X, Y=0, ax=None, gap=0.2, **kwargs):
@@ -75,16 +78,13 @@ def raster(X, Y=0, ax=None, gap=0.2, **kwargs):
 
     for x, y in zip(X, Y):
         yy = y * nx.ones(len(x))
-        # ax.plot(x, yy, 'k|', **kwargs)
         ax.vlines(x, yy - 0.5 + gap, yy + 0.5 - gap, **kwargs)
-
-    # miny, maxy = ax.get_ylim()
-    # ax.set_ylim((miny - 0.5, maxy + 0.5))
 
     return ax.collections
 
 
 def adjust_raster_ticks(ax, gap=0):
+    """Adjust raster marks to have gap pixels between them (sort of)"""
     miny, maxy = ax.get_ylim()
     ht = ax.get_window_extent().height
     for p in ax.lines:
@@ -94,114 +94,98 @@ def adjust_raster_ticks(ax, gap=0):
 def bar(labels, values, width=0.5, sort_labels=False, **kwargs):
     """
     Produces a bar plot with string labels on the x-axis
-
     <kwargs> - passed to bar()
     """
-    assert len(labels)==len(values)
+    assert len(labels) == len(values)
     lbl = nx.asarray(labels)
     if sort_labels:
         ind = lbl.argsort()
         lbl.sort()
         values = values[ind]
-
-    x = nx.arange(lbl.size,dtype='f')+width
+    x = nx.arange(lbl.size, dtype='f') + width
     mplt.bar(x, values, **kwargs)
-    mplt.xticks(x+width/2, lbl.tolist())
+    mplt.xticks(x + width / 2, lbl.tolist())
 
 
 def dcontour(ax, *args, **kwargs):
     """
     Discrete contour function. Given a matrix I with a discrete number
     of unique levels, plots a contour at each unique level.
-
     DCONTOUR(axes, I) plots the unique levels in I
     DCONTOUR(axes, X,Y,I) - X,Y specify the (x,y) coordinates of the points in Z
-
     Optional arguments:
-
     smooth - specify a float or 2-ple of floats, which are used to gaussian filter
              each data level prior to contouring (which gives smoother contour lines)
     hold - if False (default), clears the axes prior to plotting
-
     Other keyword arguments are passed to contour()
     """
     from scipy.ndimage import gaussian_filter
     from itertools import izip
-
     smooth = kwargs.get('smooth', None)
-
     I = args[0]
     if len(args) > 1:
         (X, Y) = args[1:3]
     else:
         (Y, X) = (nx.arange(I.shape[0]), nx.arange(I.shape[1]))
-
-    labels = nx.unique(I[I>-1])
-
+    labels = nx.unique(I[I > -1])
     h = []
-    hold_previous = kwargs.get('hold',False)
+    hold_previous = kwargs.get('hold', False)
     if not hold_previous:
         ax.cla()
     ax.hold(1)
-    for i,color in izip(labels,colorcycle()):
-        if smooth!=None:
-            data = gaussian_filter((I==i).astype('d'), smooth)
+    for i, color in izip(labels, colorcycle()):
+        if smooth != None:
+            data = gaussian_filter((I == i).astype('d'), smooth)
         else:
-            data = I==i
-        hh = ax.contour(X, Y, data,1, colors=color, **kwargs)
+            data = I == i
+        hh = ax.contour(X, Y, data, 1, colors=color, **kwargs)
         h.append(hh)
     if not hold_previous:
         ax.hold(0)
-
     return h
 
 
-def waterfall(x, y, offsets=(0,0), ax=None, **kwargs):
+def waterfall(x, y, offsets=(0, 0), ax=None, **kwargs):
     """
     Make a cascade/waterfall plot with each curve successively offset
-
     x  - 1D or 2D array with x values (in columns)
     y  - 1D or 2D array with y values (in columns)
     offsets - (xo,yo) - x and y offsets for each new data set
     ax - target axes
-
     If one of x or y is 2D and the other 1D, the 1D data is used for each line.
     Otherwise, if x and y have unequal numbers of columns, only the
     fully-defined datasets are plotted.
-
     Returns LineCollection of plotted lines.
     """
     from matplotlib.collections import LineCollection
     from itertools import izip, repeat
     # do this with magical iterators
-    Nx = 1 if x.ndim==1 else x.shape[1]
-    Ny = 1 if y.ndim==1 else y.shape[1]
-
-    xit = x.T if Nx>1 else repeat(x,Ny)
-    yit = y.T if Ny>1 else repeat(y,Nx)
-    segs = [nx.column_stack((a,b)) for a,b in izip(xit, yit)]
-
+    Nx = 1 if x.ndim == 1 else x.shape[1]
+    Ny = 1 if y.ndim == 1 else y.shape[1]
+    xit = x.T if Nx > 1 else repeat(x, Ny)
+    yit = y.T if Ny > 1 else repeat(y, Nx)
+    segs = [nx.column_stack((a, b)) for a, b in izip(xit, yit)]
     col = LineCollection(segs, offsets=offsets, **kwargs)
-    if ax==None:
+    if ax == None:
         ax = mplt.axes()
     ax.add_collection(col)
     return col
 
 
-def err_shade(ax,x,y,y_up,y_low,alpha=0.5,**kwargs):
+def err_shade(ax, x, y, y_up, y_low, alpha=0.5, **kwargs):
     """
     Plot a series with error indicated by a shaded polygon.
-
     x,y:          coordinates of points (N-vectors)
     y_up, y_low:  upper and lower bounds of y (N-vectors)
     alpha:        alpha of polygonal region
-
     Additional arguments passed to plot
     """
-    ax.plot(x,y, **kwargs)
-    xs,ys = mplt.mlab.poly_between(x, y_low, y_up)
-    for k in ('lw','linewidth','alpha'): kwargs.pop(k,'')
+    ax.plot(x, y, **kwargs)
+    xs, ys = mplt.mlab.poly_between(x, y_low, y_up)
+    for k in ('lw', 'linewidth', 'alpha'):
+        kwargs.pop(k, '')
     ax.fill(xs, ys, lw=0, alpha=0.5, **kwargs)
+
 
 def specgram(x, NFFT=256, shift=128, Fs=1.0, drange=60,
              ax=None, cmap=mplt.cm.gray_r, **kwargs):

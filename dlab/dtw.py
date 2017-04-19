@@ -1,9 +1,7 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# -*- mode: python -*-
 """
-Dyname time warping.
-
-Dynamic time warping is a three-step algorithm.
+Dynamic time warping.
 
 1) Calculate a distance matrix for all the pairs of frames in the stimuli
 2) Calculate a cumulative distance matrix using dynamic programming - each
@@ -20,10 +18,15 @@ dtw:               main workhorse function
 pathlen:           calculate path length of dtw solution
 warpindex:         use dtw path to generate a warping index
 totcost:           the total cost (i.e. dissimilarity) of the warp
+
 CDM, 10/2008
 """
+from __future__ import division
+from __future__ import print_function
+from __future__ import absolute_import
 
-def dtw(M, C=([1, 1, 1.0],[0, 1, 1.0],[1, 0, 1.0])):
+
+def dtw(M, C=([1, 1, 1.0], [0, 1, 1.0], [1, 0, 1.0])):
     """
     Compute the minimum-cost path through a distance matrix using dynamic programming.
 
@@ -42,14 +45,15 @@ def dtw(M, C=([1, 1, 1.0],[0, 1, 1.0],[1, 0, 1.0])):
 
     Adapted from dpfast.m/dpcore.c, by Dan Ellis <dpwe@ee.columbia.edu>
     """
-    from numpy import asarray,isfinite,zeros,zeros_like
+    from numpy import asarray, isfinite, zeros, zeros_like
     from scipy import weave
 
     C = asarray(C, dtype=M.dtype)
 
-    assert C.ndim == 2 and C.shape[1]==3, "C must be an Nx3 array"
-    assert isfinite(M).sum()==M.size, "M can only contain finite values"
-    if M.min() < 0: print "Warning: M contins negative values"
+    assert C.ndim == 2 and C.shape[1] == 3, "C must be an Nx3 array"
+    assert isfinite(M).sum() == M.size, "M can only contain finite values"
+    if M.min() < 0:
+        print("Warning: M contins negative values")
 
     D = zeros_like(M)
     S = zeros(M.shape, dtype='i')
@@ -84,7 +88,7 @@ def dtw(M, C=([1, 1, 1.0],[0, 1, 1.0],[1, 0, 1.0])):
         }
     """
 
-    weave.inline(code, ['M','C','D','S'],
+    weave.inline(code, ['M', 'C', 'D', 'S'],
                  headers=['"blitz/numinquire.h"'],
                  type_converters=weave.converters.blitz)
 
@@ -94,13 +98,14 @@ def dtw(M, C=([1, 1, 1.0],[0, 1, 1.0],[1, 0, 1.0])):
     p = [i]
     q = [j]
     while i > 0 and j > 0:
-        tb = S[i,j]
-        i = i - C[tb,0]
-        j = j - C[tb,1]
+        tb = S[i, j]
+        i = i - C[tb, 0]
+        j = j - C[tb, 1]
         p.append(i)
         q.append(j)
 
     return asarray(p[::-1], dtype='i'), asarray(q[::-1], dtype='i'), D
+
 
 def pathlen(p, q):
     """
@@ -111,10 +116,10 @@ def pathlen(p, q):
     p:  steps through first signal
     q:  steps through second signal
     """
-    from numpy import diff,sqrt
+    from numpy import diff, sqrt
     P = diff(p)
     Q = diff(q)
-    return sqrt(P**2+Q**2).sum()
+    return sqrt(P**2 + Q**2).sum()
 
 
 def warpindex(S1, S2, p, q, forward=True):
@@ -122,16 +127,17 @@ def warpindex(S1, S2, p, q, forward=True):
     Generate an index vector for warping S1 to S2 (default) or
     S2 to S1 (forward=False)
     """
+    from numpy import zeros
     if not forward:
-        S2,S1 = S1,S2
-        q,p = p,q
+        S2, S1 = S1, S2
+        q, p = p, q
 
-    D2i1 = nx.zeros(S1.shape[1], dtype='i')
+    D2i1 = zeros(S1.shape[1], dtype='i')
     for i in range(D2i1.size):
-        D2i1[i] = q[ (p >= i).nonzero()[0].min() ]
+        D2i1[i] = q[(p >= i).nonzero()[0].min()]
 
     return D2i1
 
 
-def totcost(p,q,D):
-    return D[p[-1],q[-1]]
+def totcost(p, q, D):
+    return D[p[-1], q[-1]]
