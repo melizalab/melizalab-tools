@@ -3,3 +3,6 @@
 *.so
 *.pyc
 .ipynb_checkpoints/
+attic/
+venv/
+dist/

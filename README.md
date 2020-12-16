@@ -1,4 +1,4 @@
 
 ## dlab
 
-A collection of python code used by the Meliza Lab.
+A collection of python code and scripts used by the Meliza Lab.
