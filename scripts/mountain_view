@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -e
+
+DATASET=${1%/}
+
+qt-mountainview --raw ${DATASET}/raw.mda --filt ${DATASET}/filt.mda.prv --pre ${DATASET}/pre.mda.prv --samplerate 30000 --firings ${DATASET}/firings.mda
