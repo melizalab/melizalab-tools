@@ -13,6 +13,7 @@ Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 
 _schema = "https://meliza.org/spec:2/pprox.json#"
 
+
 def empty():
     """Returns a new, empty pprox object"""
     return from_trials([])

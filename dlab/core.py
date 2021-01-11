@@ -5,6 +5,10 @@ import logging
 import argparse
 
 def setup_log(log, debug=False):
+    """ Set up logging for a module.
+
+    log: generate by calling e.g. `log = logging.getLogger("dlab.extracellular")`
+    """
     ch = logging.StreamHandler()
     formatter = logging.Formatter("%(message)s")
     loglevel = logging.DEBUG if debug else logging.INFO
@@ -15,6 +19,10 @@ def setup_log(log, debug=False):
 
 
 class ParseKeyVal(argparse.Action):
+    """ argparse action for parsing -k key=value arguments
+
+    Example: p.add_argument("-k", action=ParseKeyVal, default=dict(), metavar="KEY=VALUE", dest="metadata")
+    """
 
     def parse_value(self, value):
         import ast
