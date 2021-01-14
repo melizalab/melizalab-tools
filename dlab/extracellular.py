@@ -1,16 +1,21 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Utilities for extracellular experiments """
+import os
 import re
 import json
 import logging
 import quickspikes as qs
+import nbank
+import numpy as np
+import h5py as h5
 
 from dlab import pprox
 
 log = logging.getLogger("dlab.extracellular")
 
 #### present-audio
+
 
 def audiolog_to_trials(trials, data_file, sync_dset="channel37", sync_thresh=1.0):
     """Parses a logfile from Margot's present_audio scripts for experiment structure
@@ -44,10 +49,10 @@ def audiolog_to_trials(trials, data_file, sync_dset="channel37", sync_thresh=1.0
         # find the sync signal - we expect one and only one click
         dset = entry[sync_dset]
         pproc["recording"] = {
-            "entry": pprox.wrap_uuid(entry.attrs["uuid"]),
+            "entry": entry_name,
             "start": int(sample_count),
             "stop": int(sample_count + dset.size),
-            "sampling_rate": dset.attrs["sampling_rate"]
+            "sampling_rate": dset.attrs["sampling_rate"],
         }
         sample_count += dset.size
         sync = dset[:].astype("d")
@@ -65,9 +70,7 @@ def audiolog_to_pprox_script(argv=None):
     import sys
     import argparse
     import json
-    import h5py as h5
-    import nbank
-    from dlab.core import setup_log
+    from dlab.util import setup_log, json_serializable
 
     p = argparse.ArgumentParser(
         description="generate pprox from trial structure in present_audio logfile"
@@ -96,10 +99,14 @@ def audiolog_to_pprox_script(argv=None):
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
+    resource_url = (nbank.full_url(args.recording),)
     datafile = nbank.get(args.recording, local_only=True)
     if datafile is None:
-        p.error("unable to locate resource %s - is it deposited in neurobank?" % args.recording)
-    log.info("%s -> '%s'", args.recording, datafile)
+        p.error(
+            "unable to locate resource %s - is it deposited in neurobank?"
+            % args.recording
+        )
+    log.info("loading recording from resource %s", resource_url)
 
     with h5.File(datafile, "r") as afp:
         with open(args.logfile, "rt") as lfp:
@@ -107,23 +114,33 @@ def audiolog_to_pprox_script(argv=None):
             trials = pprox.from_trials(
                 audiolog_to_trials(
                     expt_log.pop("presentation"), afp, args.sync, args.sync_thresh
-                )
+                ),
+                recording=resource_url,
+                **expt_log
             )
-            trials.update(expt_log)
-    json.dump(trials, args.output)
+    json.dump(trials, args.output, default=json_serializable)
+    if args.output != sys.stdout:
+        log.info("wrote trial data to '%s'", args.output.name)
+
 
 ############### oeaudio-present:
+
 
 def find_stim_dset(entry):
     """ Returns the first dataset that matches 'Network_Events.*_TEXT' """
     rex = re.compile(r"Network_Events-.*?TEXT")
     for name in entry:
         if rex.match(name) is not None:
-            log.debug("  - using %s for stim log dataset", name)
+            log.debug("  - stim log dataset: %s", name)
             return entry[name]
 
 
-def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0):
+def parse_stim_id(path):
+    """ Extracts the stimulus id from the path """
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0, prepad=1.0):
     """Extracts trial information from an oeaudio-present experiment ARF file
 
     When using oeaudio-present, a single recording is made in response to all
@@ -135,30 +152,40 @@ def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0):
     user remembers to record this channel, it can be used to correct the onset
     and offset values.
 
+    The continuous recording is broken up into trials based on the stimulus
+    presentation, such that each trial encompasses one and only one stimulus.
+    The `prepad` parameter specifies, in seconds, when trials begin relative to
+    stimulus onset. The default is 1.0 s.
+
     """
-    from arf import timestamp_to_float
+    import copy
+    from arf import timestamp_to_float, timestamp_to_datetime
 
     re_metadata = re.compile(r"metadata: (\{.*\})")
     re_start = re.compile(r"start (.*)")
     re_stop = re.compile(r"stop (.*)")
     expt_start = None
     index = 0
+    det = qs.detector(sync_thresh, 10)
     for name, entry in data_file.items():
-        log.info("- parsing trials in %s", entry)
+        log.info("- entry: '%s'", name)
         entry_time = timestamp_to_float(entry.attrs["timestamp"])
-        log.info("  - start time %s", entry_time)
+        log.info("  - start time: %s", timestamp_to_datetime(entry.attrs["timestamp"]))
         if expt_start is None:
             expt_start = entry_time
         sync = entry[sync_dset]
+        sampling_rate = sync.attrs["sampling_rate"]
+        log.info("  - detecting synchronization signals in '%s'", sync_dset)
+        sync_data = sync[:].astype("d")
+        det.scale_thresh(sync_data.mean(), sync_data.std())
+        stim_onsets = np.asarray(det(sync_data))
+        log.info("    - detected %d clicks", stim_onsets.size)
         stims = find_stim_dset(entry)
-        stim_sample_offset = int(sync.attrs["offset"] * sync.attrs["sampling_rate"])
-        log.info("  - recording starts at sample %d", stim_sample_offset)
+        stim_sample_offset = int(sync.attrs["offset"] * sampling_rate)
+        log.info("  - recording clock offset: %d", stim_sample_offset)
         pproc_base = {
             "events": [],
-            "recording": {
-                "trial": pprox.wrap_uuid(entry.attrs["uuid"])
-                "sampling_rate": sync.attrs["sampling_rate"]
-            }
+            "recording": {"entry": name, "sampling_rate": sampling_rate},
         }
         this_trial = None
         for row in stims:
@@ -174,41 +201,57 @@ def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0):
                 continue
             m = re_start.match(message)
             if m is not None:
-                this_trial = pproc_base.copy()
-                stim = m.group(1)
-                this_trial.update(
-                    stim=stim, index=index
-                )
-                this_trial["recording"]["start"] = time - stim_sample_offset
+                stim = parse_stim_id(m.group(1))
+                stim_on = time - stim_sample_offset
+                # adjust to next sync click
+                click_idx = stim_onsets.searchsorted(stim_on)
                 log.debug(
-                    "  - trial %d (%s): start @ %d samples",
-                    index, stim, time - stim_sample_offset
+                    "  - trial %d: stim onset adjusted by %d",
+                    index,
+                    stim_onsets[click_idx] - stim_on,
                 )
-                continue
-            m = re_stop.match(message)
-            if m is not None:
-                stim = m.group(1)
-                if this_trial is None or stim != this_trial["stim"]:
-                    log.error(
-                        "  - ERROR: stop event %s without matching start event",
-                        m.group(1),
-                    )
-                    this_trial = None
-                else:
-                    this_trial["recording"]["stop"] = time - stim_sample_offset
-                    log.debug(
-                        "  - trial %d (%s): stop  @ %d samples",
-                        index, stim, time - stim_sample_offset
-                    )
+                stim_on = stim_onsets[click_idx]
+                trial_on = stim_on - int(prepad * sampling_rate)
+                if this_trial is not None:
+                    this_trial["recording"]["stop"] = trial_on
                     index += 1
                     yield this_trial
+                this_trial = copy.deepcopy(pproc_base)
+                if trial_on < 0:
+                    raise ValueError(
+                        "start of trial %d (%012d samples) precedes recording onset - "
+                        "adjust prepad" % (index, trial_on)
+                    )
+                this_trial.update(
+                    stim=stim,
+                    index=index,
+                    offset=(entry_time - expt_start) + float(trial_on / sampling_rate),
+                    stim_on=(stim_on - trial_on) / sampling_rate
+                )
+                this_trial["recording"]["start"] = trial_on
+                log.debug(
+                    "  - trial %d: start @ %012d samples (stim %s @ %012d)",
+                    index,
+                    trial_on,
+                    stim,
+                    stim_on,
+                )
+                continue
+            # the stop messages are just monitored to ensure data consistency
+            m = re_stop.match(message)
+            if m is not None:
+                stim = parse_stim_id(m.group(1))
+                if this_trial is None or stim != this_trial["stim"]:
+                    log.warning(
+                        "  - WARNING: stop event %s without matching start event",
+                        m.group(1),
+                    )
 
 
 def oeaudio_to_pprox_script(argv=None):
     import sys
     import argparse
-    import h5py as h5
-    from dlab.core import setup_log
+    from dlab.util import setup_log, json_serializable
 
     p = argparse.ArgumentParser(
         description="generate pprox from trial structure in oeaudio-present recording"
@@ -224,17 +267,41 @@ def oeaudio_to_pprox_script(argv=None):
     p.add_argument(
         "--sync",
         default="sync",
-        help="name of channel with synchronization signal",
+        help="name of channel with synchronization signal (default %(default)s)",
     )
-    p.add_argument("datafile", help="ARF file with recording from the experiment")
+    p.add_argument(
+        "--prepad",
+        type=float,
+        default=1.0,
+        help="sets trial start time relative to stimulus onset (default %(default)0.1f s)",
+    )
+    p.add_argument(
+        "--sync-thresh",
+        default="30.0",
+        type=float,
+        help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
+    )
+    p.add_argument("recording", help="neurobank id or URL for the ARF recording")
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    with h5.File(args.datafile, "r") as afp:
-        for trial in oeaudio_to_trials(afp, args.sync):
-            if trial["index"] > 2:
-                break
+    resource_url = nbank.full_url(args.recording)
+    resource_info = nbank.describe(resource_url)
+    datafile = nbank.get(args.recording, local_only=True)
+    if datafile is None:
+        p.error(
+            "unable to locate resource %s - is it deposited in neurobank?"
+            % args.recording
+        )
+    log.info("loading recording from neurobank resource %s", resource_url)
 
 
-if __name__ == "__main__":
-    oeaudio_to_pprox_script()
+    with h5.File(datafile, "r") as afp:
+        trials = pprox.from_trials(
+            oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad),
+            recording=resource_url,
+            **resource_info["metadata"]
+        )
+    json.dump(trials, args.output, default=json_serializable)
+    if args.output != sys.stdout:
+        log.info("wrote trial data to '%s'", args.output.name)
