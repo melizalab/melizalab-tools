@@ -99,7 +99,7 @@ def audiolog_to_pprox_script(argv=None):
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    resource_url = (nbank.full_url(args.recording),)
+    resource_url = nbank.full_url(args.recording)
     datafile = nbank.get(args.recording, local_only=True)
     if datafile is None:
         p.error(
@@ -140,7 +140,7 @@ def parse_stim_id(path):
     return os.path.splitext(os.path.basename(path))[0]
 
 
-def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0, prepad=1.0):
+def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
     """Extracts trial information from an oeaudio-present experiment ARF file
 
     When using oeaudio-present, a single recording is made in response to all
@@ -173,20 +173,34 @@ def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0, prepad=1.0):
         log.info("  - start time: %s", timestamp_to_datetime(entry.attrs["timestamp"]))
         if expt_start is None:
             expt_start = entry_time
-        sync = entry[sync_dset]
-        sampling_rate = sync.attrs["sampling_rate"]
-        log.info("  - detecting synchronization signals in '%s'", sync_dset)
-        sync_data = sync[:].astype("d")
-        det.scale_thresh(sync_data.mean(), sync_data.std())
-        stim_onsets = np.asarray(det(sync_data))
-        log.info("    - detected %d clicks", stim_onsets.size)
+
+        if sync_dset is not None:
+            sync = entry[sync_dset]
+            log.info("  - sync track: '%s'", sync_dset)
+            sync_data = sync[:].astype("d")
+            det.scale_thresh(sync_data.mean(), sync_data.std())
+            stim_onsets = np.asarray(det(sync_data))
+            log.info("    - detected %d clicks", stim_onsets.size)
+            dset_offset = sync.attrs["offset"]
+        else:
+            log.info("  - proceeding without sync track", sync_dset)
+            # find offset in other channels:
+            dset_offset = 0
+            for dname, dset in entry.items():
+                if "offset" in dset.attrs:
+                    dset_offset = dset.attrs["offset"]
+                    log.info("    - got clock offset from '%s'", dname)
+                    break
+
         stims = find_stim_dset(entry)
-        stim_sample_offset = int(sync.attrs["offset"] * sampling_rate)
+        sampling_rate = stims.attrs["sampling_rate"]
+        stim_sample_offset = int(dset_offset * sampling_rate)
         log.info("  - recording clock offset: %d", stim_sample_offset)
         pproc_base = {
             "events": [],
             "recording": {"entry": name, "sampling_rate": sampling_rate},
         }
+
         this_trial = None
         for row in stims:
             time = row["start"]
@@ -204,13 +218,14 @@ def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0, prepad=1.0):
                 stim = parse_stim_id(m.group(1))
                 stim_on = time - stim_sample_offset
                 # adjust to next sync click
-                click_idx = stim_onsets.searchsorted(stim_on)
-                log.debug(
-                    "  - trial %d: stim onset adjusted by %d",
-                    index,
-                    stim_onsets[click_idx] - stim_on,
-                )
-                stim_on = stim_onsets[click_idx]
+                if sync_dset is not None:
+                    click_idx = stim_onsets.searchsorted(stim_on)
+                    log.debug(
+                        "  - trial %d: stim onset adjusted by %d",
+                        index,
+                        stim_onsets[click_idx] - stim_on,
+                    )
+                    stim_on = stim_onsets[click_idx]
                 trial_on = stim_on - int(prepad * sampling_rate)
                 if this_trial is not None:
                     this_trial["recording"]["stop"] = trial_on
@@ -270,6 +285,11 @@ def oeaudio_to_pprox_script(argv=None):
         help="name of channel with synchronization signal (default %(default)s)",
     )
     p.add_argument(
+        "--no-sync",
+        action="store_true",
+        help="determine stimulus onset without a sync track",
+    )
+    p.add_argument(
         "--prepad",
         type=float,
         default=1.0,
@@ -281,20 +301,34 @@ def oeaudio_to_pprox_script(argv=None):
         type=float,
         help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
     )
+    p.add_argument(
+        "--no-neurobank",
+        action="store_true",
+        help="load recording file directly rather than from neurobank. For debugging only"
+    )
     p.add_argument("recording", help="neurobank id or URL for the ARF recording")
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    resource_url = nbank.full_url(args.recording)
-    resource_info = nbank.describe(resource_url)
-    datafile = nbank.get(args.recording, local_only=True)
-    if datafile is None:
-        p.error(
-            "unable to locate resource %s - is it deposited in neurobank?"
-            % args.recording
-        )
-    log.info("loading recording from neurobank resource %s", resource_url)
+    if args.no_neurobank:
+        resource_url = "file://" + args.recording
+        datafile = args.recording
+        resource_info = {"metadata": {}}
+        log.info(" - source file: '%s'", args.recording)
+    else:
+        resource_url = nbank.full_url(args.recording)
+        resource_info = nbank.describe(resource_url)
+        datafile = nbank.get(args.recording, local_only=True)
+        if datafile is None:
+            p.error(
+                "unable to locate resource %s - is it deposited in neurobank?"
+                % args.recording
+            )
+        log.info(" - source resource: %s", resource_url)
 
+    if args.no_sync:
+        args.sync = None
+        log.warning(" - warning: not using a sync track!")
 
     with h5.File(datafile, "r") as afp:
         trials = pprox.from_trials(
