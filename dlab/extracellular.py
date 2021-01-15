@@ -14,6 +14,12 @@ from dlab import pprox
 
 log = logging.getLogger("dlab.extracellular")
 
+#### general
+
+def entry_time(entry):
+    from arf import timestamp_to_float
+    return timestamp_to_float(entry.attrs["timestamp"])
+
 #### present-audio
 
 
@@ -42,10 +48,10 @@ def audiolog_to_trials(trials, data_file, sync_dset="channel37", sync_thresh=1.0
         entry = data_file[entry_name]
 
         # get time relative to first trial
-        entry_time = timestamp_to_float(entry.attrs["timestamp"])
+        time = entry_time(entry)
         if expt_start is None:
-            expt_start = entry_time
-        pproc["offset"] = entry_time - expt_start
+            expt_start = time
+        pproc["offset"] = time - expt_start
         # find the sync signal - we expect one and only one click
         dset = entry[sync_dset]
         pproc["recording"] = {
@@ -161,18 +167,17 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
     import copy
     from arf import timestamp_to_float, timestamp_to_datetime
 
-    re_metadata = re.compile(r"metadata: (\{.*\})")
     re_start = re.compile(r"start (.*)")
     re_stop = re.compile(r"stop (.*)")
     expt_start = None
     index = 0
     det = qs.detector(sync_thresh, 10)
-    for name, entry in data_file.items():
-        log.info("- entry: '%s'", name)
-        entry_time = timestamp_to_float(entry.attrs["timestamp"])
+    for entry_num, entry in enumerate(sorted(data_file.values(), key=entry_time)):
+        log.info("- entry: '%s'", entry.name)
+        entry_start = entry_time(entry)
         log.info("  - start time: %s", timestamp_to_datetime(entry.attrs["timestamp"]))
         if expt_start is None:
-            expt_start = entry_time
+            expt_start = entry_start
 
         if sync_dset is not None:
             sync = entry[sync_dset]
@@ -198,21 +203,13 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
         log.info("  - recording clock offset: %d", stim_sample_offset)
         pproc_base = {
             "events": [],
-            "recording": {"entry": name, "sampling_rate": sampling_rate},
+            "recording": {"entry": entry_num},
         }
 
         this_trial = None
         for row in stims:
             time = row["start"]
             message = row["message"].decode("utf-8")
-            m = re_metadata.match(message)
-            try:
-                metadata = json.loads(m.group(1))
-            except (AttributeError, json.JSONDecodeError):
-                pass
-            else:
-                pproc_base.update(metadata)
-                continue
             m = re_start.match(message)
             if m is not None:
                 stim = parse_stim_id(m.group(1))
@@ -240,7 +237,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                 this_trial.update(
                     stim=stim,
                     index=index,
-                    offset=(entry_time - expt_start) + float(trial_on / sampling_rate),
+                    offset=(entry_start - expt_start) + float(trial_on / sampling_rate),
                     stim_on=(stim_on - trial_on) / sampling_rate
                 )
                 this_trial["recording"]["start"] = trial_on
@@ -261,6 +258,27 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                         "  - WARNING: stop event %s without matching start event",
                         m.group(1),
                     )
+                continue
+            log.debug(" - skipping message at sample %d: '%s'", time, message)
+
+
+def entry_metadata(data_file):
+    re_metadata = re.compile(r"metadata: (\{.*\})")
+    for entry_num, entry in enumerate(sorted(data_file.values(), key=entry_time)):
+        stims = find_stim_dset(entry)
+        for row in stims:
+            time = row["start"]
+            message = row["message"].decode("utf-8")
+            m = re_metadata.match(message)
+            try:
+                metadata = json.loads(m.group(1))
+            except (AttributeError, json.JSONDecodeError):
+                pass
+            else:
+                metadata.update(name=entry.name,
+                                sampling_rate=stims.attrs["sampling_rate"])
+                yield metadata
+
 
 
 def oeaudio_to_pprox_script(argv=None):
@@ -336,6 +354,8 @@ def oeaudio_to_pprox_script(argv=None):
             recording=resource_url,
             **resource_info["metadata"]
         )
+        trials["entry_metadata"] = tuple(entry_metadata(afp))
+
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:
         log.info("wrote trial data to '%s'", args.output.name)
