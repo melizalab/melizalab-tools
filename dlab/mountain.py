@@ -41,37 +41,6 @@ def assign_events(pprox, events):
     return clusters
 
 
-def assign_events_sorted(pprox, events):
-    """Assign events to trials within a pprox based on recording time.
-
-    trials: an iterable list of pproc objects, sorted in order of time. Each
-    object must have a "recording" field that contains "start" and "stop"
-    subfields. The values of these fields must indicate the start and stop time
-    of the trial.
-
-    """
-    import pandas as pd
-    from copy import deepcopy
-    E = pd.DataFrame(events, columns=("channel", "time", "cluster")).set_index("cluster")
-    clusters = E.index.unique().sort_values()
-
-    for clust in clusters:
-        data = deepcopy(pprox)
-        trial_iter = enumerate(data["pprox"])
-        index, trial = next(trial_iter)
-        for cluster, row in E.loc[clust].iterrows():
-            if row.time < trial["recording"]["start"]:
-                log.warning("spike at %d is before the start of trial %d", row.time, index)
-            while row.time > trial["recording"]["stop"]:
-                index, trial = next(trial_iter)
-            t_seconds = (
-                (row.time - trial["recording"]["start"]) / trial["recording"]["sampling_rate"]
-            )
-            trial["events"].append(t_seconds)
-        data.update(cluster=clust,
-                    channel=row.channel)
-        yield data
-
 if __name__=="__main__":
     import json
     from arfx import mdaio
