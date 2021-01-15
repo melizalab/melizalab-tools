@@ -42,6 +42,27 @@ def assign_events(pprox, events):
     return clusters
 
 
+def aggregate_events(pprox, use_recording=False):
+    """Aggregate all the events in a pprox into a single array.
+
+    This function is primarily used for testing, as this should be the reverse
+    operation to assign_events, assuming no gaps in the recording. If there are
+    gaps, then set `use_recording` to True.
+
+    """
+    import numpy as np
+    all_events = []
+    for trial in pprox["pprox"]:
+        sampling_rate = trial["recording"]["sampling_rate"]
+        events = np.asarray(trial["events"])
+        if use_recording:
+            events = (events * sampling_rate).astype("i8") + trial["recording"]["start"]
+        else:
+            events = ((events + trial["offset"]) * sampling_rate).astype("i8")
+        all_events.append(events)
+    return np.concatenate(all_events)
+
+
 def group_spikes_script(argv=None):
     import nbank
     import argparse
