@@ -188,7 +188,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
             log.info("    - detected %d clicks", stim_onsets.size)
             dset_offset = sync.attrs["offset"]
         else:
-            log.info("  - proceeding without sync track", sync_dset)
+            log.info("  - proceeding without sync track")
             # find offset in other channels:
             dset_offset = 0
             for dname, dset in entry.items():
