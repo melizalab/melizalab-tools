@@ -9,8 +9,16 @@ from dlab import core, __version__
 
 log = logging.getLogger('dlab.mountain')
 
-def load_spikes(path):
-    """Loads spike time data from an mda file and wrangles it into pandas """
+
+def trial_iterator(pprox):
+    """ Iterates through trials in pprox, yielding (index, trial) """
+    for i, trial in enumerate(pprox["pprox"]):
+        # annotate with sampling rate
+        if "sampling_rate" not in trial["recording"]:
+            entry = trial["recording"]["entry"]
+            sampling_rate = pprox["entry_metadata"][entry]["sampling_rate"]
+            trial["recording"]["sampling_rate"] = sampling_rate
+        yield i, trial
 
 
 def assign_events(pprox, events):
@@ -25,14 +33,22 @@ def assign_events(pprox, events):
     from copy import deepcopy
 
     clusters = {}
-    trial_iter = enumerate(pprox["pprox"])
+    trial_iter = trial_iterator(pprox)
     index, trial = next(trial_iter)
     for channel, time, clust in events:
         if time < trial["recording"]["start"]:
-            log.debug("spike at %d is before the start of trial %d", time, index)
+            log.warning("warning: spike at %d is before the start of trial %d", time, index)
             continue
         while time > trial["recording"]["stop"]:
-            index, trial = next(trial_iter)
+            try:
+                index, trial = next(trial_iter)
+            except StopIteration:
+                log.warning(
+                    "warning: spike at %d is after the end of the last trial (%d samples)",
+                    time,
+                    trial["recording"]["stop"],
+                )
+                break
         t_seconds = (time - trial["recording"]["start"]) / trial["recording"]["sampling_rate"]
         if clust not in clusters:
             cluster = deepcopy(pprox)

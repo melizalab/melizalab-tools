@@ -192,6 +192,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
             stim_onsets = np.asarray(det(sync_data))
             log.info("    - detected %d clicks", stim_onsets.size)
             dset_offset = sync.attrs["offset"]
+            dset_end = sync.size
         else:
             log.info("  - proceeding without sync track")
             # find offset in other channels:
@@ -199,6 +200,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
             for dname, dset in entry.items():
                 if "offset" in dset.attrs:
                     dset_offset = dset.attrs["offset"]
+                    dset_end = dset.size
                     log.info("    - got clock offset from '%s'", dname)
                     break
 
@@ -265,7 +267,10 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                     )
                 continue
             log.debug(" - skipping message at sample %d: '%s'", time, message)
-
+        # need to emit the last trial
+        if this_trial is not None and "stop" not in this_trial["recording"]:
+            this_trial["recording"]["stop"] = dset_end
+            yield this_trial
 
 def entry_metadata(data_file):
     re_metadata = re.compile(r"metadata: (\{.*\})")
@@ -309,7 +314,7 @@ def oeaudio_to_pprox_script(argv=None):
     p.add_argument(
         "--sync",
         default="sync",
-        help="name of channel with synchronization signal (default %(default)s)",
+        help="name of channel with synchronization signal (default '%(default)s')",
     )
     p.add_argument(
         "--no-sync",
@@ -324,7 +329,7 @@ def oeaudio_to_pprox_script(argv=None):
     )
     p.add_argument(
         "--sync-thresh",
-        default="30.0",
+        default=30.0,
         type=float,
         help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
     )
