@@ -16,9 +16,12 @@ log = logging.getLogger("dlab.extracellular")
 
 #### general
 
+
 def entry_time(entry):
     from arf import timestamp_to_float
+
     return timestamp_to_float(entry.attrs["timestamp"])
+
 
 def iter_entries(data_file):
     """ Iterate through the entries in an arf file in order of time """
@@ -82,6 +85,7 @@ def audiolog_to_pprox_script(argv=None):
     import argparse
     import json
     from dlab.util import setup_log, json_serializable
+
     __version__ = "0.1.0"
 
     p = argparse.ArgumentParser(
@@ -238,6 +242,16 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                 trial_on = stim_on - int(prepad * sampling_rate)
                 if this_trial is not None:
                     this_trial["recording"]["stop"] = trial_on
+                    first_click_idx = stim_onsets.searchsorted(
+                        this_trial["recording"]["start"]
+                    )
+                    last_click_idx = stim_onsets.searchsorted(
+                        this_trial["recording"]["stop"]
+                    )
+                    this_trial["events"] = (
+                        stim_onsets[first_click_idx:last_click_idx]
+                        - this_trial["recording"]["start"]
+                    ) / sampling_rate
                     index += 1
                     yield this_trial
                 this_trial = copy.deepcopy(pproc_base)
@@ -250,7 +264,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                     stim=stim,
                     index=index,
                     offset=(entry_start - expt_start) + float(trial_on / sampling_rate),
-                    stim_on=(stim_on - trial_on) / sampling_rate
+                    stim_on=(stim_on - trial_on) / sampling_rate,
                 )
                 this_trial["recording"]["start"] = trial_on
                 log.debug(
@@ -275,6 +289,16 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
         # need to emit the last trial
         if this_trial is not None and "stop" not in this_trial["recording"]:
             this_trial["recording"]["stop"] = dset_end
+            first_click_idx = stim_onsets.searchsorted(
+                this_trial["recording"]["start"]
+            )
+            last_click_idx = stim_onsets.searchsorted(
+                this_trial["recording"]["stop"]
+            )
+            this_trial["events"] = (
+                stim_onsets[first_click_idx:last_click_idx]
+                - this_trial["recording"]["start"]
+            ) / sampling_rate
             yield this_trial
 
 
@@ -297,8 +321,7 @@ def entry_metadata(entry):
         except (AttributeError, json.JSONDecodeError):
             pass
         else:
-            metadata.update(name=entry.name,
-                            sampling_rate=stims.attrs["sampling_rate"])
+            metadata.update(name=entry.name, sampling_rate=stims.attrs["sampling_rate"])
             return metadata
 
 
@@ -306,6 +329,7 @@ def oeaudio_to_pprox_script(argv=None):
     import sys
     import argparse
     from dlab.util import setup_log, json_serializable
+
     __version__ = "0.1.0"
 
     p = argparse.ArgumentParser(
@@ -347,7 +371,7 @@ def oeaudio_to_pprox_script(argv=None):
     p.add_argument(
         "--no-neurobank",
         action="store_true",
-        help="load recording file directly rather than from neurobank. For debugging only"
+        help="load recording file directly rather than from neurobank. For debugging only",
     )
     p.add_argument("recording", help="neurobank id or URL for the ARF recording")
     args = p.parse_args(argv)
@@ -380,7 +404,9 @@ def oeaudio_to_pprox_script(argv=None):
             processed_by=["{} {}".format(p.prog, __version__)],
             **resource_info["metadata"]
         )
-        trials["entry_metadata"] = tuple(entry_metadata(e) for _, e in iter_entries(afp))
+        trials["entry_metadata"] = tuple(
+            entry_metadata(e) for _, e in iter_entries(afp)
+        )
 
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:

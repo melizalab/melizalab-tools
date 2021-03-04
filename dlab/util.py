@@ -58,3 +58,9 @@ def json_serializable(val):
 def __js_numpy(val):
     """Used if *val* is an instance of a numpy scalar."""
     return val.item()
+
+
+@json_serializable.register(np.ndarray)
+def __js_numpy_arr(arr):
+    """Used if *arr* is an instance of a numpy array."""
+    return arr.tolist()
