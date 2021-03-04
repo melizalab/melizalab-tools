@@ -20,6 +20,11 @@ def entry_time(entry):
     from arf import timestamp_to_float
     return timestamp_to_float(entry.attrs["timestamp"])
 
+def iter_entries(data_file):
+    """ Iterate through the entries in an arf file in order of time """
+    return enumerate(sorted(data_file.values(), key=entry_time))
+
+
 #### present-audio
 
 
@@ -177,7 +182,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
     expt_start = None
     index = 0
     det = qs.detector(sync_thresh, 10)
-    for entry_num, entry in enumerate(sorted(data_file.values(), key=entry_time)):
+    for entry_num, entry in iter_entries(data_file):
         log.info("- entry: '%s'", entry.name)
         entry_start = entry_time(entry)
         log.info("  - start time: %s", timestamp_to_datetime(entry.attrs["timestamp"]))
@@ -272,23 +277,29 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
             this_trial["recording"]["stop"] = dset_end
             yield this_trial
 
-def entry_metadata(data_file):
-    re_metadata = re.compile(r"metadata: (\{.*\})")
-    for entry_num, entry in enumerate(sorted(data_file.values(), key=entry_time)):
-        stims = find_stim_dset(entry)
-        for row in stims:
-            time = row["start"]
-            message = row["message"].decode("utf-8")
-            m = re_metadata.match(message)
-            try:
-                metadata = json.loads(m.group(1))
-            except (AttributeError, json.JSONDecodeError):
-                pass
-            else:
-                metadata.update(name=entry.name,
-                                sampling_rate=stims.attrs["sampling_rate"])
-                yield metadata
 
+def entry_metadata(entry):
+    """Extracts metadata from an entry in an oeaudio-present experiment ARF file.
+
+    Metadata are passed to open-ephys through the network events socket as a
+    json-encoded dictionary. There should be one and only one metadata message
+    per entry, so only the first is returned.
+
+    """
+    re_metadata = re.compile(r"metadata: (\{.*\})")
+    stims = find_stim_dset(entry)
+    for row in stims:
+        time = row["start"]
+        message = row["message"].decode("utf-8")
+        m = re_metadata.match(message)
+        try:
+            metadata = json.loads(m.group(1))
+        except (AttributeError, json.JSONDecodeError):
+            pass
+        else:
+            metadata.update(name=entry.name,
+                            sampling_rate=stims.attrs["sampling_rate"])
+            return metadata
 
 
 def oeaudio_to_pprox_script(argv=None):
@@ -369,7 +380,7 @@ def oeaudio_to_pprox_script(argv=None):
             processed_by=["{} {}".format(p.prog, __version__)],
             **resource_info["metadata"]
         )
-        trials["entry_metadata"] = tuple(entry_metadata(afp))
+        trials["entry_metadata"] = tuple(entry_metadata(e) for _, e in iter_entries(afp))
 
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:
