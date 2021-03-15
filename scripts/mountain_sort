@@ -28,5 +28,10 @@ echo "${DATASET} - computing templates"
 ml-run-process ephys.compute_templates \
         --inputs timeseries:${DATASET}/raw.mda firings:${DATASET}/firings.mda \
         --outputs templates_out:${DATASET}/templates.mda.prv \
-        --parameters \
-                clip_size:150
+        --parameters clip_size:150
+
+echo "${DATASET} - computing cluster metrics"
+ml-run-process ephys.compute_cluster_metrics \
+        --inputs timeseries:${DATASET}/pre.mda.prv firings:${DATASET}/firings.mda \
+        --outputs metrics_out:${DATASET}/metrics.json \
+        --parameters clip_size:150 samplerate:30000 refrac_msec:1.0

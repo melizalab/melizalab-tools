@@ -4,4 +4,4 @@ set -e
 
 DATASET=${1%/}
 
-qt-mountainview --raw ${DATASET}/raw.mda --filt ${DATASET}/filt.mda.prv --pre ${DATASET}/pre.mda.prv --samplerate 30000 --firings ${DATASET}/firings.mda
+qt-mountainview --raw ${DATASET}/raw.mda --filt ${DATASET}/filt.mda.prv --pre ${DATASET}/pre.mda.prv --samplerate 30000 --firings ${DATASET}/firings.mda --cluster_metrics ${DATASET}/metrics.json --geom ${DATASET}/geom.csv --templates ${DATASET}/templates.mda.prv
