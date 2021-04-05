@@ -2,3 +2,5 @@ quickspikes
 toelis
 ewave
 arf
+numpy
+pandas
