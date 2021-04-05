@@ -11,7 +11,7 @@ ml-run-process ephys.bandpass_filter \
         --parameters samplerate:30000 freq_min:300 freq_max:6000
 ml-run-process ephys.whiten \
         --inputs timeseries:${DATASET}/filt.mda.prv \
-        --outputs timeseries_out:${DATASET}/pre.mda.prv
+        --outputs timeseries_out:${DATASET}/pre.mda.prv \
 
 echo "${DATASET} - sorting spikes"
 ml-run-process ms4alg.sort \
@@ -20,18 +20,57 @@ ml-run-process ms4alg.sort \
         --outputs \
                 firings_out:${DATASET}/firings.mda \
         --parameters \
-                detect_sign:1 \
+                detect_sign:-1 \
                 adjacency_radius:-1 \
                 detect_threshold:3
 
+echo "${DATASET} - computing cluster metrics"
+ml-run-process ms3.isolation_metrics \
+        --inputs timeseries:${DATASET}/pre.mda.prv firings:${DATASET}/firings.mda \
+        --outputs metrics_out:${DATASET}/metrics_isolation.json \
+        --parameters compute_bursting_parents:'true'
+
+ml-run-process ms3.cluster_metrics \
+        --inputs timeseries:${DATASET}/raw.mda firings:${DATASET}/firings.mda \
+        --outputs cluster_metrics_out:${DATASET}/metrics_cluster.json \
+        --parameters samplerate:30000
+
+ml-run-process ms3.combine_cluster_metrics \
+        --inputs metrics_list:${DATASET}/metrics_cluster.json metrics_list:${DATASET}/metrics_isolation.json \
+        --outputs metrics_out:${DATASET}/metrics.json
+
+# Auto curation
+echo "${DATASET} - curating clusters"
+ml-run-process ms4alg.create_label_map \
+        --inputs \
+                metrics:${DATASET}/metrics.json \
+        --outputs \
+                label_map_out:${DATASET}/label_map.mda \
+
+ml-run-process ms4alg.apply_label_map \
+        --inputs \
+                label_map:${DATASET}/label_map.mda \
+                firings:${DATASET}/firings.mda \
+        --outputs \
+                firings_out:${DATASET}/firings_curated.mda \
+
+echo "${DATASET} - computing curated cluster metrics"
+ml-run-process ms3.isolation_metrics \
+        --inputs timeseries:${DATASET}/pre.mda.prv firings:${DATASET}/firings_curated.mda \
+        --outputs metrics_out:${DATASET}/metrics_curated_isolation.json \
+        --parameters compute_bursting_parents:'true'
+
+ml-run-process ms3.cluster_metrics \
+        --inputs timeseries:${DATASET}/raw.mda firings:${DATASET}/firings_curated.mda \
+        --outputs cluster_metrics_out:${DATASET}/metrics_curated_cluster.json \
+        --parameters samplerate:30000
+
+ml-run-process ms3.combine_cluster_metrics \
+        --inputs metrics_list:${DATASET}/metrics_curated_cluster.json metrics_list:${DATASET}/metrics_curated_isolation.json \
+        --outputs metrics_out:${DATASET}/metrics_curated.json
+
 echo "${DATASET} - computing templates"
 ml-run-process ephys.compute_templates \
-        --inputs timeseries:${DATASET}/raw.mda firings:${DATASET}/firings.mda \
-        --outputs templates_out:${DATASET}/templates.mda.prv \
-        --parameters clip_size:150
-
-echo "${DATASET} - computing cluster metrics"
-ml-run-process ephys.compute_cluster_metrics \
-        --inputs timeseries:${DATASET}/pre.mda.prv firings:${DATASET}/firings.mda \
-        --outputs metrics_out:${DATASET}/metrics.json \
-        --parameters clip_size:150 samplerate:30000 refrac_msec:1.0
+        --inputs timeseries:${DATASET}/raw.mda firings:${DATASET}/firings_curated.mda \
+        --outputs templates_out:${DATASET}/templates_curated.mda.prv \
+        --parameters clip_size:100

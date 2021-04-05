@@ -330,7 +330,7 @@ def oeaudio_to_pprox_script(argv=None):
     import argparse
     from dlab.util import setup_log, json_serializable
 
-    __version__ = "0.1.0"
+    __version__ = "2021.03.01"
 
     p = argparse.ArgumentParser(
         description="generate pprox from trial structure in oeaudio-present recording"
@@ -369,29 +369,31 @@ def oeaudio_to_pprox_script(argv=None):
         help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
     )
     p.add_argument(
-        "--no-neurobank",
-        action="store_true",
-        help="load recording file directly rather than from neurobank. For debugging only",
+        "--local",
+        help="load recording from local file rather than from neurobank",
     )
     p.add_argument("recording", help="neurobank id or URL for the ARF recording")
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    if args.no_neurobank:
-        resource_url = "file://" + args.recording
-        datafile = args.recording
-        resource_info = {"metadata": {}}
-        log.info(" - source file: '%s'", args.recording)
+    resource_url = nbank.full_url(args.recording)
+    log.info(" - source resource: %s", resource_url)
+    resource_info = nbank.describe(resource_url)
+    if args.local:
+        from nbank import util
+        datafile = args.local
+        log.info(" - using local file %s (checking hash)", datafile)
+        file_hash = util.hash(datafile)
+        if resource_info["sha1"] != file_hash:
+            p.error("sha1 for local file does not match resource")
+        log.info("   ✓ %s", file_hash)
     else:
-        resource_url = nbank.full_url(args.recording)
-        resource_info = nbank.describe(resource_url)
         datafile = nbank.get(args.recording, local_only=True)
         if datafile is None:
             p.error(
                 "unable to locate resource %s - is it deposited in neurobank?"
                 % args.recording
             )
-        log.info(" - source resource: %s", resource_url)
 
     if args.no_sync:
         args.sync = None
@@ -410,4 +412,4 @@ def oeaudio_to_pprox_script(argv=None):
 
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:
-        log.info("wrote trial data to '%s'", args.output.name)
+        log.info(" ✓ wrote trial data to '%s'", args.output.name)
