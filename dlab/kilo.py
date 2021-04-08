@@ -69,7 +69,7 @@ def group_spikes_script(argv=None):
     import json
     from dlab.util import setup_log, json_serializable
 
-    __version__ = "0.1.0"
+    __version__ = "2021.04.08"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -129,14 +129,22 @@ def group_spikes_script(argv=None):
     total_spikes = 0
     total_clusters = 0
     for clust_id, cluster in clusters.items():
-        clust_type = info.loc[clust_id]['group']
-        # annotate with cluster info
+        clust_info = info.loc[clust_id]
+        clust_type = clust_info['group']
         n_spikes = sum(len(t["events"]) for t in cluster["pprox"])
         if clust_type == "noise" or (clust_type == "mua" and not args.mua):
             log.info("  - cluster %d (%d spikes, %s) -> skipped", clust_id, n_spikes, clust_type)
             continue
         total_spikes += n_spikes
         total_clusters += 1
+        # annotate with cluster info
+        cluster.update(
+            kilosort_amplitude=clust_info["Amplitude"],
+            kilosort_contam_pct=clust_info["ContamPct"],
+            kilosort_source_channel=clust_info["ch"],
+            kilosort_probe_depth=clust_info["depth"],
+            kilosort_n_spikes=clust_info["n_spikes"],
+        )
         outfile = os.path.join(
             args.output or "", "{}_c{}.pprox".format(args.name, clust_id)
         )
