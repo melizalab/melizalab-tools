@@ -19,7 +19,6 @@ log = logging.getLogger("dlab.extracellular")
 
 def entry_time(entry):
     from arf import timestamp_to_float
-
     return timestamp_to_float(entry.attrs["timestamp"])
 
 
@@ -193,6 +192,9 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
         if expt_start is None:
             expt_start = entry_start
 
+        stims = find_stim_dset(entry)
+        sampling_rate = stims.attrs["sampling_rate"]
+
         if sync_dset is not None:
             sync = entry[sync_dset]
             log.info("  - sync track: '%s'", sync_dset)
@@ -202,6 +204,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
             log.info("    - detected %d clicks", stim_onsets.size)
             dset_offset = sync.attrs["offset"]
             dset_end = sync.size
+            sampling_rate = sync.attrs["sampling_rate"]
         else:
             log.info("  - proceeding without sync track")
             # find offset in other channels:
@@ -213,8 +216,6 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                     log.info("    - got clock offset from '%s'", dname)
                     break
 
-        stims = find_stim_dset(entry)
-        sampling_rate = stims.attrs["sampling_rate"]
         stim_sample_offset = int(dset_offset * sampling_rate)
         log.info("  - recording clock offset: %d", stim_sample_offset)
         pproc_base = {
