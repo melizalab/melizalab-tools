@@ -12,6 +12,16 @@ from dlab import core, __version__
 log = logging.getLogger("dlab.kilo")
 
 
+def assign_events_flat(event_times, event_clusts, sampling_rate):
+    """Assign event_times to clusters, generating a large toelis object"""
+    from collections import defaultdict
+    tl = defaultdict(list)
+    for time, clust in zip(event_times, event_clusts):
+        tl[clust].append(time / sampling_rate * 1000.)
+    max_clust = max(tl.keys())
+    return [np.asarray(tl[i]) for i in range(max_clust + 1)]
+
+
 def assign_events(pprox, event_times, event_clusts, warn_unassigned=False):
     """Assign event_times to trials within a pprox based on recording time.
 
@@ -79,6 +89,11 @@ def group_spikes_script(argv=None):
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(
+        "--toelis",
+        action="store_true",
+        help="output toelis instead of pprox. one file will be generated for the entire recording"
+    )
+    p.add_argument(
         "--output",
         "-o",
         help="directory to output pprox files (default current directory)",
@@ -124,37 +139,50 @@ def group_spikes_script(argv=None):
         base, rec_id = nbank.parse_resource_id(pprox["recording"])
         args.name = rec_id
 
-    log.info("- grouping %d spikes by cluster and trial...", event_times.size)
-    clusters = assign_events(pprox, event_times, event_clusts, warn_unassigned=args.debug)
-    total_spikes = 0
-    total_clusters = 0
-    for clust_id, cluster in clusters.items():
-        clust_info = info.loc[clust_id]
-        clust_type = clust_info['group']
-        n_spikes = sum(len(t["events"]) for t in cluster["pprox"])
-        if clust_type == "noise" or (clust_type == "mua" and not args.mua):
-            log.info("  - cluster %d (%d spikes, %s) -> skipped", clust_id, n_spikes, clust_type)
-            continue
-        total_spikes += n_spikes
-        total_clusters += 1
-        # annotate with cluster info
-        cluster.update(
-            kilosort_amplitude=clust_info["Amplitude"],
-            kilosort_contam_pct=clust_info["ContamPct"],
-            kilosort_source_channel=clust_info["ch"],
-            kilosort_probe_depth=clust_info["depth"],
-            kilosort_n_spikes=clust_info["n_spikes"],
-        )
+    if args.toelis:
+        import toelis
+        log.info("- grouping %d spikes by cluster...", event_times.size)
+        sampling_rate = pprox["entry_metadata"][0]["sampling_rate"]
+        clusters = assign_events_flat(event_times, event_clusts, sampling_rate)
         outfile = os.path.join(
-            args.output or "", "{}_c{}.pprox".format(args.name, clust_id)
+            args.output or "",
+            "all_units.toe_lis"
         )
-        log.info("  - cluster %d (%d spikes, %s) -> %s", clust_id, n_spikes, clust_type, outfile)
-        try:
-            pb = cluster["processed_by"]
-        except KeyError:
-            pb = []
-            cluster["processed_by"] = pb
-        pb.append("{} {}".format(p.prog, __version__))
         with open(outfile, "wt") as ofp:
-            json.dump(cluster, ofp, default=json_serializable)
-    log.info("- a total of %d spikes were assigned to %d clusters", total_spikes, total_clusters)
+            toelis.write(ofp, clusters)
+        log.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
+    else:
+        log.info("- grouping %d spikes by cluster and trial...", event_times.size)
+        clusters = assign_events(pprox, event_times, event_clusts, warn_unassigned=args.debug)
+        total_spikes = 0
+        total_clusters = 0
+        for clust_id, cluster in clusters.items():
+            clust_info = info.loc[clust_id]
+            clust_type = clust_info['group']
+            n_spikes = sum(len(t["events"]) for t in cluster["pprox"])
+            if clust_type == "noise" or (clust_type == "mua" and not args.mua):
+                log.info("  - cluster %d (%d spikes, %s) -> skipped", clust_id, n_spikes, clust_type)
+                continue
+            total_spikes += n_spikes
+            total_clusters += 1
+            # annotate with cluster info
+            cluster.update(
+                kilosort_amplitude=clust_info["Amplitude"],
+                kilosort_contam_pct=clust_info["ContamPct"],
+                kilosort_source_channel=clust_info["ch"],
+                kilosort_probe_depth=clust_info["depth"],
+                kilosort_n_spikes=clust_info["n_spikes"],
+            )
+            outfile = os.path.join(
+                args.output or "", "{}_c{}.pprox".format(args.name, clust_id)
+            )
+            log.info("  - cluster %d (%d spikes, %s) -> %s", clust_id, n_spikes, clust_type, outfile)
+            try:
+                pb = cluster["processed_by"]
+            except KeyError:
+                pb = []
+                cluster["processed_by"] = pb
+            pb.append("{} {}".format(p.prog, __version__))
+            with open(outfile, "wt") as ofp:
+                json.dump(cluster, ofp, default=json_serializable)
+        log.info("- a total of %d spikes were assigned to %d clusters", total_spikes, total_clusters)
