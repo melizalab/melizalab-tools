@@ -186,7 +186,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
     index = 0
     det = qs.detector(sync_thresh, 10)
     for entry_num, entry in iter_entries(data_file):
-        log.info("- entry: '%s'", entry.name)
+        log.info(" - entry: '%s'", entry.name)
         entry_start = entry_time(entry)
         log.info("  - start time: %s", timestamp_to_datetime(entry.attrs["timestamp"]))
         if expt_start is None:
@@ -241,6 +241,8 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                     )
                     stim_on = stim_onsets[click_idx]
                 trial_on = stim_on - int(prepad * sampling_rate)
+                # if there is a previous trial, its stop time is the start of
+                # this one, and we emit the
                 if this_trial is not None:
                     this_trial["recording"]["stop"] = trial_on
                     first_click_idx = stim_onsets.searchsorted(
@@ -253,8 +255,14 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                         stim_onsets[first_click_idx:last_click_idx]
                         - this_trial["recording"]["start"]
                     ) / sampling_rate
+                    # required key in pprox v2 spec
+                    this_trial["interval"] = (
+                        0.0,
+                        (this_trial["recording"]["stop"] - this_trial["recording"]["start"]) / sampling_rate
+                    )
                     index += 1
                     yield this_trial
+                # create a new trial object
                 this_trial = copy.deepcopy(pproc_base)
                 if trial_on < 0:
                     raise ValueError(
