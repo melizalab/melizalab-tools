@@ -4,3 +4,5 @@ ewave
 arf
 numpy
 pandas
+appdirs
+neurobank

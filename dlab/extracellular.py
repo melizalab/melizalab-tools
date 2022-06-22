@@ -5,12 +5,14 @@ import os
 import re
 import json
 import logging
+from pathlib import Path
+
 import quickspikes as qs
 import nbank
 import numpy as np
 import h5py as h5
-
 from dlab import pprox
+from dlab.util import memodict
 
 log = logging.getLogger("dlab.extracellular")
 
@@ -159,6 +161,34 @@ def parse_stim_id(path):
     return os.path.splitext(os.path.basename(path))[0]
 
 
+@memodict
+def stim_duration(stim_name):
+    """
+    Returns the duration of a stimulus (in s). This can only really be done by
+    downloading the stimulus from the registry, because the start/stop times are
+    not reliable. We try to speed this up by memoizing the function and caching
+    the downloaded files.
+
+    """
+    import wave
+    from appdirs import user_cache_dir
+    from urllib.parse import urlparse
+    APP_NAME = "dlab"
+    APP_AUTHOR = "melizalab"
+    neurobank_registry = nbank.default_registry()
+    parsed_url = urlparse(neurobank_registry)
+    cache_dir = Path(user_cache_dir(APP_NAME, APP_AUTHOR)) / parsed_url.netloc
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / stim_name
+    if not target.exists():
+        log.debug("   - fetching %s from registry", stim_name)
+        nbank.fetch_resource(neurobank_registry, stim_name, target)
+    with open(target, "rb") as fp:
+        reader = wave.open(fp)
+        return 1.0 * reader.getnframes() / reader.getframerate()
+
+
+
 def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
     """Extracts trial information from an oeaudio-present experiment ARF file
 
@@ -229,13 +259,13 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
             message = row["message"].decode("utf-8")
             m = re_start.match(message)
             if m is not None:
-                stim = parse_stim_id(m.group(1))
+                stim_name = parse_stim_id(m.group(1))
                 stim_on = time - stim_sample_offset
                 # adjust to next sync click
                 if sync_dset is not None:
                     click_idx = stim_onsets.searchsorted(stim_on)
                     log.debug(
-                        "  - trial %d: stim onset adjusted by %d",
+                        "  - trial %d: stimulus onset adjusted by %d",
                         index,
                         stim_onsets[click_idx] - stim_on,
                     )
@@ -270,25 +300,33 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                         "adjust prepad" % (index, trial_on)
                     )
                 this_trial.update(
-                    stim=stim,
                     index=index,
                     offset=(entry_start - expt_start) + float(trial_on / sampling_rate),
-                    stim_on=(stim_on - trial_on) / sampling_rate,
                 )
+                # look up stimulus duration in neurobank
+                stim_on_s = (stim_on - trial_on) / sampling_rate
+                try:
+                    stim_dur_s = stim_duration(stim_name)
+                except Exception as e:
+                    log.error("error fetching stimulus duration for %s - have you added it to the registry?\n%s", stim_name, e)
+
+                this_trial["stimulus"] = {"name": stim_name, "interval": [stim_on_s, stim_on_s + stim_dur_s]}
                 this_trial["recording"]["start"] = trial_on
                 log.debug(
-                    "  - trial %d: start @ %012d samples (stim %s @ %012d)",
+                    "  - trial %d: start @ %012d samples (stim %s @ %012d--%012d = %.2f s)",
                     index,
                     trial_on,
-                    stim,
+                    stim_name,
                     stim_on,
+                    stim_on + int(stim_dur_s * sampling_rate),
+                    stim_dur_s
                 )
                 continue
             # the stop messages are just monitored to ensure data consistency
             m = re_stop.match(message)
             if m is not None:
-                stim = parse_stim_id(m.group(1))
-                if this_trial is None or stim != this_trial["stim"]:
+                stim_name = parse_stim_id(m.group(1))
+                if this_trial is None or stim_name != this_trial["stimulus"]["name"]:
                     log.warning(
                         "  - WARNING: stop event %s without matching start event",
                         m.group(1),
@@ -339,7 +377,7 @@ def oeaudio_to_pprox_script(argv=None):
     import argparse
     from dlab.util import setup_log, json_serializable
 
-    __version__ = "2021.03.01"
+    __version__ = "2022.06.21"
 
     p = argparse.ArgumentParser(
         description="generate pprox from trial structure in oeaudio-present recording"
@@ -408,16 +446,20 @@ def oeaudio_to_pprox_script(argv=None):
         args.sync = None
         log.warning(" - warning: not using a sync track!")
 
-    with h5.File(datafile, "r") as afp:
-        trials = pprox.from_trials(
-            oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad),
-            recording=resource_url,
-            processed_by=["{} {}".format(p.prog, __version__)],
-            **resource_info["metadata"]
-        )
-        trials["entry_metadata"] = tuple(
-            entry_metadata(e) for _, e in iter_entries(afp)
-        )
+    try:
+        with h5.File(datafile, "r") as afp:
+            trials = pprox.from_trials(
+                oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad),
+                recording=resource_url,
+                processed_by=["{} {}".format(p.prog, __version__)],
+                **resource_info["metadata"]
+            )
+            trials["$schema"] = "https://meliza.org/spec:2/stimtrial.json#"
+            trials["entry_metadata"] = tuple(
+                entry_metadata(e) for _, e in iter_entries(afp)
+            )
+    except Exception as e:
+        p.error(e)
 
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:
