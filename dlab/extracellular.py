@@ -305,10 +305,10 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                 )
                 # look up stimulus duration in neurobank
                 stim_on_s = (stim_on - trial_on) / sampling_rate
-                try:
-                    stim_dur_s = stim_duration(stim_name)
-                except Exception as e:
-                    log.error("error fetching stimulus duration for %s - have you added it to the registry?\n%s", stim_name, e)
+                stim_dur_s = stim_duration(stim_name)
+                # except Exception as e:
+                #     log.error("error fetching stimulus duration for %s - have you added it to the registry?\n%s", stim_name, e)
+                #     raise e
 
                 this_trial["stimulus"] = {"name": stim_name, "interval": [stim_on_s, stim_on_s + stim_dur_s]}
                 this_trial["recording"]["start"] = trial_on
@@ -371,6 +371,32 @@ def entry_metadata(entry):
             metadata.update(name=entry.name, sampling_rate=stims.attrs["sampling_rate"])
             return metadata
 
+def get_or_verify_datafile(resource):
+    """ Load a neurobank resource, either from a local file or from an archive
+
+    if `resource` is a file that exists, the hash is used to look up resource information
+    if `resource` is an ID or a registry URL, tries to find the file in a local archive
+
+    returns (datafile path, registry record)
+    """
+    if os.path.exists(resource):
+        datafile = resource
+        log.info(" - using local file %s (checking hash)", datafile)
+        resources = nbank.verify(datafile)
+        try:
+            resource_info = next(resources)
+            log.info("   ✓ %s", resource_info["sha1"])
+        except StopIteration:
+            raise ValueError("sha1 for local file does not match any resource in the registry")
+    else:
+        resource_url = nbank.full_url(resource)
+        log.info(" - source resource: %s", resource_url)
+        resource_info = nbank.describe(resource_url)
+        datafile = nbank.get(resource, local_only=True)
+        if datafile is None:
+            raise ValueError("unable to locate resource file")
+    return datafile, resource_info
+
 
 def oeaudio_to_pprox_script(argv=None):
     import sys
@@ -415,52 +441,31 @@ def oeaudio_to_pprox_script(argv=None):
         type=float,
         help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
     )
-    p.add_argument(
-        "--local",
-        help="load recording from local file rather than from neurobank",
-    )
-    p.add_argument("recording", help="neurobank id or URL for the ARF recording")
+    p.add_argument("recording", help="ARF recording (local file, or neurobank id/URL)")
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    resource_url = nbank.full_url(args.recording)
-    log.info(" - source resource: %s", resource_url)
-    resource_info = nbank.describe(resource_url)
-    if args.local:
-        from nbank import util
-        datafile = args.local
-        log.info(" - using local file %s (checking hash)", datafile)
-        file_hash = util.hash(datafile)
-        if resource_info["sha1"] != file_hash:
-            p.error("sha1 for local file does not match resource")
-        log.info("   ✓ %s", file_hash)
-    else:
-        datafile = nbank.get(args.recording, local_only=True)
-        if datafile is None:
-            p.error(
-                "unable to locate resource %s - is it deposited in neurobank?"
-                % args.recording
-            )
+    datafile, resource_info = get_or_verify_datafile(args.recording)
+    resource_url = nbank.full_url(resource_info["name"])
 
     if args.no_sync:
         args.sync = None
         log.warning(" - warning: not using a sync track!")
 
-    try:
-        with h5.File(datafile, "r") as afp:
-            trials = pprox.from_trials(
-                oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad),
-                recording=resource_url,
-                processed_by=["{} {}".format(p.prog, __version__)],
-                **resource_info["metadata"]
-            )
-            trials["$schema"] = "https://meliza.org/spec:2/stimtrial.json#"
-            trials["entry_metadata"] = tuple(
-                entry_metadata(e) for _, e in iter_entries(afp)
-            )
-    except Exception as e:
-        p.error(e)
+    with h5.File(datafile, "r") as afp:
+        trials = pprox.from_trials(
+            oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad),
+            recording=resource_url,
+            processed_by=["{} {}".format(p.prog, __version__)],
+            **resource_info["metadata"]
+        )
+        trials["$schema"] = "https://meliza.org/spec:2/stimtrial.json#"
+        trials["entry_metadata"] = tuple(
+            entry_metadata(e) for _, e in iter_entries(afp)
+        )
 
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:
         log.info(" ✓ wrote trial data to '%s'", args.output.name)
+
+## extract-waveforms
