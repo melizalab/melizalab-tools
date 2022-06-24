@@ -5,7 +5,6 @@ import os
 import re
 import json
 import logging
-from pathlib import Path
 
 import quickspikes as qs
 import nbank
@@ -14,22 +13,23 @@ import h5py as h5
 from dlab import pprox
 from dlab.util import memodict
 
-log = logging.getLogger("dlab.extracellular")
+log = logging.getLogger("dlab")
 
-#### general
+### general
 
 
 def entry_time(entry):
     from arf import timestamp_to_float
+
     return timestamp_to_float(entry.attrs["timestamp"])
 
 
 def iter_entries(data_file):
-    """ Iterate through the entries in an arf file in order of time """
+    """Iterate through the entries in an arf file in order of time"""
     return enumerate(sorted(data_file.values(), key=entry_time))
 
 
-#### present-audio
+### present-audio
 
 
 def audiolog_to_trials(trials, data_file, sync_dset="channel37", sync_thresh=1.0):
@@ -81,7 +81,7 @@ def audiolog_to_trials(trials, data_file, sync_dset="channel37", sync_thresh=1.0
 
 
 def audiolog_to_pprox_script(argv=None):
-    """ CLI to generate a pprox from present_audio log """
+    """CLI to generate a pprox from present_audio log"""
     import sys
     import argparse
     import json
@@ -148,7 +148,7 @@ def audiolog_to_pprox_script(argv=None):
 
 
 def find_stim_dset(entry):
-    """ Returns the first dataset that matches 'Network_Events.*_TEXT' """
+    """Returns the first dataset that matches 'Network_Events.*_TEXT'"""
     rex = re.compile(r"Network_Events-.*?TEXT")
     for name in entry:
         if rex.match(name) is not None:
@@ -157,7 +157,7 @@ def find_stim_dset(entry):
 
 
 def parse_stim_id(path):
-    """ Extracts the stimulus id from the path """
+    """Extracts the stimulus id from the path"""
     return os.path.splitext(os.path.basename(path))[0]
 
 
@@ -171,22 +171,13 @@ def stim_duration(stim_name):
 
     """
     import wave
-    from appdirs import user_cache_dir
-    from urllib.parse import urlparse
-    APP_NAME = "dlab"
-    APP_AUTHOR = "melizalab"
+    from dlab.core import fetch_resource
+
     neurobank_registry = nbank.default_registry()
-    parsed_url = urlparse(neurobank_registry)
-    cache_dir = Path(user_cache_dir(APP_NAME, APP_AUTHOR)) / parsed_url.netloc
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    target = cache_dir / stim_name
-    if not target.exists():
-        log.debug("   - fetching %s from registry", stim_name)
-        nbank.fetch_resource(neurobank_registry, stim_name, target)
+    target = fetch_resource(neurobank_registry, stim_name)
     with open(target, "rb") as fp:
         reader = wave.open(fp)
         return 1.0 * reader.getnframes() / reader.getframerate()
-
 
 
 def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
@@ -208,7 +199,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
 
     """
     import copy
-    from arf import timestamp_to_float, timestamp_to_datetime
+    from arf import timestamp_to_datetime
 
     re_start = re.compile(r"start (.*)")
     re_stop = re.compile(r"stop (.*)")
@@ -288,7 +279,11 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                     # required key in pprox v2 spec
                     this_trial["interval"] = (
                         0.0,
-                        (this_trial["recording"]["stop"] - this_trial["recording"]["start"]) / sampling_rate
+                        (
+                            this_trial["recording"]["stop"]
+                            - this_trial["recording"]["start"]
+                        )
+                        / sampling_rate,
                     )
                     index += 1
                     yield this_trial
@@ -310,7 +305,10 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                 #     log.error("error fetching stimulus duration for %s - have you added it to the registry?\n%s", stim_name, e)
                 #     raise e
 
-                this_trial["stimulus"] = {"name": stim_name, "interval": [stim_on_s, stim_on_s + stim_dur_s]}
+                this_trial["stimulus"] = {
+                    "name": stim_name,
+                    "interval": [stim_on_s, stim_on_s + stim_dur_s],
+                }
                 this_trial["recording"]["start"] = trial_on
                 log.debug(
                     "  - trial %d: start @ %012d samples (stim %s @ %012d--%012d = %.2f s)",
@@ -319,7 +317,7 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
                     stim_name,
                     stim_on,
                     stim_on + int(stim_dur_s * sampling_rate),
-                    stim_dur_s
+                    stim_dur_s,
                 )
                 continue
             # the stop messages are just monitored to ensure data consistency
@@ -336,12 +334,8 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
         # need to emit the last trial
         if this_trial is not None and "stop" not in this_trial["recording"]:
             this_trial["recording"]["stop"] = dset_end
-            first_click_idx = stim_onsets.searchsorted(
-                this_trial["recording"]["start"]
-            )
-            last_click_idx = stim_onsets.searchsorted(
-                this_trial["recording"]["stop"]
-            )
+            first_click_idx = stim_onsets.searchsorted(this_trial["recording"]["start"])
+            last_click_idx = stim_onsets.searchsorted(this_trial["recording"]["stop"])
             this_trial["events"] = (
                 stim_onsets[first_click_idx:last_click_idx]
                 - this_trial["recording"]["start"]
@@ -360,7 +354,6 @@ def entry_metadata(entry):
     re_metadata = re.compile(r"metadata: (\{.*\})")
     stims = find_stim_dset(entry)
     for row in stims:
-        time = row["start"]
         message = row["message"].decode("utf-8")
         m = re_metadata.match(message)
         try:
@@ -371,36 +364,11 @@ def entry_metadata(entry):
             metadata.update(name=entry.name, sampling_rate=stims.attrs["sampling_rate"])
             return metadata
 
-def get_or_verify_datafile(resource):
-    """ Load a neurobank resource, either from a local file or from an archive
-
-    if `resource` is a file that exists, the hash is used to look up resource information
-    if `resource` is an ID or a registry URL, tries to find the file in a local archive
-
-    returns (datafile path, registry record)
-    """
-    if os.path.exists(resource):
-        datafile = resource
-        log.info(" - using local file %s (checking hash)", datafile)
-        resources = nbank.verify(datafile)
-        try:
-            resource_info = next(resources)
-            log.info("   ✓ %s", resource_info["sha1"])
-        except StopIteration:
-            raise ValueError("sha1 for local file does not match any resource in the registry")
-    else:
-        resource_url = nbank.full_url(resource)
-        log.info(" - source resource: %s", resource_url)
-        resource_info = nbank.describe(resource_url)
-        datafile = nbank.get(resource, local_only=True)
-        if datafile is None:
-            raise ValueError("unable to locate resource file")
-    return datafile, resource_info
-
 
 def oeaudio_to_pprox_script(argv=None):
     import sys
     import argparse
+    from dlab.core import get_or_verify_datafile
     from dlab.util import setup_log, json_serializable
 
     __version__ = "2022.06.21"
@@ -445,7 +413,7 @@ def oeaudio_to_pprox_script(argv=None):
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    datafile, resource_info = get_or_verify_datafile(args.recording)
+    datafile, resource_info = get_or_verify_datafile(args.recording, args.debug)
     resource_url = nbank.full_url(resource_info["name"])
 
     if args.no_sync:
@@ -467,5 +435,3 @@ def oeaudio_to_pprox_script(argv=None):
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:
         log.info(" ✓ wrote trial data to '%s'", args.output.name)
-
-## extract-waveforms
