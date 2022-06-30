@@ -41,7 +41,7 @@ class ParseKeyVal(argparse.Action):
             kv = dict()
         if not arg.count('=') == 1:
             raise ValueError(
-                "-k %s argument badly formed; needs key=value" % arg)
+                "%s argument badly formed; needs key=value" % arg)
         else:
             key, val = arg.split('=')
             kv[key] = self.parse_value(val)

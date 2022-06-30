@@ -45,7 +45,7 @@ if __name__=="__main__":
     p.add_argument(
         "--post-spike",
         type=float,
-        default=10.0,
+        default=5.0,
         help="samples after the spike to keep (default %(default).1f ms)",
     )
     p.add_argument(
@@ -67,7 +67,7 @@ if __name__=="__main__":
         type=argparse.FileType("r", encoding="utf-8"),
         help="pprox files with spike times",
     )
-    args = p.parse_args(argv)
+    args = p.parse_args()
     setup_log(log, args.debug)
 
     datafile, arf_info = get_or_verify_datafile(args.recording, args.debug)
@@ -80,7 +80,7 @@ if __name__=="__main__":
             log.info("   - source recording: %s", spike_data["recording"])
             dset_channel = spike_data["kilosort_source_channel"]
             # TODO verify that that index is 1-based
-            dset_name = f"CH{dset_channel}"
+            dset_name = f"CH{dset_channel + 1}"
             log.info("   - main channel: %s", dset_name)
             resource_info = nbank.describe(spike_data["recording"])
             if resource_info["sha1"] != arf_info["sha1"]:
@@ -120,7 +120,7 @@ if __name__=="__main__":
             waveforms = np.zeros((nspikes, n_before + n_after), dtype="f8")
             for i, row in enumerate(selected.itertuples(index=False)):
                 waveforms[i, :] = dsets[row.entry][row.start:row.stop]
-            __import__("IPython").embed()
+            #__import__("IPython").embed()
 
 
             #     spike_idx = (np.asarray(trial["events"]) * sampling_rate).astype("int64") + trial["recording"]["start"]
