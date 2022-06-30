@@ -2,12 +2,9 @@
 # -*- mode: python -*-
 """ Functions for using kilsort/phy data """
 import os
-import shutil
 import logging
 import numpy as np
 import pandas as pd
-
-from dlab import core, __version__
 
 log = logging.getLogger("dlab.kilo")
 
@@ -15,9 +12,10 @@ log = logging.getLogger("dlab.kilo")
 def assign_events_flat(event_times, event_clusts, sampling_rate):
     """Assign event_times to clusters, generating a large toelis object"""
     from collections import defaultdict
+
     tl = defaultdict(list)
     for time, clust in zip(event_times, event_clusts):
-        tl[clust].append(time / sampling_rate * 1000.)
+        tl[clust].append(time / sampling_rate * 1000.0)
     max_clust = max(tl.keys())
     return [np.asarray(tl[i]) for i in range(max_clust + 1)]
 
@@ -25,7 +23,7 @@ def assign_events_flat(event_times, event_clusts, sampling_rate):
 def assign_events(pprox, event_times, event_clusts, warn_unassigned=False):
     """Assign event_times to trials within a pprox based on recording time.
 
-    trials: an iterable list of pproc objects, sorted in order of time. Each
+    pprox: an iterable list of pproc objects, sorted in order of time. Each
     object must have a "recording" field that contains "start" and "stop"
     subfields. The values of these fields must indicate the start and stop time
     of the trial.
@@ -91,7 +89,7 @@ def group_spikes_script(argv=None):
     p.add_argument(
         "--toelis",
         action="store_true",
-        help="output toelis instead of pprox. one file will be generated for the entire recording"
+        help="output toelis instead of pprox. one file will be generated for the entire recording",
     )
     p.add_argument(
         "--output",
@@ -114,7 +112,7 @@ def group_spikes_script(argv=None):
     p.add_argument(
         "sortdir",
         help="kilosort output directory. Needs to contain 'spike_times.npy', 'spike_clusters.npy',"
-        " and 'cluster_info.tsv'"
+        " and 'cluster_info.tsv'",
     )
     args = p.parse_args(argv)
     setup_log(log, args.debug)
@@ -141,27 +139,32 @@ def group_spikes_script(argv=None):
 
     if args.toelis:
         import toelis
+
         log.info("- grouping %d spikes by cluster...", event_times.size)
         sampling_rate = pprox["entry_metadata"][0]["sampling_rate"]
         clusters = assign_events_flat(event_times, event_clusts, sampling_rate)
-        outfile = os.path.join(
-            args.output or "",
-            "all_units.toe_lis"
-        )
+        outfile = os.path.join(args.output or "", "all_units.toe_lis")
         with open(outfile, "wt") as ofp:
             toelis.write(ofp, clusters)
         log.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
     else:
         log.info("- grouping %d spikes by cluster and trial...", event_times.size)
-        clusters = assign_events(pprox, event_times, event_clusts, warn_unassigned=args.debug)
+        clusters = assign_events(
+            pprox, event_times, event_clusts, warn_unassigned=args.debug
+        )
         total_spikes = 0
         total_clusters = 0
         for clust_id, cluster in clusters.items():
             clust_info = info.loc[clust_id]
-            clust_type = clust_info['group']
+            clust_type = clust_info["group"]
             n_spikes = sum(len(t["events"]) for t in cluster["pprox"])
             if clust_type == "noise" or (clust_type == "mua" and not args.mua):
-                log.info("  - cluster %d (%d spikes, %s) -> skipped", clust_id, n_spikes, clust_type)
+                log.info(
+                    "  - cluster %d (%d spikes, %s) -> skipped",
+                    clust_id,
+                    n_spikes,
+                    clust_type,
+                )
                 continue
             total_spikes += n_spikes
             total_clusters += 1
@@ -176,7 +179,13 @@ def group_spikes_script(argv=None):
             outfile = os.path.join(
                 args.output or "", "{}_c{}.pprox".format(args.name, clust_id)
             )
-            log.info("  - cluster %d (%d spikes, %s) -> %s", clust_id, n_spikes, clust_type, outfile)
+            log.info(
+                "  - cluster %d (%d spikes, %s) -> %s",
+                clust_id,
+                n_spikes,
+                clust_type,
+                outfile,
+            )
             try:
                 pb = cluster["processed_by"]
             except KeyError:
@@ -185,4 +194,8 @@ def group_spikes_script(argv=None):
             pb.append("{} {}".format(p.prog, __version__))
             with open(outfile, "wt") as ofp:
                 json.dump(cluster, ofp, default=json_serializable)
-        log.info("- a total of %d spikes were assigned to %d clusters", total_spikes, total_clusters)
+        log.info(
+            "- a total of %d spikes were assigned to %d clusters",
+            total_spikes,
+            total_clusters,
+        )
