@@ -126,7 +126,7 @@ def extract_songs(args):
     from quicksong.streaming import IntervalFinder
 
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-    log.info("Training song classifier:")
+    log.info("Extracting songs:")
     log.info("- version: %s", __version__)
     with open(args.model, "rb") as fp:
         log.info("- loading classifier from '%s'", args.model)
@@ -137,25 +137,38 @@ def extract_songs(args):
     finder = IntervalFinder(max_gap=args.max_gap, min_duration=args.min_duration, dt=dt)
     with h5.File(args.input, "r") as ifp:
         log.info("- processing recordings in '%s'", args.input)
-        last_entry = None
+        last_sample = None
         for ename, entry in ifp.items():
             if not isinstance(entry, h5.Group):
                 log.info(" - %s: not an entry, skipping", ename)
                 continue
             dset = entry[args.dataset_name]
             sampling_rate = dset.attrs["sampling_rate"] / 1000.0
-            # TODO check if this entry is a continuation of the previous entry
-            extractor = make_extractor(model["config"], sampling_rate)
-            log.debug(" - %s: %d samples @ %.2f kHz", ename, dset.size, sampling_rate)
-            for block in extractor.process(dset[:]):
+            entry_start = entry.attrs["jack_frame"]
+            log.info(
+                " - %s: start=%s, end=%s, sampling_rate=%.2f kHz",
+                ename,
+                entry_start,
+                entry_start + dset.size,
+                sampling_rate,
+            )
+            # is this a continuation of the previous entry?
+            if last_sample is not None and last_sample > entry_start:
+                log.info("   - continues previous entry")
+            else:
+                extractor = make_extractor(model["config"], sampling_rate)
+                finder.reset()
+            for block in extractor.process(dset):
                 pred = classifier.predict(block)
                 for ival in finder.process(pred):
                     log.info(
-                        " - %s: song detected between %d--%d ms",
-                        entry.name,
+                        "   - song: %.1f--%.1f ms",
                         ival[0] * dt,
                         ival[1] * dt,
                     )
+            # jack_frame is a np.uint32 so it should overflow to allow
+            # comparison with next entry
+            last_sample = entry_start + dset.size
 
 
 def script(argv=None):
