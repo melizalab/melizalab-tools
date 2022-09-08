@@ -73,3 +73,13 @@ def memodict(f):
             ret = self[key] = f(key)
             return ret
     return memodict().__getitem__
+
+
+def all_same(seq):
+    """If all the elements of seq are the same, returns the value. If not, returns None"""
+    it = iter(seq)
+    first = next(it)
+    for e in it:
+        if e != first:
+            return None
+    return first

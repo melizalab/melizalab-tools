@@ -123,7 +123,7 @@ def train_classifier(args):
 
 def extract_songs(args):
     import h5py as h5
-    from quicksong.streaming import IntervalFinder
+    from quicksong.core import IntervalFinder
 
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     log.info("Extracting songs:")
@@ -138,37 +138,68 @@ def extract_songs(args):
     with h5.File(args.input, "r") as ifp:
         log.info("- processing recordings in '%s'", args.input)
         last_sample = None
-        for ename, entry in ifp.items():
+        buffer = []
+        intervals = []
+        for entry in ifp.values():
             if not isinstance(entry, h5.Group):
-                log.info(" - %s: not an entry, skipping", ename)
+                log.info("  ✗ %s: not an entry, skipping", entry.name)
                 continue
             dset = entry[args.dataset_name]
             sampling_rate = dset.attrs["sampling_rate"] / 1000.0
             entry_start = entry.attrs["jack_frame"]
-            log.info(
+            log.debug(
                 " - %s: start=%s, end=%s, sampling_rate=%.2f kHz",
-                ename,
+                entry.name,
                 entry_start,
                 entry_start + dset.size,
                 sampling_rate,
             )
             # is this a continuation of the previous entry?
             if last_sample is not None and last_sample > entry_start:
-                log.info("   - continues previous entry")
+                log.debug("   - continues previous entry")
             else:
+                # process the intervals
+                extract_intervals(buffer, intervals, args.pad_before, args.pad_after)
                 extractor = make_extractor(model["config"], sampling_rate)
                 finder.reset()
+                buffer = []
+                intervals = []
             for block in extractor.process(dset):
                 pred = classifier.predict(block)
-                for ival in finder.process(pred):
-                    log.info(
-                        "   - song: %.1f--%.1f ms",
-                        ival[0] * dt,
-                        ival[1] * dt,
-                    )
+                intervals.extend(
+                    (start * dt, stop * dt) for start, stop in finder.process(pred)
+                )
             # jack_frame is a np.uint32 so it should overflow to allow
             # comparison with next entry
             last_sample = entry_start + dset.size
+            buffer.append(dset)
+
+
+def extract_intervals(dsets, intervals, pad_before, pad_after):
+    from quicksong.core import pad_intervals
+    from .util import all_same
+
+    if len(dsets) == 0:
+        return
+    dset_name = ", ".join(dset.parent.name for dset in dsets)
+    if len(intervals) == 0:
+        log.info("  ✗ %s: no song detected", dset_name)
+        return
+    sampling_rate = all_same(dset.attrs["sampling_rate"] for dset in dsets) / 1000.0
+    assert sampling_rate is not None, "Entries don't have the same sampling rate!"
+    signal = np.concatenate(dsets)
+    log.info("  ✓ %s: ", dset_name)
+    for start, end in pad_intervals(intervals, pad_before, pad_after):
+        start_sample = max(0, int(start * sampling_rate))
+        end_sample = min(signal.size, int(end * sampling_rate))
+        log.info(
+            "    - samples %d–%d (%.1f ms)",
+            start_sample,
+            end_sample,
+            (end_sample - start_sample) / sampling_rate,
+        )
+        # import pdb; pdb.set_trace()  ## DEBUG ##
+        #yield signal[start_sample:end_sample]
 
 
 def script(argv=None):
@@ -204,21 +235,32 @@ def script(argv=None):
     pp.set_defaults(func=extract_songs)
     pp.add_argument(
         "--dataset-name",
-        "-d",
         default="pcm_000",
-        help="the name of the dataset to process in each entry",
+        help="the name of the dataset to process in each entry (default `%(default)s`)",
     )
     pp.add_argument(
         "--max-gap",
         type=float,
         default=100,
-        help="merge segments separated by gaps less than this value (in ms)",
+        help="merge segments separated by gaps less than this value (default %(default).1f ms)",
     )
     pp.add_argument(
         "--min-duration",
         type=float,
         default=500,
-        help="segments must be at least this long (in ms)",
+        help="segments must be at least this long (default %(default).1f ms)",
+    )
+    pp.add_argument(
+        "--pad-before",
+        type=float,
+        default=1000,
+        help="the amount of time before song onset to extract (default %(default).1f ms)",
+    )
+    pp.add_argument(
+        "--pad-after",
+        type=float,
+        default=1000,
+        help="the amount of time after song end to extract (default %(default).1f ms)",
     )
     pp.add_argument("model", help="trained classifier model (pkl file saved by `train`")
     pp.add_argument("input", help="the ARF file to process")
