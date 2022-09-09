@@ -7,7 +7,8 @@ import argparse
 import logging
 import numpy as np
 
-__version__ = "2022.09.06"
+script_name = "quicksong"
+__version__ = "2022.09.09"
 
 _example_config = """
 spectrogram:
@@ -121,7 +122,27 @@ def train_classifier(args):
             log.info("- wrote model to '%s'", args.model)
 
 
+class ArfWriter:
+    """Utility class that writes to sequentially numbered entries"""
+
+    def __init__(self, arfp, template="song_{index:04}"):
+        self.arfp = arfp
+        self.entry_count = len(arfp.keys())
+        self.template = template
+
+    @property
+    def filename(self):
+        return self.arfp.filename
+
+    def create_entry(self, timestamp, **attributes):
+        import arf
+        next_entry_name = self.template.format(index=self.entry_count)
+        self.entry_count += 1
+        return arf.create_entry(self.arfp, next_entry_name, timestamp, **attributes)
+
+
 def extract_songs(args):
+    import arf
     import h5py as h5
     from quicksong.core import IntervalFinder
 
@@ -135,8 +156,11 @@ def extract_songs(args):
     classifier = model["classifier"]
     dt = model["config"]["spectrogram"]["shift_ms"]
     finder = IntervalFinder(max_gap=args.max_gap, min_duration=args.min_duration, dt=dt)
-    with h5.File(args.input, "r") as ifp:
+    # TODO: more flexibility with output format
+    with h5.File(args.input, "r") as ifp, arf.open_file(args.output, mode="a") as ofp:
         log.info("- processing recordings in '%s'", args.input)
+        writer = ArfWriter(ofp)
+        log.info("- saving songs to '%s'", args.output)
         last_sample = None
         buffer = []
         intervals = []
@@ -159,7 +183,13 @@ def extract_songs(args):
                 log.debug("   - continues previous entry")
             else:
                 # process the intervals
-                extract_intervals(buffer, intervals, args.pad_before, args.pad_after)
+                extract_intervals(
+                    writer,
+                    buffer,
+                    intervals,
+                    args.pad_before,
+                    args.pad_after,
+                )
                 extractor = make_extractor(model["config"], sampling_rate)
                 finder.reset()
                 buffer = []
@@ -175,9 +205,21 @@ def extract_songs(args):
             buffer.append(dset)
 
 
-def extract_intervals(dsets, intervals, pad_before, pad_after):
+def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
+    import posixpath
+    from datetime import timedelta
+    from arf import timestamp_to_datetime, create_dataset, DataTypes, set_uuid
     from quicksong.core import pad_intervals
     from .util import all_same
+
+    fields_to_drop = (
+        "entry_creator",
+        "timestamp",
+        "jack_frame",
+        "jack_sampling_rate",
+        "jack_usec",
+        "trial_off",
+    )
 
     if len(dsets) == 0:
         return
@@ -187,19 +229,45 @@ def extract_intervals(dsets, intervals, pad_before, pad_after):
         return
     sampling_rate = all_same(dset.attrs["sampling_rate"] for dset in dsets) / 1000.0
     assert sampling_rate is not None, "Entries don't have the same sampling rate!"
+    parent_entry = dsets[0].parent
+    entry_attrs = {
+        k: v for k, v in parent_entry.attrs.items() if k not in fields_to_drop
+    }
+    entry_attrs.update(
+        source_file=parent_entry.file.filename,
+        source_uuid=b",".join(dset.parent.attrs["uuid"] for dset in dsets),
+        entry_creator=f"org.meliza.dlab/{script_name} {__version__}",
+    )
+    entry_attrs.pop("uuid")
+    dset_attrs = dict(dsets[0].attrs)
+    dset_attrs["source_uuid"] = b",".join(dset.attrs["uuid"] for dset in dsets)
+    dset_attrs["datatype"] = DataTypes.ACOUSTIC
+    dset_attrs.pop("uuid")
     signal = np.concatenate(dsets)
     log.info("  ✓ %s: ", dset_name)
     for start, end in pad_intervals(intervals, pad_before, pad_after):
         start_sample = max(0, int(start * sampling_rate))
         end_sample = min(signal.size, int(end * sampling_rate))
+        song_timestamp = timestamp_to_datetime(
+            parent_entry.attrs["timestamp"]
+        ) + timedelta(seconds=start_sample * sampling_rate * 1000)
+        new_entry = writer.create_entry(song_timestamp, **entry_attrs)
+        new_dset = create_dataset(
+            new_entry,
+            posixpath.basename(dsets[0].name),
+            signal[start_sample:end_sample],
+            compression="gzip",
+            **dset_attrs,
+        )
+        set_uuid(new_dset)
         log.info(
-            "    - samples %d–%d (%.1f ms)",
+            "    - samples %d–%d (%.1f ms) -> %s%s",
             start_sample,
             end_sample,
             (end_sample - start_sample) / sampling_rate,
+            writer.filename,
+            new_dset.name
         )
-        # import pdb; pdb.set_trace()  ## DEBUG ##
-        #yield signal[start_sample:end_sample]
 
 
 def script(argv=None):
