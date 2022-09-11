@@ -252,7 +252,7 @@ def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
         end_sample = min(signal.size, int(end * sampling_rate))
         song_timestamp = timestamp_to_datetime(
             parent_entry.attrs["timestamp"]
-        ) + timedelta(seconds=start_sample * sampling_rate * 1000)
+        ) + timedelta(seconds=start_sample / sampling_rate / 1000)
         new_entry = writer.create_entry(song_timestamp, **entry_attrs)
         new_dset = create_dataset(
             new_entry,
