@@ -8,7 +8,7 @@ import logging
 import numpy as np
 
 script_name = "quicksong"
-__version__ = "2022.09.09"
+__version__ = "2022.09.11"
 
 _example_config = """
 spectrogram:
@@ -107,19 +107,19 @@ def train_classifier(args):
             log.info("  - labeled frames: %d", y.size)
             X_all.append(X)
             y_all.append(y)
-        X = np.row_stack(X_all)
-        y = np.concatenate(y_all)
-        assert X.shape[0] == y.size
-        log.info("- training classifier...")
-        classifier, score = model.train_classifier(
-            X, y, cfg["classifier"], cfg["testing"]
+    X = np.row_stack(X_all)
+    y = np.concatenate(y_all)
+    assert X.shape[0] == y.size
+    log.info("- training classifier...")
+    classifier, score = model.train_classifier(
+        X, y, cfg["classifier"], cfg["testing"]
+    )
+    log.info("  - model score: %.3f", score)
+    with open(args.model, "wb") as fp:
+        pickle.dump(
+            {"config": cfg, "classifier": classifier, "version": __version__}, fp
         )
-        log.info("  - model score: %.3f", score)
-        with open(args.model, "wb") as fp:
-            pickle.dump(
-                {"config": cfg, "classifier": classifier, "version": __version__}, fp
-            )
-            log.info("- wrote model to '%s'", args.model)
+        log.info("- wrote model to '%s'", args.model)
 
 
 class ArfWriter:
@@ -157,52 +157,54 @@ def extract_songs(args):
     dt = model["config"]["spectrogram"]["shift_ms"]
     finder = IntervalFinder(max_gap=args.max_gap, min_duration=args.min_duration, dt=dt)
     # TODO: more flexibility with output format
-    with h5.File(args.input, "r") as ifp, arf.open_file(args.output, mode="a") as ofp:
-        log.info("- processing recordings in '%s'", args.input)
+    with arf.open_file(args.output, mode="a") as ofp:
         writer = ArfWriter(ofp)
         log.info("- saving songs to '%s'", args.output)
-        last_sample = None
-        buffer = []
-        intervals = []
-        for entry in ifp.values():
-            if not isinstance(entry, h5.Group):
-                log.info("  ✗ %s: not an entry, skipping", entry.name)
-                continue
-            dset = entry[args.dataset_name]
-            sampling_rate = dset.attrs["sampling_rate"] / 1000.0
-            entry_start = entry.attrs["jack_frame"]
-            log.debug(
-                " - %s: start=%s, end=%s, sampling_rate=%.2f kHz",
-                entry.name,
-                entry_start,
-                entry_start + dset.size,
-                sampling_rate,
-            )
-            # is this a continuation of the previous entry?
-            if last_sample is not None and last_sample > entry_start:
-                log.debug("   - continues previous entry")
-            else:
-                # process the intervals
-                extract_intervals(
-                    writer,
-                    buffer,
-                    intervals,
-                    args.pad_before,
-                    args.pad_after,
-                )
-                extractor = make_extractor(model["config"], sampling_rate)
-                finder.reset()
+        for fname in args.input:
+            with h5.File(fname, "r") as ifp:
+                log.info("- processing recordings in '%s'", ifp.filename)
+                last_sample = None
                 buffer = []
                 intervals = []
-            for block in extractor.process(dset):
-                pred = classifier.predict(block)
-                intervals.extend(
-                    (start * dt, stop * dt) for start, stop in finder.process(pred)
-                )
-            # jack_frame is a np.uint32 so it should overflow to allow
-            # comparison with next entry
-            last_sample = entry_start + dset.size
-            buffer.append(dset)
+                for entry in ifp.values():
+                    if not isinstance(entry, h5.Group):
+                        log.info("  ✗ %s: not an entry, skipping", entry.name)
+                        continue
+                    dset = entry[args.dataset_name]
+                    sampling_rate = dset.attrs["sampling_rate"] / 1000.0
+                    entry_start = entry.attrs["jack_frame"]
+                    log.debug(
+                        " - %s: start=%s, end=%s, sampling_rate=%.2f kHz",
+                        entry.name,
+                        entry_start,
+                        entry_start + dset.size,
+                        sampling_rate,
+                    )
+                    # is this a continuation of the previous entry?
+                    if last_sample is not None and last_sample > entry_start:
+                        log.debug("   - continues previous entry")
+                    else:
+                        # process the intervals
+                        extract_intervals(
+                            writer,
+                            buffer,
+                            intervals,
+                            args.pad_before,
+                            args.pad_after,
+                        )
+                        extractor = make_extractor(model["config"], sampling_rate)
+                        finder.reset()
+                        buffer = []
+                        intervals = []
+                    for block in extractor.process(dset):
+                        pred = classifier.predict(block)
+                        intervals.extend(
+                            (start * dt, stop * dt) for start, stop in finder.process(pred)
+                        )
+                    # jack_frame is a np.uint32 so it should overflow to allow
+                    # comparison with next entry
+                    last_sample = entry_start + dset.size
+                    buffer.append(dset)
 
 
 def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
@@ -210,7 +212,7 @@ def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
     from datetime import timedelta
     from arf import timestamp_to_datetime, create_dataset, DataTypes, set_uuid
     from quicksong.core import pad_intervals
-    from .util import all_same
+    from dlab.util import all_same
 
     fields_to_drop = (
         "entry_creator",
@@ -331,7 +333,7 @@ def script(argv=None):
         help="the amount of time after song end to extract (default %(default).1f ms)",
     )
     pp.add_argument("model", help="trained classifier model (pkl file saved by `train`")
-    pp.add_argument("input", help="the ARF file to process")
+    pp.add_argument("input", help="the ARF file to process", nargs="+")
     pp.add_argument("output", help="output where the song segments should be saved")
 
     args = p.parse_args(argv)
@@ -341,3 +343,7 @@ def script(argv=None):
         return 0
 
     args.func(args)
+
+
+if __name__=="__main__":
+    script()
