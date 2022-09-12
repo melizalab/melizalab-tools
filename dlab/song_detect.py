@@ -16,8 +16,8 @@ spectrogram:
   shift_ms: 10.0
   frequency_range: [0.5, 20.]
 features:
-  - TotalPower
-  - WienerEntropy
+  - total_power
+  - wiener_entropy
 target_label: x
 smoothing:
   kernel_widths: [11, 21, 51]
@@ -56,7 +56,7 @@ def make_extractor(cfg, sampling_rate_khz):
         cfg["spectrogram"]["shift_ms"],
         cfg["spectrogram"]["frequency_range"],
     )
-    feats = tuple(getattr(features, f)() for f in cfg["features"])
+    feats = tuple(getattr(features, f) for f in cfg["features"])
     conv = OverlapSaveConvolver(make_hanning_kernels(cfg["smoothing"]["kernel_widths"]))
     return FeatureExtractor(speccr, feats, conv)
 
