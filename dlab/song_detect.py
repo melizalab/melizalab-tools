@@ -170,7 +170,11 @@ def extract_songs(args):
                     if not isinstance(entry, h5.Group):
                         log.info("  ✗ %s: not an entry, skipping", entry.name)
                         continue
-                    dset = entry[args.dataset_name]
+                    try:
+                        dset = entry[args.dataset_name]
+                    except KeyError:
+                        log.info("  ✗ %s: does not have dataset `%s`, skipping", args.dataset_name)
+                        continue
                     sampling_rate = dset.attrs["sampling_rate"] / 1000.0
                     entry_start = entry.attrs["jack_frame"]
                     log.debug(
