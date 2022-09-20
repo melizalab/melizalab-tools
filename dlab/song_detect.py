@@ -1,48 +1,42 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Front-end scripts for song detector """
-import os
+from pathlib import Path
 import pickle
 import argparse
 import logging
 import numpy as np
 
 script_name = "quicksong"
-__version__ = "2022.09.11"
+__version__ = "2022.09.20"
 
-_example_config = """
-spectrogram:
-  window_ms: 20.0
-  shift_ms: 10.0
-  frequency_range: [0.5, 20.]
-features:
-  - total_power
-  - wiener_entropy
-target_label: x
-smoothing:
-  kernel_widths: [11, 21, 51]
-classifier:
-  gamma: 2
-  C: 1
-testing:
-  test_size: 0.4
-  random_state: 45
-intervals:
-  max_gap_ms: 100
-  min_interval_ms: 500
-# add your training data here, one line per labeled recording
-datasets:
-  - name_of_recording
-"""
+_example_config = dict(
+    spectrogram={
+        "window_ms": 20.0,
+        "shift_ms": 10.0,
+        "frequency_range": [0.7, 20.0],
+    },
+    features=["total_power", "wiener_entropy"],
+    target_label="x",
+    smoothing={"kernel_widths": [11, 21, 51]},
+    classifier={"gamma": 2, "C": 1},
+    testing={"test_size": 0.4, "random_state": 45},
+    intervals={"max_gap_ms": 100, "min_interval_ms": 500},
+    datasets=[],
+)
 
 log = logging.getLogger("")
 
 
 def make_config(args):
+    import yaml
+
+    cfg = _example_config.copy()
+    for lblfile in args.label_files:
+        cfg["datasets"].append(lblfile.stem)
     with open(args.config, "wt") as fp:
-        fp.writelines(_example_config)
+        yaml.dump(cfg, fp)
         log.info("created new configuration file '%s'", args.config)
-        log.info("edit this file to add training stimuli under `datasets`")
 
 
 def make_extractor(cfg, sampling_rate_khz):
@@ -78,8 +72,8 @@ def train_classifier(args):
     y_all = []
     for dset in cfg["datasets"]:
         log.info("- dataset: %s", dset)
-        path = os.path.join(args.dataset_dir, dset)
-        with ewave.open(path + ".wav", "r") as fp:
+        path = args.dataset_dir / dset
+        with ewave.open(path.with_suffix(".wav"), "r") as fp:
             Fs = fp.sampling_rate / 1000.0
             signal = ewave.rescale(fp.read(), "f")
             log.info(" - recording: %d samples @ %.2f kHz", signal.size, Fs)
@@ -87,7 +81,7 @@ def train_classifier(args):
         feats = extractor.process_all(signal)
         log.info("   - calculated features %s", feats.shape)
 
-        with open(path + ".lbl", "rt") as fp:
+        with open(path.with_suffix(".lbl"), "rt") as fp:
             out = []
             for lbl in lblio.read(fp):
                 n = lbl["name"]
@@ -111,10 +105,10 @@ def train_classifier(args):
     y = np.concatenate(y_all)
     assert X.shape[0] == y.size
     log.info("- training classifier...")
-    classifier, score = model.train_classifier(
-        X, y, cfg["classifier"], cfg["testing"]
-    )
+    classifier, score = model.train_classifier(X, y, cfg["classifier"], cfg["testing"])
     log.info("  - model score: %.3f", score)
+    if args.model is None:
+        args.model = args.config.with_suffix(".pkl")
     with open(args.model, "wb") as fp:
         pickle.dump(
             {"config": cfg, "classifier": classifier, "version": __version__}, fp
@@ -136,12 +130,14 @@ class ArfWriter:
 
     def create_entry(self, timestamp, **attributes):
         import arf
+
         next_entry_name = self.template.format(index=self.entry_count)
         self.entry_count += 1
         return arf.create_entry(self.arfp, next_entry_name, timestamp, **attributes)
 
 
 def extract_songs(args):
+    import os
     import arf
     import h5py as h5
     from quicksong.core import IntervalFinder
@@ -173,7 +169,11 @@ def extract_songs(args):
                     try:
                         dset = entry[args.dataset_name]
                     except KeyError:
-                        log.info("  ✗ %s: does not have dataset `%s`, skipping", args.dataset_name)
+                        log.info(
+                            "  ✗ %s: does not have dataset `%s`, skipping",
+                            entry.name,
+                            args.dataset_name,
+                        )
                         continue
                     sampling_rate = dset.attrs["sampling_rate"] / 1000.0
                     entry_start = entry.attrs["jack_frame"]
@@ -203,7 +203,8 @@ def extract_songs(args):
                     for block in extractor.process(dset):
                         pred = classifier.predict(block)
                         intervals.extend(
-                            (start * dt, stop * dt) for start, stop in finder.process(pred)
+                            (start * dt, stop * dt)
+                            for start, stop in finder.process(pred)
                         )
                     # jack_frame is a np.uint32 so it should overflow to allow
                     # comparison with next entry
@@ -272,7 +273,7 @@ def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
             end_sample,
             (end_sample - start_sample) / sampling_rate,
             writer.filename,
-            new_dset.name
+            new_dset.name,
         )
 
 
@@ -290,18 +291,32 @@ def script(argv=None):
 
     pp = sub.add_parser("init", help="generate a starting configuration file")
     pp.set_defaults(func=make_config)
-    pp.add_argument("config", help="path where the configuration file should be saved")
+    pp.add_argument(
+        "config", type=Path, help="path where the configuration file should be saved"
+    )
+    pp.add_argument(
+        "label_files",
+        type=Path,
+        nargs="*",
+        help="label files to add to config file as training dataset",
+    )
 
     pp = sub.add_parser("train", help="train the classifier")
     pp.set_defaults(func=train_classifier)
     pp.add_argument(
         "--dataset-dir",
         "-d",
-        default=".",
+        type=Path,
+        default=Path("."),
         help="directory where training data files are stored",
     )
-    pp.add_argument("config", help="path of the configuration file")
-    pp.add_argument("model", help="path where the model should be saved")
+    pp.add_argument("config", type=Path, help="path of the configuration file")
+    pp.add_argument(
+        "model",
+        type=Path,
+        nargs="?",
+        help="path where the model should be saved (default is `config.pkl`)",
+    )
 
     pp = sub.add_parser(
         "extract", help="use a trained model to extract songs from ARF files"
@@ -349,5 +364,5 @@ def script(argv=None):
     args.func(args)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     script()
