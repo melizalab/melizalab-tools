@@ -8,7 +8,7 @@ import logging
 import numpy as np
 
 script_name = "quicksong"
-__version__ = "2022.09.20"
+__version__ = "2022.09.21"
 
 _example_config = dict(
     spectrogram={
@@ -37,6 +37,10 @@ def make_config(args):
     with open(args.config, "wt") as fp:
         yaml.dump(cfg, fp)
         log.info("created new configuration file '%s'", args.config)
+    if args.train:
+        args.dataset_dir = lblfile.parent
+        args.model = None
+        train_classifier(args)
 
 
 def make_extractor(cfg, sampling_rate_khz):
@@ -291,6 +295,11 @@ def script(argv=None):
 
     pp = sub.add_parser("init", help="generate a starting configuration file")
     pp.set_defaults(func=make_config)
+    pp.add_argument(
+        "--train",
+        action="store_true",
+        help="run training with the intialized config file",
+    )
     pp.add_argument(
         "config", type=Path, help="path where the configuration file should be saved"
     )
