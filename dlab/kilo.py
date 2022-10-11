@@ -1,14 +1,144 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for using kilsort/phy data """
-import os
 import logging
+from pathlib import Path
+from collections import namedtuple
+
 import numpy as np
 import pandas as pd
 import quickspikes as qs
+import h5py as h5
 from tqdm import tqdm
 
 log = logging.getLogger("dlab.kilo")
+
+Trial = namedtuple(
+    "Trial",
+    [
+        "recording_entry",
+        "recording_start",
+        "recording_end",
+        "stimulus_name",
+        "stimulus_start",
+        "stimulus_end",
+    ],
+)
+
+Stimulus = namedtuple("Stimulus", ["name", "start", "end"], defaults=[None])
+
+
+def read_kilo_params(fname):
+    """Read the kilosort params.py file"""
+    from itertools import chain
+    from configparser import ConfigParser
+
+    parser = ConfigParser()
+    with open(fname, "rt") as lines:
+        lines = chain(("[top]",), lines)
+        parser.read_file(lines)
+    sect = parser["top"]
+    return dict(
+        dtype=sect["dtype"].strip("'"),
+        nchannels=int(sect["n_channels_dat"]),
+        sampling_rate=float(sect["sample_rate"]),
+    )
+
+
+def oeaudio_stims(dset):
+    """Parse the messages in the 'stim' dataset to get a table of stimuli with
+    start samples. Note that these need to be corrected for offset of the
+    recording and network lag.
+
+    """
+    import re
+
+    re_start = re.compile(r"start (.*)")
+
+    for row in dset:
+        time = row["start"]
+        message = row["message"].decode("utf-8")
+        m = re_start.match(message)
+        if m is not None:
+            stim_name = Path(m.group(1)).stem
+            yield Stimulus(stim_name, time)
+
+
+def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0, prepad=1.0):
+
+    """Extracts trial information from an oeaudio-present experiment ARF file
+
+    When using oeaudio-present, a single recording is made in response to all
+    the stimuli. The stimulus presentation script sends network events to
+    open-ephys to mark the start and stop of each stimulus. There is typically a
+    significant lag between the 'start' event and the onset of the stimulus, due
+    to buffering of the audio playback. However, the oeaudio-present script will
+    play a synchronization click on a second channel by default. As long as the
+    user remembers to record this channel, it can be used to correct the onset
+    and offset values.
+
+    The continuous recording is broken up into trials based on the stimulus
+    presentation, such that each trial encompasses one and only one stimulus.
+    The `prepad` parameter specifies, in seconds, when trials begin relative to
+    stimulus onset. The default is 1.0 s.
+
+    """
+    from itertools import zip_longest
+    from dlab.extracellular import (
+        find_stim_dset,
+        entry_time,
+        iter_entries,
+        stim_duration,
+    )
+    from arf import timestamp_to_datetime
+
+    expt_start = None
+    det = qs.detector(sync_thresh, 10)
+    for entry_num, entry in iter_entries(data_file):
+        log.info(" - entry: '%s'", entry.name)
+        entry_start = entry_time(entry)
+        log.info("  - start time: %s", timestamp_to_datetime(entry.attrs["timestamp"]))
+        if expt_start is None:
+            expt_start = entry_start
+
+        log.info("  - parsing stimulus log")
+        stims = list(oeaudio_stims(find_stim_dset(entry)))
+        log.info("    - detected %d stimuli", len(stims))
+        log.info("  - sync track: '%s'", sync_dset)
+        sync = entry[sync_dset]
+        sync_data = sync[:].astype("d")
+        det.scale_thresh(sync_data.mean(), sync_data.std())
+        stim_onsets = np.asarray(det(sync_data))
+        log.info("    - detected %d clicks", stim_onsets.size)
+        dset_offset = sync.attrs["offset"]
+        dset_end = sync.size
+        sampling_rate = sync.attrs["sampling_rate"]
+        stim_sample_offset = int(dset_offset * sampling_rate)
+        log.info("  - recording clock offset: %d", stim_sample_offset)
+
+        if len(stims) != stim_onsets.size:
+            log.warning(
+                "  - WARNING: number of stimuli does not match number of clicks. This recording may need to be discarded"
+            )
+
+        padding_samples = int(prepad * sampling_rate)
+        for stim, onset, offset in zip_longest(
+            stims, stim_onsets, stim_onsets[1:], fillvalue=dset_end + padding_samples
+        ):
+            stim_dur = int(stim_duration(stim.name) * sampling_rate)
+            if stim_dur > offset - onset:
+                log.warning(
+                    "  - WARNING: in trial %d, stimulus %s is longer than the duration of the trial",
+                    index,
+                )
+            yield Trial(
+                entry_num,
+                onset - padding_samples,
+                offset - padding_samples,
+                stim.name,
+                onset,
+                onset + stim_dur,
+            )
 
 
 def assign_events_flat(events, sampling_rate):
@@ -85,10 +215,10 @@ def assign_events(pprox, events, warn_unassigned=False, only_clusters=None):
 def group_spikes_script(argv=None):
     import nbank
     import argparse
-    import json
     from dlab.util import setup_log, json_serializable
+    from dlab.core import get_or_verify_datafile
 
-    __version__ = "2022.07.01"
+    __version__ = "2022.10.11"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -101,6 +231,23 @@ def group_spikes_script(argv=None):
         "--dry-run",
         help="do everything except write the output files",
         action="store_true",
+    )
+    p.add_argument(
+        "--sync",
+        default="sync",
+        help="name of channel with synchronization signal (default '%(default)s')",
+    )
+    p.add_argument(
+        "--sync-thresh",
+        default=30.0,
+        type=float,
+        help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
+    )
+    p.add_argument(
+        "--prepad",
+        type=float,
+        default=1.0,
+        help="sets trial start time relative to stimulus onset (default %(default)0.1f s)",
     )
     p.add_argument(
         "--toelis",
@@ -117,6 +264,8 @@ def group_spikes_script(argv=None):
     p.add_argument(
         "--output",
         "-o",
+        type=Path,
+        default=".",
         help="directory to output pprox files (default current directory)",
     )
     p.add_argument(
@@ -165,26 +314,23 @@ def group_spikes_script(argv=None):
         default=3,
         help="factor to upsample spikes before aligning them (default %(default)0.1f)",
     )
-    p.add_argument(
-        "trials", help="pprox file with the trial structure of the experiment"
-    )
+    p.add_argument("recording", help="ARF recording (local file, or neurobank id/URL)")
     p.add_argument(
         "sortdir",
+        type=Path,
         help="kilosort output directory. Needs to contain 'spike_times.npy', 'spike_clusters.npy',"
         " 'cluster_info.tsv', and 'temp_wh.dat'",
     )
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    log.info("- loading data:")
-    log.info("  - experiment file: %s", args.trials)
-    with open(args.trials, "rt") as fp:
-        pprox = json.load(fp)
-    sampling_rate = pprox["entry_metadata"][0]["sampling_rate"]
+    datafile, resource_info = get_or_verify_datafile(args.recording, args.debug)
+    recording_name = resource_info["name"]
+    resource_url = nbank.full_url(recording_name)
     log.info("  - kilosort output directory: %s", args.sortdir)
-    timefile = os.path.join(args.sortdir, "spike_times.npy")
-    clustfile = os.path.join(args.sortdir, "spike_clusters.npy")
-    infofile = os.path.join(args.sortdir, "cluster_info.tsv")
+    timefile = args.sortdir / "spike_times.npy"
+    clustfile = args.sortdir / "spike_clusters.npy"
+    infofile = args.sortdir / "cluster_info.tsv"
     log.info("    - spike times: %s", timefile)
     log.info("    - spike clusters: %s", clustfile)
     events = pd.DataFrame(
@@ -192,112 +338,116 @@ def group_spikes_script(argv=None):
     )
     log.info("    - cluster info: %s", infofile)
     info = pd.read_csv(infofile, sep="\t", index_col=0)
-    recfile = os.path.join(args.sortdir, "temp_wh.dat")
-    filtfile = os.path.join(args.sortdir, "whitening_mat.npy")
-    nchannels, _ = np.load(filtfile).shape
-    # TODO get dtype from params.py
-    recording = np.memmap(recfile, mode="c", dtype="int16")
-    recording = np.reshape(recording, (recording.size // nchannels, nchannels))
+    recfile = args.sortdir / "temp_wh.dat"
+    params = read_kilo_params(args.sortdir / "params.py")
+    recording = np.memmap(recfile, mode="c", dtype=params["dtype"])
+    recording = np.reshape(
+        recording, (recording.size // params["nchannels"], params["nchannels"])
+    )
     nsamples, nchannels = recording.shape
     log.info("    - filtered recording: %s", recfile)
     log.info("      - %d samples, %d channels", nsamples, nchannels)
 
-    if args.name is None:
-        base, rec_id = nbank.parse_resource_id(pprox["recording"])
-        args.name = rec_id
-
     if args.toelis:
         import toelis
-
-        clusters = assign_events_flat(events, sampling_rate)
-        outfile = os.path.join(args.output or "", "all_units.toe_lis")
+        clusters = assign_events_flat(events, params["sampling_rate"])
+        outfile = (args.output / recording_name).with_suffix(".toelis")
         if not args.dry_run:
             with open(outfile, "wt") as ofp:
                 toelis.write(ofp, clusters)
             log.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
-    else:
-        clusters = assign_events(
-            pprox,
-            events,
-            warn_unassigned=args.debug,
-            only_clusters=args.cluster,
-        )
-        total_spikes = 0
-        total_clusters = 0
-        events = events.set_index("clust")
-        for clust_id, cluster in clusters.items():
-            clust_info = info.loc[clust_id]
-            clust_type = clust_info["group"]
-            n_spikes = sum(len(t["events"]) for t in cluster["pprox"])
-            if clust_type == "noise" or (clust_type == "mua" and not args.mua):
-                log.info(
-                    "  - cluster %d (%d spikes, %s) -> skipped",
-                    clust_id,
-                    n_spikes,
-                    clust_type,
-                )
-                continue
-            total_spikes += n_spikes
-            total_clusters += 1
-            # annotate with cluster info
-            cluster.update(
-                kilosort_amplitude=clust_info["Amplitude"],
-                kilosort_contam_pct=clust_info["ContamPct"],
-                kilosort_source_channel=clust_info["ch"],
-                kilosort_probe_depth=clust_info["depth"],
-                kilosort_n_spikes=clust_info["n_spikes"],
-            )
-            outfile = os.path.join(
-                args.output or "", "{}_c{}.pprox".format(args.name, clust_id)
-            )
-            log.info(
-                "  - cluster %d (%d spikes, %s) -> %s",
-                clust_id,
-                n_spikes,
-                clust_type,
-                outfile,
-            )
-            n_before = int(args.waveform_pre_peak * sampling_rate / 1000)
-            n_after = int(args.waveform_post_peak * sampling_rate / 1000)
-            clust = events.loc[clust_id]
-            clust = clust[(clust.time > n_before) & (clust.time < (nsamples - n_after))]
-            nspikes, _ = clust.shape
-            selected = clust.sample(
-                min(args.waveform_num_spikes, nspikes), random_state=args.waveform_seed
-            )
-            times = sorted(selected.time)
-            waveforms = qs.peaks(
-                recording[:, clust_info["ch"]], times, n_before, n_after
-            )
-            if args.waveform_upsample > 1:
-                # quick and dirty check for inverted signal
-                mean_spike = waveforms.mean(0)
-                flip = np.sign(mean_spike.min() + mean_spike.max())
-                _, waveforms = qs.realign_spikes(
-                    times,
-                    waveforms * flip,
-                    args.waveform_upsample,
-                    expected_peak=n_before * args.waveform_upsample,
-                )
-                waveforms *= flip
-            cluster["waveform"] = {
-                "mean": waveforms.mean(0),
-                "sampling_rate": sampling_rate * args.waveform_upsample,
-            }
-            if args.save_waveforms:
-                np.save(os.path.splitext(outfile)[0] + "_spikes.npy", waveforms)
+        return
 
-            try:
-                pb = cluster["processed_by"]
-            except KeyError:
-                pb = []
-                cluster["processed_by"] = pb
-            pb.append("{} {}".format(p.prog, __version__))
-            if not args.dry_run:
-                with open(outfile, "wt") as ofp:
-                    json.dump(cluster, ofp, default=json_serializable)
-        log.info(
-            "- a total of %d spikes were assigned to %d clusters",
-            total_spikes,
-            total_clusters,
+    log.info("- splitting recording into trials:")
+    with h5.File(datafile, "r") as afp:
+        trials = pd.DataFrame(
+            oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad)
         )
+
+
+    # else:
+    #     clusters = assign_events(
+    #         pprox,
+    #         events,
+    #         warn_unassigned=args.debug,
+    #         only_clusters=args.cluster,
+    #     )
+    #     total_spikes = 0
+    #     total_clusters = 0
+    #     events = events.set_index("clust")
+    #     for clust_id, cluster in clusters.items():
+    #         clust_info = info.loc[clust_id]
+    #         clust_type = clust_info["group"]
+    #         n_spikes = sum(len(t["events"]) for t in cluster["pprox"])
+    #         if clust_type == "noise" or (clust_type == "mua" and not args.mua):
+    #             log.info(
+    #                 "  - cluster %d (%d spikes, %s) -> skipped",
+    #                 clust_id,
+    #                 n_spikes,
+    #                 clust_type,
+    #             )
+    #             continue
+    #         total_spikes += n_spikes
+    #         total_clusters += 1
+    #         # annotate with cluster info
+    #         cluster.update(
+    #             kilosort_amplitude=clust_info["Amplitude"],
+    #             kilosort_contam_pct=clust_info["ContamPct"],
+    #             kilosort_source_channel=clust_info["ch"],
+    #             kilosort_probe_depth=clust_info["depth"],
+    #             kilosort_n_spikes=clust_info["n_spikes"],
+    #         )
+    #         outfile = os.path.join(
+    #             args.output or "", "{}_c{}.pprox".format(args.name, clust_id)
+    #         )
+    #         log.info(
+    #             "  - cluster %d (%d spikes, %s) -> %s",
+    #             clust_id,
+    #             n_spikes,
+    #             clust_type,
+    #             outfile,
+    #         )
+    #         n_before = int(args.waveform_pre_peak * sampling_rate / 1000)
+    #         n_after = int(args.waveform_post_peak * sampling_rate / 1000)
+    #         clust = events.loc[clust_id]
+    #         clust = clust[(clust.time > n_before) & (clust.time < (nsamples - n_after))]
+    #         nspikes, _ = clust.shape
+    #         selected = clust.sample(
+    #             min(args.waveform_num_spikes, nspikes), random_state=args.waveform_seed
+    #         )
+    #         times = sorted(selected.time)
+    #         waveforms = qs.peaks(
+    #             recording[:, clust_info["ch"]], times, n_before, n_after
+    #         )
+    #         if args.waveform_upsample > 1:
+    #             # quick and dirty check for inverted signal
+    #             mean_spike = waveforms.mean(0)
+    #             flip = np.sign(mean_spike.min() + mean_spike.max())
+    #             _, waveforms = qs.realign_spikes(
+    #                 times,
+    #                 waveforms * flip,
+    #                 args.waveform_upsample,
+    #                 expected_peak=n_before * args.waveform_upsample,
+    #             )
+    #             waveforms *= flip
+    #         cluster["waveform"] = {
+    #             "mean": waveforms.mean(0),
+    #             "sampling_rate": sampling_rate * args.waveform_upsample,
+    #         }
+    #         if args.save_waveforms:
+    #             np.save(os.path.splitext(outfile)[0] + "_spikes.npy", waveforms)
+
+    #         try:
+    #             pb = cluster["processed_by"]
+    #         except KeyError:
+    #             pb = []
+    #             cluster["processed_by"] = pb
+    #         pb.append("{} {}".format(p.prog, __version__))
+    #         if not args.dry_run:
+    #             with open(outfile, "wt") as ofp:
+    #                 json.dump(cluster, ofp, default=json_serializable)
+    #     log.info(
+    #         "- a total of %d spikes were assigned to %d clusters",
+    #         total_spikes,
+    #         total_clusters,
+    #     )
