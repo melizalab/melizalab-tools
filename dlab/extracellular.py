@@ -254,7 +254,6 @@ def oeaudio_to_trials(data_file, sync_dset=None, sync_thresh=1.0, prepad=1.0):
             if m is not None:
                 stim_name = parse_stim_id(m.group(1))
                 stim_on = time - stim_sample_offset
-                import pdb; pdb.set_trace()  ## DEBUG ##
                 # adjust to next sync click
                 if sync_dset is not None:
                     click_idx = stim_onsets.searchsorted(stim_on)
