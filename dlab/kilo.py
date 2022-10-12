@@ -129,8 +129,8 @@ def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0, prepad=1.0):
             stim_dur = int(stim_duration(stim.name) * sampling_rate)
             if stim_dur > offset - onset:
                 log.warning(
-                    "  - WARNING: in trial %d, stimulus %s is longer than the duration of the trial",
-                    index,
+                    "  - WARNING: stimulus %s is longer than the duration of the trial",
+                    stim,
                 )
             yield Trial(
                 entry_num,
@@ -412,7 +412,7 @@ def group_spikes_script(argv=None):
             "sampling_rate": params["sampling_rate"] * args.waveform_upsample,
         }
         if args.save_waveforms:
-            np.save(os.path.splitext(outfile)[0] + "_spikes.npy", waveforms)
+            np.save(args.output / (outfile.stem + "_spikes.npy"), waveforms)
 
         if not args.dry_run:
             with open(outfile, "wt") as ofp:
