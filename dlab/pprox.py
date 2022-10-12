@@ -36,18 +36,16 @@ def wrap_uuid(b):
     return uuid.UUID(b).urn
 
 
-def groupby(obj, *keys):
+def groupby(obj, keyfun):
     """Iterate through pprocs based on keys
 
-    For example, if "stim" and "trial" are metadata on the trials, collate(obj, "stim") will yield
+    For example, if "stim" and "trial" are metadata on the trials, groupby(obj, lambda x: x["stim"]) will yield
     (stim0, [events_trial0, events_trial1]), (stim1, [events_trial0, events_trial1]), ...
 
     """
     import itertools
-    import operator
-    keyfun = operator.itemgetter(keys)
-    evsorted = sorted(obj['pprox'], keyfun)
-    return itertools.groupby(evsorted, keyfun)
+    evsorted = sorted(obj['pprox'], key=keyfun)
+    return itertools.groupby(evsorted, key=keyfun)
 
 
 def validate(obj):
@@ -68,23 +66,11 @@ def trial_iterator(pprox):
         yield i, trial
 
 
-def aggregate_events(pprox, use_recording=False):
-    """Aggregate all the events in a pprox into a single array.
-
-    This function is primarily used for testing, as this should be the reverse
-    operation to whatever function is used to assign events to trials (assuming
-    no gaps in the recording). If there are gaps, then set `use_recording` to
-    True.
-
-    """
+def aggregate_events(pprox):
+    """Aggregate all the events in a pprox into a single array, using the offset field to adjust times """
     import numpy as np
-    all_events = []
-    for trial in pprox["pprox"]:
-        sampling_rate = trial["recording"]["sampling_rate"]
-        events = np.asarray(trial["events"])
-        if use_recording:
-            events = (events * sampling_rate).astype("i8") + trial["recording"]["start"]
-        else:
-            events = ((events + trial["offset"]) * sampling_rate).astype("i8")
-        all_events.append(events)
+    all_events = [
+        np.asarray(trial["events"]) + trial["offset"]
+        for trial in pprox["pprox"]
+    ]
     return np.concatenate(all_events)
