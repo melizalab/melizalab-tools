@@ -157,7 +157,7 @@ def trials_to_pprox(trials, sampling_rate):
     """ Convert pandas trials to pproc """
     for trial in trials.itertuples():
         pproc = {
-            "events": (trial.events - trial.stimulus_start) / sampling_rate,
+            "events": (trial.events.astype("d") - trial.stimulus_start) / sampling_rate,
             "offset": trial.stimulus_start / sampling_rate,
             "index": trial.Index,
             "interval": ((trial.recording_start - trial.stimulus_start) / sampling_rate,
@@ -181,6 +181,7 @@ def group_spikes_script(argv=None):
     import argparse
     from dlab.util import setup_log, json_serializable
     from dlab.core import get_or_verify_datafile
+    from dlab.extracellular import entry_metadata, iter_entries
 
     __version__ = "2022.10.11"
 
@@ -291,16 +292,16 @@ def group_spikes_script(argv=None):
     datafile, resource_info = get_or_verify_datafile(args.recording, args.debug)
     recording_name = resource_info["name"]
     resource_url = nbank.full_url(recording_name)
-    log.info("  - kilosort output directory: %s", args.sortdir)
+    log.info("- kilosort output directory: %s", args.sortdir)
     timefile = args.sortdir / "spike_times.npy"
     clustfile = args.sortdir / "spike_clusters.npy"
     infofile = args.sortdir / "cluster_info.tsv"
-    log.info("    - spike times: %s", timefile)
-    log.info("    - spike clusters: %s", clustfile)
+    log.info("  - spike times: %s", timefile)
+    log.info("  - spike clusters: %s", clustfile)
     events = pd.DataFrame(
         {"time": np.load(timefile).squeeze(), "clust": np.load(clustfile)},
     ).set_index("clust")
-    log.info("    - cluster info: %s", infofile)
+    log.info("  - cluster info: %s", infofile)
     info = pd.read_csv(infofile, sep="\t", index_col=0)
     recfile = args.sortdir / "temp_wh.dat"
     params = read_kilo_params(args.sortdir / "params.py")
@@ -309,10 +310,10 @@ def group_spikes_script(argv=None):
         recording, (recording.size // params["nchannels"], params["nchannels"])
     )
     nsamples, nchannels = recording.shape
-    log.info("    - filtered recording: %s", recfile)
-    log.info("      - %d samples, %d channels", nsamples, nchannels)
+    log.info("  - filtered recording: %s", recfile)
+    log.info("    - %d samples, %d channels", nsamples, nchannels)
     if args.cluster is not None:
-        log.info(" - only analyzing clusters: %s", args.cluster)
+        log.info("- only analyzing clusters: %s", args.cluster)
         events = events.loc[args.cluster]
 
     if args.toelis:
@@ -329,6 +330,9 @@ def group_spikes_script(argv=None):
     with h5.File(datafile, "r") as afp:
         trials = pd.DataFrame(
             oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad)
+        )
+        entry_attrs = tuple(
+            entry_metadata(e) for _, e in iter_entries(afp)
         )
 
     # this pandas magic sorts the events by cluster and trial
@@ -361,12 +365,13 @@ def group_spikes_script(argv=None):
         total_clusters += 1
         outfile = args.output / f"{recording_name}_c{clust_id}.pprox"
         log.info(
-            "  - cluster %d (%d spikes, %s) -> %s",
+            "  ✓ cluster %d (%d spikes, %s) -> %s",
             clust_id,
             n_spikes,
             clust_type,
             outfile,
         )
+
         clust_trials = pprox.from_trials(
             trials_to_pprox(clust_trials, params["sampling_rate"]),
             recording=resource_url,
@@ -376,41 +381,42 @@ def group_spikes_script(argv=None):
             kilosort_source_channel=clust_info["ch"],
             kilosort_probe_depth=clust_info["depth"],
             kilosort_n_spikes=clust_info["n_spikes"],
+            entry_metadata=entry_attrs,
             **resource_info["metadata"]
         )
-    #         n_before = int(args.waveform_pre_peak * sampling_rate / 1000)
-    #         n_after = int(args.waveform_post_peak * sampling_rate / 1000)
-    #         clust = events.loc[clust_id]
-    #         clust = clust[(clust.time > n_before) & (clust.time < (nsamples - n_after))]
-    #         nspikes, _ = clust.shape
-    #         selected = clust.sample(
-    #             min(args.waveform_num_spikes, nspikes), random_state=args.waveform_seed
-    #         )
-    #         times = sorted(selected.time)
-    #         waveforms = qs.peaks(
-    #             recording[:, clust_info["ch"]], times, n_before, n_after
-    #         )
-    #         if args.waveform_upsample > 1:
-    #             # quick and dirty check for inverted signal
-    #             mean_spike = waveforms.mean(0)
-    #             flip = np.sign(mean_spike.min() + mean_spike.max())
-    #             _, waveforms = qs.realign_spikes(
-    #                 times,
-    #                 waveforms * flip,
-    #                 args.waveform_upsample,
-    #                 expected_peak=n_before * args.waveform_upsample,
-    #             )
-    #             waveforms *= flip
-    #         cluster["waveform"] = {
-    #             "mean": waveforms.mean(0),
-    #             "sampling_rate": sampling_rate * args.waveform_upsample,
-    #         }
-    #         if args.save_waveforms:
-    #             np.save(os.path.splitext(outfile)[0] + "_spikes.npy", waveforms)
+        log.info("    - computing average spike waveform from channel %d", clust_info["ch"])
+        n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
+        n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
+        spikes = events.loc[clust_id]
+        spikes = spikes[(spikes.time > n_before) & (spikes.time < (nsamples - n_after))]
+        selected = spikes.sample(
+            min(args.waveform_num_spikes, n_spikes), random_state=args.waveform_seed
+        )
+        times = sorted(selected.time)
+        waveforms = qs.peaks(
+            recording[:, clust_info["ch"]], times, n_before, n_after
+        )
+        if args.waveform_upsample > 1:
+            # quick and dirty check for inverted signal
+            mean_spike = waveforms.mean(0)
+            flip = np.sign(mean_spike.min() + mean_spike.max())
+            _, waveforms = qs.realign_spikes(
+                times,
+                waveforms * flip,
+                args.waveform_upsample,
+                expected_peak=n_before * args.waveform_upsample,
+            )
+            waveforms *= flip
+        clust_trials["waveform"] = {
+            "mean": waveforms.mean(0),
+            "sampling_rate": params["sampling_rate"] * args.waveform_upsample,
+        }
+        if args.save_waveforms:
+            np.save(os.path.splitext(outfile)[0] + "_spikes.npy", waveforms)
 
         if not args.dry_run:
             with open(outfile, "wt") as ofp:
-                json.dump(cluster, ofp, default=json_serializable)
+                json.dump(clust_trials, ofp, default=json_serializable)
     log.info(
         "- a total of %d spikes were assigned to %d clusters",
         total_spikes,
