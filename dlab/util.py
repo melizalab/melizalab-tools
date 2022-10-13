@@ -8,7 +8,7 @@ from functools import singledispatch
 
 
 def setup_log(log, debug=False):
-    """ Set up logging for a module.
+    """Set up logging for a module.
 
     log: generate by calling e.g. `log = logging.getLogger("dlab.extracellular")`
     """
@@ -22,7 +22,7 @@ def setup_log(log, debug=False):
 
 
 class ParseKeyVal(argparse.Action):
-    """ argparse action for parsing -k key=value arguments
+    """argparse action for parsing -k key=value arguments
 
     Example: p.add_argument("-k", action=ParseKeyVal, default=dict(),
                             metavar="KEY=VALUE", dest="metadata")
@@ -30,6 +30,7 @@ class ParseKeyVal(argparse.Action):
 
     def parse_value(self, value):
         import ast
+
         try:
             return ast.literal_eval(value)
         except (ValueError, SyntaxError):
@@ -39,11 +40,10 @@ class ParseKeyVal(argparse.Action):
         kv = getattr(namespace, self.dest)
         if kv is None:
             kv = dict()
-        if not arg.count('=') == 1:
-            raise ValueError(
-                "%s argument badly formed; needs key=value" % arg)
+        if not arg.count("=") == 1:
+            raise ValueError("%s argument badly formed; needs key=value" % arg)
         else:
-            key, val = arg.split('=')
+            key, val = arg.split("=")
             kv[key] = self.parse_value(val)
         setattr(namespace, self.dest, kv)
 
@@ -67,11 +67,13 @@ def __js_numpy_arr(arr):
 
 
 def memodict(f):
-    """ Memoization decorator for a function taking a single argument """
+    """Memoization decorator for a function taking a single argument"""
+
     class memodict(dict):
         def __missing__(self, key):
             ret = self[key] = f(key)
             return ret
+
     return memodict().__getitem__
 
 

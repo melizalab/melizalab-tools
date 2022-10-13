@@ -289,7 +289,10 @@ def script(argv=None):
         description="train the song detector on labeled recordings"
     )
     p.add_argument(
-        "-v", "--version", action="version", version=f"%(prog)s {script_version} (melizalab-tools {__version__})"
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {script_version} (melizalab-tools {__version__})",
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     sub = p.add_subparsers(title="subcommands")

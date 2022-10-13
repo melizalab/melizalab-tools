@@ -146,33 +146,35 @@ def assign_events_flat(events, sampling_rate):
     """Assign event_times to clusters, generating a large toelis object"""
     nevents, _ = events.shape
     log.info("- grouping %d spikes by cluster...", nevents)
-    return (
-        events
-        .groupby("clust")
-        .apply(lambda df: df.time.sort_values().to_numpy() / sampling_rate * 1000.0)
+    return events.groupby("clust").apply(
+        lambda df: df.time.sort_values().to_numpy() / sampling_rate * 1000.0
     )
 
 
 def trials_to_pprox(trials, sampling_rate):
-    """ Convert pandas trials to pproc """
+    """Convert pandas trials to pproc"""
     for trial in trials.itertuples():
         # TODO need to handle empty trials
         pproc = {
             "events": (trial.events.astype("d") - trial.stimulus_start) / sampling_rate,
             "offset": trial.stimulus_start / sampling_rate,
             "index": trial.Index,
-            "interval": ((trial.recording_start - trial.stimulus_start) / sampling_rate,
-                         (trial.recording_end - trial.stimulus_start) / sampling_rate),
+            "interval": (
+                (trial.recording_start - trial.stimulus_start) / sampling_rate,
+                (trial.recording_end - trial.stimulus_start) / sampling_rate,
+            ),
             "stimulus": {
                 "name": trial.stimulus_name,
-                "interval": (0.0,
-                             (trial.stimulus_end - trial.stimulus_start) / sampling_rate)
+                "interval": (
+                    0.0,
+                    (trial.stimulus_end - trial.stimulus_start) / sampling_rate,
+                ),
             },
             "recording": {
                 "entry": trial.recording_entry,
                 "start": trial.recording_start,
-                "end": trial.recording_end
-            }
+                "end": trial.recording_end,
+            },
         }
         yield pproc
 
@@ -190,7 +192,10 @@ def group_spikes_script(argv=None):
         description="group kilosorted spikes into pprox files based on cluster and trial"
     )
     p.add_argument(
-        "-v", "--version", action="version", version=f"%(prog)s {version} (melizalab-tools {__version__})"
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {version} (melizalab-tools {__version__})",
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(
@@ -319,6 +324,7 @@ def group_spikes_script(argv=None):
 
     if args.toelis:
         import toelis
+
         clusters = assign_events_flat(events, params["sampling_rate"])
         outfile = (args.output / recording_name).with_suffix(".toe_lis")
         if not args.dry_run:
@@ -332,19 +338,16 @@ def group_spikes_script(argv=None):
         trials = pd.DataFrame(
             oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad)
         )
-        entry_attrs = tuple(
-            entry_metadata(e) for _, e in iter_entries(afp)
-        )
+        entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
 
     # this pandas magic sorts the events by cluster and trial
     log.info("- sorting events into trials:")
     events["trial"] = trials.recording_start.searchsorted(events.time, side="left") - 1
     clusters = (
-        events
-        .groupby("clust")
+        events.groupby("clust")
         .apply(lambda df: df.groupby("trial").apply(lambda x: x.time.to_numpy()))
         .unstack("clust")
-        .unstack("clust")         # I have no idea why this is necessary
+        .unstack("clust")  # I have no idea why this is necessary
     )
 
     total_spikes = 0
@@ -383,9 +386,11 @@ def group_spikes_script(argv=None):
             kilosort_probe_depth=clust_info["depth"],
             kilosort_n_spikes=clust_info["n_spikes"],
             entry_metadata=entry_attrs,
-            **resource_info["metadata"]
+            **resource_info["metadata"],
         )
-        log.info("    - computing average spike waveform from channel %d", clust_info["ch"])
+        log.info(
+            "    - computing average spike waveform from channel %d", clust_info["ch"]
+        )
         n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
         n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
         spikes = events.loc[clust_id]
@@ -394,9 +399,7 @@ def group_spikes_script(argv=None):
             min(args.waveform_num_spikes, n_spikes), random_state=args.waveform_seed
         )
         times = sorted(selected.time)
-        waveforms = qs.peaks(
-            recording[:, clust_info["ch"]], times, n_before, n_after
-        )
+        waveforms = qs.peaks(recording[:, clust_info["ch"]], times, n_before, n_after)
         if args.waveform_upsample > 1:
             # quick and dirty check for inverted signal
             mean_spike = waveforms.mean(0)

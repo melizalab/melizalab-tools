@@ -94,6 +94,7 @@ def split_trial(trial, split_fun):
 
     """
     import pandas as pd
+
     stimulus = trial["stimulus"]
     stim_on = stimulus["interval"][0]
     splits = split_fun(stimulus["name"])

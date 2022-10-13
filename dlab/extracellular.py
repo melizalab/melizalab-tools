@@ -95,7 +95,10 @@ def audiolog_to_pprox_script(argv=None):
         description="generate pprox from trial structure in present_audio logfile"
     )
     p.add_argument(
-        "-v", "--version", action="version", version=f"%(prog)s {version} (melizalab-tools {__version__})"
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {version} (melizalab-tools {__version__})",
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(
@@ -139,7 +142,7 @@ def audiolog_to_pprox_script(argv=None):
                 ),
                 recording=resource_url,
                 processed_by=["{} {}".format(p.prog, version)],
-                **expt_log
+                **expt_log,
             )
     json.dump(trials, args.output, default=json_serializable)
     if args.output != sys.stdout:
@@ -147,6 +150,7 @@ def audiolog_to_pprox_script(argv=None):
 
 
 ############### open-ephys-audio specific functions
+
 
 def find_stim_dset(entry):
     """Returns the first dataset that matches 'Network_Events.*_TEXT'"""

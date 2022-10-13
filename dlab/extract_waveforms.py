@@ -11,7 +11,7 @@ import pandas as pd
 log = logging.getLogger("dlab")
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     import argparse
     from dlab.core import __version__, get_or_verify_datafile
     from dlab.util import setup_log
@@ -24,7 +24,10 @@ if __name__=="__main__":
         "for each pprox file"
     )
     p.add_argument(
-        "-v", "--version", action="version", version=f"%(prog)s {script_version} (melizalab-tools {__version__})"
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {script_version} (melizalab-tools {__version__})",
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(
@@ -53,10 +56,7 @@ if __name__=="__main__":
         help="factor to upsample spikes before aligning them (default %(default)0.1f)",
     )
     p.add_argument(
-        "--seed",
-        type=int,
-        default=12345,
-        help="random seed for selecting spikes"
+        "--seed", type=int, default=12345, help="random seed for selecting spikes"
     )
     p.add_argument("recording", help="ARF recording (local file, or neurobank id/URL)")
     p.add_argument(
@@ -105,21 +105,28 @@ if __name__=="__main__":
                     spike_start = peak_sample - n_before
                     spike_end = peak_sample + n_after
                     if spike_start > 0 and spike_end < trial["recording"]["stop"]:
-                        spikes.append(
-                            (entry, spike, spike_start, spike_end)
-                        )
+                        spikes.append((entry, spike, spike_start, spike_end))
             spikes = pd.DataFrame.from_records(
-                np.array(spikes, dtype=[("entry", "i4"), ("peak", "f8"), ("start", "i8"), ("stop", "i8")])
+                np.array(
+                    spikes,
+                    dtype=[
+                        ("entry", "i4"),
+                        ("peak", "f8"),
+                        ("start", "i8"),
+                        ("stop", "i8"),
+                    ],
+                )
             )
             nspikes, _ = spikes.shape
-            selected = spikes.sample(min(args.num_spikes, nspikes), random_state=args.seed)
+            selected = spikes.sample(
+                min(args.num_spikes, nspikes), random_state=args.seed
+            )
             nspikes, _ = selected.shape
 
             waveforms = np.zeros((nspikes, n_before + n_after), dtype="f8")
             for i, row in enumerate(selected.itertuples(index=False)):
-                waveforms[i, :] = dsets[row.entry][row.start:row.stop]
-            #__import__("IPython").embed()
-
+                waveforms[i, :] = dsets[row.entry][row.start : row.stop]
+            # __import__("IPython").embed()
 
             #     spike_idx = (np.asarray(trial["events"]) * sampling_rate).astype("int64") + trial["recording"]["start"]
             #     nspikes = spike_idx.size
@@ -134,7 +141,7 @@ if __name__=="__main__":
             # spike_tbl = pd.DataFrame({"entry":
             # spikes = []
             # for entry, peak in zip(all_spike_entries[selected], all_spike_times[selected]):
-            #     
+            #
             #     s_before = peak - args.pre_spike * entry_metadata[entry]["sampling_rate"]
             #     s_after = peak + args.post_spike * entry_metadata[entry]["sampling_rate"]
             #     spikes.append(dset[s_before:s_after])
