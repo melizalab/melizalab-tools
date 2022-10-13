@@ -111,7 +111,8 @@ def split_trials(pprox, split_fun):
         gaps.iloc[-1] = gaps.mean()
         splits["interval_end"] = splits.stim_end + gaps
         last_split_end = splits.interval_end.iloc[-1]
-        spikes = pd.Series((t for t in trial["events"] if t < last_split_end))
+        spikes = pd.Series(trial["events"]) - stim_on
+        spikes = spikes[spikes < last_split_end]
         # this expression uses searchsorted to assign each spike to a split,
         # then groups the spikes by split and merges this with the table of splits
         split_data = splits[required_fields].join(
@@ -133,7 +134,7 @@ def split_trials(pprox, split_fun):
                 evts = sdata.events - sdata.stim_begin
             pproc = {
                 "events": evts,
-                "offset": trial["offset"] + sdata.stim_begin,
+                "offset": trial["offset"] + sdata.stim_begin + stim_on,
                 "index": sdata.Index,
                 "interval": [0.0, sdata.interval_end - sdata.stim_begin],
                 "stimulus": {"interval": [0.0, sdata.stim_end - sdata.stim_begin]},
