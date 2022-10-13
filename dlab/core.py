@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Shared code for all scripts and modules """
-
 import logging
 
+__version__ = "2022.10.13"
 log = logging.getLogger("dlab.core")
 
 

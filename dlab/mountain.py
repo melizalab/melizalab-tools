@@ -2,10 +2,7 @@
 # -*- mode: python -*-
 """ Functions for using mountainlab data """
 import os
-import shutil
 import logging
-
-from dlab import core, __version__
 
 log = logging.getLogger('dlab.mountain')
 
@@ -53,14 +50,15 @@ def group_spikes_script(argv=None):
     import argparse
     import json
     from arfx import mdaio
+    from dlab.core import __version__
     from dlab.util import setup_log, json_serializable
-    __version__ = "0.1.0"
+    version = "0.1.0"
 
     p = argparse.ArgumentParser(
         description="group sorted spikes into pprox files based on cluster and trial"
     )
     p.add_argument(
-        "-v", "--version", action="version", version="%(prog)s " + __version__
+        "-v", "--version", action="version", version=f"%(prog)s {version} (melizalab-tools {__version__})"
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(

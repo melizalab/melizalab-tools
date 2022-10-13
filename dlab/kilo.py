@@ -156,6 +156,7 @@ def assign_events_flat(events, sampling_rate):
 def trials_to_pprox(trials, sampling_rate):
     """ Convert pandas trials to pproc """
     for trial in trials.itertuples():
+        # TODO need to handle empty trials
         pproc = {
             "events": (trial.events.astype("d") - trial.stimulus_start) / sampling_rate,
             "offset": trial.stimulus_start / sampling_rate,
@@ -180,16 +181,16 @@ def group_spikes_script(argv=None):
     import nbank
     import argparse
     from dlab.util import setup_log, json_serializable
-    from dlab.core import get_or_verify_datafile
+    from dlab.core import __version__, get_or_verify_datafile
     from dlab.extracellular import entry_metadata, iter_entries
 
-    __version__ = "2022.10.11"
+    version = "2022.10.11"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
     )
     p.add_argument(
-        "-v", "--version", action="version", version="%(prog)s " + __version__
+        "-v", "--version", action="version", version=f"%(prog)s {version} (melizalab-tools {__version__})"
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(
@@ -375,7 +376,7 @@ def group_spikes_script(argv=None):
         clust_trials = pprox.from_trials(
             trials_to_pprox(clust_trials, params["sampling_rate"]),
             recording=resource_url,
-            processed_by=["{} {}".format(p.prog, __version__)],
+            processed_by=[f"{p.prog} {version}"],
             kilosort_amplitude=clust_info["Amplitude"],
             kilosort_contam_pct=clust_info["ContamPct"],
             kilosort_source_channel=clust_info["ch"],

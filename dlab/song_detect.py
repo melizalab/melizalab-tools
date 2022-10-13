@@ -8,7 +8,7 @@ import logging
 import numpy as np
 
 script_name = "quicksong"
-__version__ = "2022.09.21"
+script_version = "2022.09.21"
 
 _example_config = dict(
     spectrogram={
@@ -70,7 +70,7 @@ def train_classifier(args):
     log.debug(cfg)
     label_ids = {cfg["target_label"]: 0}
     log.info("Training song classifier:")
-    log.info("- version: %s", __version__)
+    log.info("- version: %s", script_version)
 
     X_all = []
     y_all = []
@@ -115,7 +115,7 @@ def train_classifier(args):
         args.model = args.config.with_suffix(".pkl")
     with open(args.model, "wb") as fp:
         pickle.dump(
-            {"config": cfg, "classifier": classifier, "version": __version__}, fp
+            {"config": cfg, "classifier": classifier, "version": script_version}, fp
         )
         log.info("- wrote model to '%s'", args.model)
 
@@ -148,7 +148,7 @@ def extract_songs(args):
 
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     log.info("Extracting songs:")
-    log.info("- version: %s", __version__)
+    log.info("- version: %s", script_version)
     with open(args.model, "rb") as fp:
         log.info("- loading classifier from '%s'", args.model)
         model = pickle.load(fp)
@@ -247,7 +247,7 @@ def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
     entry_attrs.update(
         source_file=parent_entry.file.filename,
         source_uuid=b",".join(dset.parent.attrs["uuid"] for dset in dsets),
-        entry_creator=f"org.meliza.dlab/{script_name} {__version__}",
+        entry_creator=f"org.meliza.dlab/{script_name} {script_version}",
     )
     entry_attrs.pop("uuid")
     dset_attrs = dict(dsets[0].attrs)
@@ -282,13 +282,14 @@ def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
 
 
 def script(argv=None):
+    from dlab.core import __version__
     from dlab.util import setup_log
 
     p = argparse.ArgumentParser(
         description="train the song detector on labeled recordings"
     )
     p.add_argument(
-        "-v", "--version", action="version", version="%(prog)s " + __version__
+        "-v", "--version", action="version", version=f"%(prog)s {script_version} (melizalab-tools {__version__})"
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     sub = p.add_subparsers(title="subcommands")

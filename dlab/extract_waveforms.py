@@ -7,18 +7,16 @@ import nbank
 import numpy as np
 import h5py as h5
 import pandas as pd
-import quickspikes as qs
 
 log = logging.getLogger("dlab")
 
 
-#def script(argv=None):
 if __name__=="__main__":
     import argparse
-    from dlab.core import get_or_verify_datafile
+    from dlab.core import __version__, get_or_verify_datafile
     from dlab.util import setup_log
 
-    __version__ = "2022.06.24"
+    script_version = "2022.06.24"
 
     p = argparse.ArgumentParser(
         description="extract waveforms from extracellular recording based "
@@ -26,7 +24,7 @@ if __name__=="__main__":
         "for each pprox file"
     )
     p.add_argument(
-        "-v", "--version", action="version", version="%(prog)s " + __version__
+        "-v", "--version", action="version", version=f"%(prog)s {script_version} (melizalab-tools {__version__})"
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(

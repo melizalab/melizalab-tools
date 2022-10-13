@@ -86,15 +86,16 @@ def audiolog_to_pprox_script(argv=None):
     import sys
     import argparse
     import json
+    from dlab import __version__
     from dlab.util import setup_log, json_serializable
 
-    __version__ = "0.1.0"
+    version = "0.1.0"
 
     p = argparse.ArgumentParser(
         description="generate pprox from trial structure in present_audio logfile"
     )
     p.add_argument(
-        "-v", "--version", action="version", version="%(prog)s " + __version__
+        "-v", "--version", action="version", version=f"%(prog)s {version} (melizalab-tools {__version__})"
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(
@@ -137,7 +138,7 @@ def audiolog_to_pprox_script(argv=None):
                     expt_log.pop("presentation"), afp, args.sync, args.sync_thresh
                 ),
                 recording=resource_url,
-                processed_by=["{} {}".format(p.prog, __version__)],
+                processed_by=["{} {}".format(p.prog, version)],
                 **expt_log
             )
     json.dump(trials, args.output, default=json_serializable)
