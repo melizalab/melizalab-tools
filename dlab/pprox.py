@@ -79,8 +79,8 @@ def aggregate_events(pprox):
     return np.concatenate(all_events)
 
 
-def split_trials(pprox, split_fun):
-    """Split the trials in `pprox` based on the stimulus.
+def split_trial(trial, split_fun):
+    """Split a trial into multiple intervals.
 
     split_fun: a function that takes the name of the stimulus and returns an
     list of dictionaries, one per split. Each dict needs to have at least three
@@ -90,56 +90,31 @@ def split_trials(pprox, split_fun):
     as metadata on the new trials. Alternatively, `split_fun` can return a
     pandas dataframe. Make sure the metadata fields are valid Python identifiers.
 
-    Returns a copy of the input pprox with the "pprox" field replaced by the split trials.
+    Returns a pandas DataFrame with one row per split.
 
     """
     import pandas as pd
-
-    required_fields = ["stim_begin", "stim_end", "interval_end"]
-    out = pprox.copy()
-    trials = out.pop("pprox")
-    out["pprox"] = []
-    for trial in trials:
-        stimulus = trial["stimulus"]
-        stim_on = stimulus["interval"][0]
-        splits = split_fun(stimulus["name"])
-        if not isinstance(splits, pd.DataFrame):
-            splits = pd.DataFrame(splits)
-        # calculate average gap between splits and use this to determine when
-        # the last split should end
-        gaps = splits.stim_begin.shift(-1) - splits.stim_end
-        gaps.iloc[-1] = gaps.mean()
-        splits["interval_end"] = splits.stim_end + gaps
-        last_split_end = splits.interval_end.iloc[-1]
-        spikes = pd.Series(trial["events"]) - stim_on
-        spikes = spikes[spikes < last_split_end]
-        # this expression uses searchsorted to assign each spike to a split,
-        # then groups the spikes by split and merges this with the table of splits
-        split_data = splits[required_fields].join(
-            spikes.groupby(splits.stim_begin.searchsorted(spikes, side="left") - 1)
-            .apply(lambda x: x.to_numpy())
-            .rename("events")
-        )
-        # kludgy way to select out metadata
-        split_meta = splits.drop(columns=required_fields)
-        # finally, iterate through the splits table and generate pproc objects
-        # with adjusted spike times, offsets, etc
-        for sdata, smeta in zip(
-            split_data.itertuples(), split_meta.itertuples(index=False)
-        ):
-            # check for empty trial
-            if isinstance(sdata.events, float):
-                evts = []
-            else:
-                evts = sdata.events - sdata.stim_begin
-            pproc = {
-                "events": evts,
-                "offset": trial["offset"] + sdata.stim_begin + stim_on,
-                "index": sdata.Index,
-                "interval": [0.0, sdata.interval_end - sdata.stim_begin],
-                "stimulus": {"interval": [0.0, sdata.stim_end - sdata.stim_begin]},
-                "source_trial": trial["index"],
-            }
-            pproc["stimulus"].update(smeta._asdict())
-            out["pprox"].append(pproc)
-    return out
+    stimulus = trial["stimulus"]
+    stim_on = stimulus["interval"][0]
+    splits = split_fun(stimulus["name"])
+    # calculate average gap between splits and use this to determine when
+    # the last split should end
+    gaps = splits.stim_begin.shift(-1) - splits.stim_end
+    gaps.iloc[-1] = gaps.mean()
+    splits["interval_end"] = splits.stim_end + gaps
+    last_split_end = splits.interval_end.iloc[-1]
+    spikes = pd.Series(trial["events"]) - stim_on
+    spikes = spikes[spikes < last_split_end]
+    # this expression uses searchsorted to assign each spike to a split,
+    # then groups the spikes by split and merges this with the table of splits
+    df = splits.join(
+        spikes.groupby(splits.stim_begin.searchsorted(spikes, side="left") - 1)
+        .apply(lambda x: x.to_numpy())
+        .rename("events")
+    )
+    df["offset"] = trial["offset"] + df.stim_begin + stim_on
+    df["events"] -= df.stim_begin
+    df["stim_end"] -= df.stim_begin
+    df["interval_end"] -= df.stim_begin
+    df["source_trial"] = trial["index"]
+    return df.drop(columns=["stim_begin"]).rename_axis(index="interval")

@@ -2,6 +2,7 @@
 # -*- mode: python -*-
 import unittest
 import logging
+import numpy as np
 import pandas as pd
 from dlab import pprox
 
@@ -231,7 +232,14 @@ class TestPprox(unittest.TestCase):
         all_events = pprox.aggregate_events(unit)
         self.assertEqual(all_events.size, sum(len(t["events"]) for t in unit["pprox"]))
 
-    def test_split_trials(self):
-        split = pprox.split_trials(unit, split_fun)
-        self.assertEqual(len(split["pprox"]), sum(len(split["stim_end"]) for split in stims.values()))
+    def test_split_trial(self):
+        for trial in unit["pprox"]:
+            stim = trial["stimulus"]["name"]
+            split = pprox.split_trial(trial, split_fun)
+            self.assertEqual(split.shape[0], len(stims[stim]["stim_end"]))
+            trial_spikes = np.asarray(trial["events"]) + trial["offset"]
+            split_spikes = split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
+            # round to avoid floating point imprecision
+            self.assertTrue(np.all(np.isin(np.floor(split_spikes * 1000),np.floor(trial_spikes * 1000))))
+            
 
