@@ -117,4 +117,4 @@ def split_trial(trial, split_fun):
     df["stim_end"] -= df.stim_begin
     df["interval_end"] -= df.stim_begin
     df["source_trial"] = trial["index"]
-    return df.drop(columns=["stim_begin"]).rename_axis(index="interval")
+    return df.drop(columns=["stim_begin"]).rename_axis(index="interval").reset_index()
