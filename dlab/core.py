@@ -3,7 +3,7 @@
 """ Shared code for all scripts and modules """
 import logging
 
-__version__ = "2022.10.13"
+__version__ = "2022.10.14"
 log = logging.getLogger("dlab.core")
 
 
