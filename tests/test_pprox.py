@@ -29,6 +29,18 @@ trials = [
     },
 ]
 
+empty_trial = {
+    "events": [],
+    "recording": {"entry": 0, "start": 36989, "stop": 989947},
+    "index": 0,
+    "offset": 1.2329666666666668,
+    "stimulus": {
+        "name": "igmi8fxa-p1mrfhop-0oq8ifcb-l1a3ltpy-vekibwgj-9ex2k0dy-c95zqjxq-ztqee46x-g29wxi4q-jkexyrd5-30_btwmt59w-50",
+        "interval": [1.0, 30.254149659863945],
+    },
+    "interval": [0.0, 31.765266666666665],
+}
+
 unit = {
     "$schema": "https://meliza.org/spec:2/pprox.json#",
     "pprox": [
@@ -100,7 +112,7 @@ unit = {
             "index": 1,
             "interval": [-1.0, 30.765166666666666],
             "stimulus": {
-                "name":   "g29wxi4q-c95zqjxq-jkexyrd5-vekibwgj-ztqee46x-0oq8ifcb-9ex2k0dy-igmi8fxa-l1a3ltpy-p1mrfhop-30_btwmt59w-60",
+                "name": "g29wxi4q-c95zqjxq-jkexyrd5-vekibwgj-ztqee46x-0oq8ifcb-9ex2k0dy-igmi8fxa-l1a3ltpy-p1mrfhop-30_btwmt59w-60",
                 "interval": [0.0, 29.254133333333332],
             },
             "recording": {"entry": 0, "start": 989755, "end": 1942710},
@@ -136,8 +148,7 @@ unit = {
 }
 
 stims = {
-    "igmi8fxa-p1mrfhop-0oq8ifcb-l1a3ltpy-vekibwgj-9ex2k0dy-c95zqjxq-ztqee46x-g29wxi4q-jkexyrd5-30_btwmt59w-50":
-    {
+    "igmi8fxa-p1mrfhop-0oq8ifcb-l1a3ltpy-vekibwgj-9ex2k0dy-c95zqjxq-ztqee46x-g29wxi4q-jkexyrd5-30_btwmt59w-50": {
         "foreground": "igmi8fxa-p1mrfhop-0oq8ifcb-l1a3ltpy-vekibwgj-9ex2k0dy-c95zqjxq-ztqee46x-g29wxi4q-jkexyrd5",
         "background": "btwmt59w",
         "background-dBFS": -50,
@@ -167,8 +178,7 @@ stims = {
             26.754149659863945,
         ],
     },
-    "g29wxi4q-c95zqjxq-jkexyrd5-vekibwgj-ztqee46x-0oq8ifcb-9ex2k0dy-igmi8fxa-l1a3ltpy-p1mrfhop-30_btwmt59w-60":
-    {
+    "g29wxi4q-c95zqjxq-jkexyrd5-vekibwgj-ztqee46x-0oq8ifcb-9ex2k0dy-igmi8fxa-l1a3ltpy-p1mrfhop-30_btwmt59w-60": {
         "foreground": "g29wxi4q-c95zqjxq-jkexyrd5-vekibwgj-ztqee46x-0oq8ifcb-9ex2k0dy-igmi8fxa-l1a3ltpy-p1mrfhop",
         "background": "btwmt59w",
         "background-dBFS": -60,
@@ -202,7 +212,7 @@ stims = {
 
 
 def split_fun(name):
-    info = stims[name]
+    info = stims[name].copy()
     info["foreground"] = info["foreground"].split("-")
     return pd.DataFrame(info).rename(lambda s: s.replace("-", "_"), axis="columns")
 
@@ -238,8 +248,23 @@ class TestPprox(unittest.TestCase):
             split = pprox.split_trial(trial, split_fun)
             self.assertEqual(split.shape[0], len(stims[stim]["stim_end"]))
             trial_spikes = np.asarray(trial["events"]) + trial["offset"]
-            split_spikes = split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
+            split_spikes = (
+                split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
+            )
             # round to avoid floating point imprecision
-            self.assertTrue(np.all(np.isin(np.floor(split_spikes * 1000),np.floor(trial_spikes * 1000))))
-            
+            self.assertTrue(
+                np.all(
+                    np.isin(
+                        np.floor(split_spikes * 1000), np.floor(trial_spikes * 1000)
+                    )
+                )
+            )
 
+    def test_split_trial_empty(self):
+        split = pprox.split_trial(empty_trial, split_fun)
+        stim = empty_trial["stimulus"]["name"]
+        self.assertEqual(split.shape[0], len(stims[stim]["stim_end"]))
+        split_spikes = (
+            split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
+        )
+        self.assertEqual(len(split_spikes), 0)

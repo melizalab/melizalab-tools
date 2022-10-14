@@ -1,2 +1,5 @@
+[tool.pytest.ini_options]
+filterwarnings = [ "error::FutureWarning" ]
+
 [build-system]
 requires = ["setuptools", "wheel"]

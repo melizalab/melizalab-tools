@@ -104,12 +104,12 @@ def split_trial(trial, split_fun):
     gaps.iloc[-1] = gaps.mean()
     splits["interval_end"] = splits.stim_end + gaps
     last_split_end = splits.interval_end.iloc[-1]
-    spikes = pd.Series(trial["events"]) - stim_on
+    spikes = pd.Series(trial["events"], dtype="f") - stim_on
     spikes = spikes[spikes < last_split_end]
     # this expression uses searchsorted to assign each spike to a split,
     # then groups the spikes by split and merges this with the table of splits
     df = splits.join(
-        spikes.groupby(splits.stim_begin.searchsorted(spikes, side="left") - 1)
+        spikes.groupby(splits.stim_begin.searchsorted(spikes, side="left") - 1, group_keys=False)
         .apply(lambda x: x.to_numpy())
         .rename("events")
     )
