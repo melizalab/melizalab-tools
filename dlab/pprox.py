@@ -79,6 +79,11 @@ def aggregate_events(pprox):
     return np.concatenate(all_events)
 
 
+def combine_recordings(*pprox):
+    """Combine events from multiple pprox objects into a single object, matching based on trial number"""
+    pass
+
+
 def split_trial(trial, split_fun):
     """Split a trial into multiple intervals.
 
@@ -120,7 +125,9 @@ def split_trial(trial, split_fun):
     # this expression uses searchsorted to assign each spike to a split,
     # then groups the spikes by split and merges this with the table of splits
     df = splits.join(
-        spikes.groupby(splits.stim_begin.searchsorted(spikes, side="left") - 1, group_keys=False)
+        spikes.groupby(
+            splits.stim_begin.searchsorted(spikes, side="left") - 1, group_keys=False
+        )
         .apply(lambda x: x.to_numpy())
         .rename("events")
     )

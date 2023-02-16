@@ -3,7 +3,7 @@
 """ Shared code for all scripts and modules """
 import logging
 
-__version__ = "2022.10.14"
+__version__ = "2023.02.15"
 log = logging.getLogger("dlab.core")
 
 
@@ -67,3 +67,8 @@ def fetch_resource(neurobank_registry, resource_name):
         log.debug("   - fetching %s from registry", resource_name)
         fetch_resource(neurobank_registry, resource_name, target)
     return str(target)
+
+
+def fetch_metadata(neurobank_registry, resource_name):
+    """ """
+    pass

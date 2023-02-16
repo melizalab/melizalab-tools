@@ -4,21 +4,22 @@
 import re
 import json
 import logging
+from functools import lru_cache
 
-from dlab.util import memodict
 
 log = logging.getLogger("dlab")
 
 
-def entry_time(entry):
-    from arf import timestamp_to_float
-
-    return timestamp_to_float(entry.attrs["timestamp"])
-
-
 def iter_entries(data_file):
     """Iterate through the entries in an arf file in order of time"""
-    return enumerate(sorted(data_file.values(), key=entry_time))
+    from arf import timestamp_to_float
+
+    return enumerate(
+        sorted(
+            data_file.values(),
+            key=lambda entry: timestamp_to_float(entry.attrs["timestamp"]),
+        )
+    )
 
 
 def find_stim_dset(entry):
@@ -30,7 +31,7 @@ def find_stim_dset(entry):
             return entry[name]
 
 
-@memodict
+@lru_cache(maxsize=None)
 def stim_duration(stim_name):
     """
     Returns the duration of a stimulus (in s). This can only really be done by

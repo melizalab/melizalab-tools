@@ -66,19 +66,8 @@ def __js_numpy_arr(arr):
     return arr.tolist()
 
 
-def memodict(f):
-    """Memoization decorator for a function taking a single argument"""
-
-    class memodict(dict):
-        def __missing__(self, key):
-            ret = self[key] = f(key)
-            return ret
-
-    return memodict().__getitem__
-
-
 def all_same(seq):
-    """If all the elements of seq are the same, returns the value. If not, returns None"""
+    """If all elements of seq are equal, returns the value, otherwise None"""
     it = iter(seq)
     first = next(it)
     for e in it:
