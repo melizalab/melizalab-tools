@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
-from appdirs import user_cache_dir
 from aiohttp import ClientSession
 import asyncio
 from aiopath import AsyncPath
 import logging
 from nbank import registry, util
-from typing import Optional
+from typing import Union
 from dlab.util import setup_log
 
-APP_NAME = "dlab"
-APP_AUTHOR = "melizalab"
 log = logging.getLogger("dlab.nbank")
 
 
@@ -19,8 +16,8 @@ async def find_resource(
     session: ClientSession,
     registry_url: str,
     resource_id: str,
-    alt_base: Optional[str] = None,
-) -> AsyncPaths:
+    alt_base: Union[AsyncPath, str, None] = None,
+) -> AsyncPath:
     """Locate a neurobank resource
 
     This function will try to locate resources from the following locations: a
@@ -58,19 +55,26 @@ async def find_resource(
 
 
 async def fetch_resource(
-    session: ClientSession, url: str, resource_id: str, chunk_size: int = 8192
+    session: ClientSession,
+    url: str,
+    resource_id: str,
+    chunk_size: int = 8192,
+    no_download: bool = False,
 ) -> AsyncPath:
     """Fetch a downloadable resource from the registry.
 
     The file will be cached locally. Returns the path of the file.
     """
+    from dlab.core import get_user_cache_dir
     from urllib.parse import urlparse
 
     parsed_url = urlparse(url)
-    cache_dir = AsyncPath(user_cache_dir(APP_NAME, APP_AUTHOR)) / parsed_url.netloc
+    cache_dir = AsyncPath(get_user_cache_dir()) / parsed_url.netloc
     target = cache_dir / resource_id
     if await target.exists():
         return target
+    elif no_download:
+        raise FileNotFoundError(f"{url}: resource not found in local cache")
     await cache_dir.mkdir(parents=True, exist_ok=True)
     log.debug("- fetching %s from registry", resource_id)
     async with session.get(url) as response:
@@ -107,19 +111,28 @@ async def main(argv=None):
         "Default is to use the environment variable '%s'" % registry._env_registry,
         default=registry.default_registry(),
     )
+    p.add_argument(
+        "-b",
+        "--base",
+        type=AsyncPath,
+        help="set an alternative base directory to search for local resources",
+    )
     p.add_argument("id", help="the identifier of the resource", nargs="+")
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
     async with ClientSession(headers={"Accept": "application/json"}) as session:
-        tasks = [find_resource(session, args.registry_url, id) for id in args.id]
+        tasks = [
+            find_resource(session, args.registry_url, id, alt_base=args.base)
+            for id in args.id
+        ]
         for id, task in zip(args.id, asyncio.as_completed(tasks)):
             try:
                 path = await task
             except ValueError:
                 log.info("%s: no such resource", id)
             except FileNotFoundError:
-                log.info("%s: not found, and unable to download")
+                log.info("%s: not found, unable to download", id)
             else:
                 log.info("%s: %s", id, path)
 
