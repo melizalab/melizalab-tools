@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Utilities for extracellular experiments """
-import re
 import json
 import logging
+import re
 from functools import lru_cache
-
 
 log = logging.getLogger("dlab")
 
@@ -41,7 +40,9 @@ def stim_duration(stim_name):
 
     """
     import wave
+
     from nbank import default_registry
+
     from dlab.core import fetch_resource
 
     neurobank_registry = default_registry()

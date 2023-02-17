@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Utility functions for scripts and modules """
-import logging
 import argparse
-import numpy as np
+import logging
 from functools import singledispatch
+
+import numpy as np
 
 
 def setup_log(log, debug=False):

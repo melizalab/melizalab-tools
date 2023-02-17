@@ -3,9 +3,10 @@
 """ Commandline script to extract waveforms from extracellular recordings """
 import json
 import logging
+
+import h5py as h5
 import nbank
 import numpy as np
-import h5py as h5
 import pandas as pd
 
 log = logging.getLogger("dlab")
@@ -13,6 +14,7 @@ log = logging.getLogger("dlab")
 
 if __name__ == "__main__":
     import argparse
+
     from dlab.core import __version__, get_or_verify_datafile
     from dlab.util import setup_log
 

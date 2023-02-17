@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for using kilsort/phy data """
-import logging
 import json
-from pathlib import Path
+import logging
 from collections import namedtuple
+from pathlib import Path
 
+import h5py as h5
 import numpy as np
 import pandas as pd
 import quickspikes as qs
-import h5py as h5
+
 from dlab import pprox
 
 log = logging.getLogger("dlab.kilo")
@@ -31,8 +32,8 @@ Stimulus = namedtuple("Stimulus", ["name", "start", "end"], defaults=[None])
 
 def read_kilo_params(fname):
     """Read the kilosort params.py file"""
-    from itertools import chain
     from configparser import ConfigParser
+    from itertools import chain
 
     parser = ConfigParser()
     with open(fname, "rt") as lines:
@@ -85,13 +86,11 @@ def oeaudio_to_trials(data_file, sync_dset, sync_thresh=1.0, prepad=1.0):
 
     """
     from itertools import zip_longest
-    from dlab.extracellular import (
-        find_stim_dset,
-        entry_time,
-        iter_entries,
-        stim_duration,
-    )
+
     from arf import timestamp_to_datetime
+
+    from dlab.extracellular import (entry_time, find_stim_dset, iter_entries,
+                                    stim_duration)
 
     expt_start = None
     det = qs.detector(sync_thresh, 10)
@@ -180,11 +179,13 @@ def trials_to_pprox(trials, sampling_rate):
 
 
 def group_spikes_script(argv=None):
-    import nbank
     import argparse
-    from dlab.util import setup_log, json_serializable
+
+    import nbank
+
     from dlab.core import __version__, get_or_verify_datafile
     from dlab.extracellular import entry_metadata, iter_entries
+    from dlab.util import json_serializable, setup_log
 
     version = "2022.10.11"
 

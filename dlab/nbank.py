@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
-from aiohttp import ClientSession
 import asyncio
-from aiopath import AsyncPath
 import logging
+from typing import Dict, Union
+
+from aiohttp import ClientSession
+from aiopath import AsyncPath
 from nbank import registry, util
-from typing import Union
+
 from dlab.util import setup_log
 
 log = logging.getLogger("dlab.nbank")
@@ -65,8 +67,9 @@ async def fetch_resource(
 
     The file will be cached locally. Returns the path of the file.
     """
-    from dlab.core import get_user_cache_dir
     from urllib.parse import urlparse
+
+    from dlab.core import get_user_cache_dir
 
     parsed_url = urlparse(url)
     cache_dir = AsyncPath(get_user_cache_dir()) / parsed_url.netloc

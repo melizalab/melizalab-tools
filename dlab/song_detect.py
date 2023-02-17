@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Front-end scripts for song detector """
-from pathlib import Path
-import pickle
 import argparse
 import logging
+import pickle
+from pathlib import Path
+
 import numpy as np
 
 script_name = "quicksong"
@@ -45,8 +46,8 @@ def make_config(args):
 
 def make_extractor(cfg, sampling_rate_khz):
     from quicksong import features
-    from quicksong.streaming import STFT, OverlapSaveConvolver
     from quicksong.core import FeatureExtractor, make_hanning_kernels
+    from quicksong.streaming import STFT, OverlapSaveConvolver
 
     speccr = STFT(
         sampling_rate_khz,
@@ -60,10 +61,10 @@ def make_extractor(cfg, sampling_rate_khz):
 
 
 def train_classifier(args):
-    import yaml
     import ewave
-    from quicksong import core, model
+    import yaml
     from arfx import lblio
+    from quicksong import core, model
 
     with open(args.config) as fp:
         cfg = yaml.safe_load(fp)
@@ -142,6 +143,7 @@ class ArfWriter:
 
 def extract_songs(args):
     import os
+
     import arf
     import h5py as h5
     from quicksong.core import IntervalFinder
@@ -219,8 +221,10 @@ def extract_songs(args):
 def extract_intervals(writer, dsets, intervals, pad_before, pad_after):
     import posixpath
     from datetime import timedelta
-    from arf import timestamp_to_datetime, create_dataset, DataTypes, set_uuid
+
+    from arf import DataTypes, create_dataset, set_uuid, timestamp_to_datetime
     from quicksong.core import pad_intervals
+
     from dlab.util import all_same
 
     fields_to_drop = (
