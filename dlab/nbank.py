@@ -85,6 +85,16 @@ async def fetch_resource(
     return target
 
 
+async def fetch_metadata(
+    session: ClientSession, registry_url: str, resource_id: str
+) -> Dict:
+    """Fetch metadata for a resource"""
+    url, params = registry.get_resource(registry_url, resource_id)
+    async with session.get(url, params=params) as response:
+        response.raise_for_status()
+        return response.json()
+
+
 async def main(argv=None):
     import argparse
 

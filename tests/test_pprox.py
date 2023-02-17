@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
-import unittest
 import logging
 import numpy as np
 import pandas as pd
@@ -8,7 +7,7 @@ from dlab import pprox
 
 log = logging.getLogger("dlab")
 
-trials = [
+trials = (
     {
         "events": [1, 2, 3, 4],
         "interval": [0.0, 2.3],
@@ -27,7 +26,7 @@ trials = [
         "offset": 4.0,
         "stimulus": {"name": "stim1", "interval": [1.0, 1.5]},
     },
-]
+)
 
 empty_trial = {
     "events": [],
@@ -217,54 +216,52 @@ def split_fun(name):
     return pd.DataFrame(info).rename(lambda s: s.replace("-", "_"), axis="columns")
 
 
-class TestPprox(unittest.TestCase):
-    def test_make_pprox(self):
-        pp = pprox.from_trials(trials, test_attribute="blank")
-        self.assertEqual(pp["$schema"], pprox._schema)
-        self.assertEqual(pp["test_attribute"], "blank")
-        self.assertSequenceEqual(pp["pprox"], trials)
+def test_make_pprox():
+    pp = pprox.from_trials(trials, test_attribute="blank")
+    assert pp["$schema"] == pprox._schema
+    assert pp["test_attribute"] == "blank"
+    assert pp["pprox"] == trials
 
-    def test_group_by_stim(self):
-        pp = pprox.from_trials(trials)
-        for stim, group in pprox.groupby(pp, lambda trial: trial["stimulus"]["name"]):
-            if stim == "stim1":
-                self.assertSequenceEqual(tuple(group), [trials[0], trials[2]])
-            elif stim == "stim2":
-                self.assertSequenceEqual(tuple(group), [trials[1]])
-            else:
-                raise ValueError("unexpected stimulus name")
 
-    def test_aggregate_events_simple(self):
-        all_events = pprox.aggregate_events(pprox.from_trials(trials))
-        self.assertEqual(all_events.size, sum(len(t["events"]) for t in trials))
+def test_group_by_stim():
+    pp = pprox.from_trials(trials)
+    for stim, group in pprox.groupby(pp, lambda trial: trial["stimulus"]["name"]):
+        if stim == "stim1":
+            assert list(group) == [trials[0], trials[2]]
+        elif stim == "stim2":
+            assert list(group) == [trials[1]]
+        else:
+            raise ValueError("unexpected stimulus name")
 
-    def test_aggregate_events_complex(self):
-        all_events = pprox.aggregate_events(unit)
-        self.assertEqual(all_events.size, sum(len(t["events"]) for t in unit["pprox"]))
 
-    def test_split_trial(self):
-        for trial in unit["pprox"]:
-            stim = trial["stimulus"]["name"]
-            split = pprox.split_trial(trial, split_fun)
-            self.assertEqual(split.shape[0], len(stims[stim]["stim_end"]))
-            trial_spikes = np.asarray(trial["events"]) + trial["offset"]
-            split_spikes = (
-                split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
-            )
-            # round to avoid floating point imprecision
-            self.assertTrue(
-                np.all(
-                    np.isin(
-                        np.floor(split_spikes * 1000), np.floor(trial_spikes * 1000)
-                    )
-                )
-            )
+def test_aggregate_events_simple():
+    all_events = pprox.aggregate_events(pprox.from_trials(trials))
+    assert all_events.size == sum(len(t["events"]) for t in trials)
 
-    def test_split_trial_empty(self):
-        split = pprox.split_trial(empty_trial, split_fun)
-        stim = empty_trial["stimulus"]["name"]
-        self.assertEqual(split.shape[0], len(stims[stim]["stim_end"]))
+
+def test_aggregate_events_complex():
+    all_events = pprox.aggregate_events(unit)
+    assert all_events.size == sum(len(t["events"]) for t in unit["pprox"])
+
+
+def test_split_trial():
+    for trial in unit["pprox"]:
+        stim = trial["stimulus"]["name"]
+        split = pprox.split_trial(trial, split_fun)
+        assert split.shape[0] == len(stims[stim]["stim_end"])
+        trial_spikes = np.asarray(trial["events"]) + trial["offset"]
         split_spikes = (
             split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
         )
-        self.assertEqual(len(split_spikes), 0)
+        # round to avoid floating point imprecision
+        assert np.all(
+            np.isin(np.floor(split_spikes * 1000), np.floor(trial_spikes * 1000))
+        )
+
+
+def test_split_trial_empty():
+    split = pprox.split_trial(empty_trial, split_fun)
+    stim = empty_trial["stimulus"]["name"]
+    assert split.shape[0] == len(stims[stim]["stim_end"])
+    split_spikes = split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
+    assert len(split_spikes) == 0
