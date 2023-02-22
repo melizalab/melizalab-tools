@@ -25,14 +25,7 @@ def entry_datetime(entry):
 
 def iter_entries(data_file):
     """Iterate through the entries in an arf file in order of time"""
-    from arf import timestamp_to_float
-
-    return enumerate(
-        sorted(
-            data_file.values(),
-            key=lambda entry: timestamp_to_float(entry.attrs["timestamp"]),
-        )
-    )
+    return enumerate(sorted(data_file.values(), key=entry_time))
 
 
 def find_stim_dset(entry):

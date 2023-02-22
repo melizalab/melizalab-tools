@@ -29,7 +29,7 @@ def kernel(name: str, bandwidth: float, dt: float) -> Tuple[np.ndarray, np.ndarr
     else:
         D = bandwidth
 
-    N = np.floor(D / dt)  # number of grid points in half the support
+    N = int(np.floor(D / dt))  # number of grid points in half the support
     G = (np.arange(1, 2 * N + 2) - 1 - N) * dt  # grid support
     xv = G / bandwidth
 
@@ -46,6 +46,8 @@ def kernel(name: str, bandwidth: float, dt: float) -> Tuple[np.ndarray, np.ndarr
         W = np.cos(np.pi * xv / 2) * (np.absolute(xv) <= 1)
     elif name == "epanech":
         W = np.maximum(0, 1 - xv * xv)
+    elif name == "hanning":
+        W = np.hanning(1 + 2 * N)
     else:
         from scipy.signal import get_window
 
