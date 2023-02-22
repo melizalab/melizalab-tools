@@ -20,13 +20,14 @@ async def find_resource(
     registry_url: str,
     resource_id: str,
     alt_base: Union[AsyncPath, str, None] = None,
+    no_download: bool = False,
 ) -> AsyncPath:
     """Locate a neurobank resource
 
     This function will try to locate resources from the following locations: a
-     local neurobank archive, a local cache, and finally a remote HTTP archive.
-     It will raise a ValueError if the resource does not exist and a
-     FileNotFoundError if the resource cannot be located.
+    local neurobank archive, a local cache, and finally a remote HTTP archive.
+    It will raise a ValueError if the resource does not exist and a
+    FileNotFoundError if the resource cannot be located.
 
     """
     url, params = registry.get_locations(registry_url, resource_id)
@@ -50,7 +51,7 @@ async def find_resource(
             continue
         url = util.parse_location(loc)
         try:
-            return await fetch_resource(session, url, resource_id)
+            return await fetch_resource(session, url, resource_id, no_download)
         except FileNotFoundError:
             pass
     # all locations failed; raise an error
@@ -60,7 +61,7 @@ async def find_resource(
 async def fetch_resource(
     session: ClientSession,
     url: str,
-    resource_id: str,
+    resource_id: str,  # this could be parsed out of the url
     chunk_size: int = 8192,
     no_download: bool = False,
 ) -> AsyncPath:
@@ -102,18 +103,23 @@ async def fetch_metadata(
         return await response.json()
 
 
+def add_registry_argument(parser, dest="registry_url"):
+    """Add a registry argument to an argparse parser"""
+    parser.add_argument(
+        "-r",
+        dest=dest,
+        help="URL of the registry service. "
+        "Default is to use the environment variable '%s'" % registry._env_registry,
+        default=default_registry,
+    )
+
+
 async def main(argv=None):
     import argparse
 
     p = argparse.ArgumentParser(description="locate neurobank resources ")
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
-    p.add_argument(
-        "-r",
-        dest="registry_url",
-        help="URL of the registry service. "
-        "Default is to use the environment variable '%s'" % registry._env_registry,
-        default=registry.default_registry(),
-    )
+    add_registry_argument(p)
     p.add_argument(
         "-b",
         "--base",

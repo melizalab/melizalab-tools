@@ -4,9 +4,23 @@
 import json
 import logging
 import re
-from functools import lru_cache
+
 
 log = logging.getLogger("dlab")
+
+
+def entry_time(entry):
+    """Return the timestamp of an entry as a floating point number"""
+    from arf import timestamp_to_float
+
+    return timestamp_to_float(entry.attrs["timestamp"])
+
+
+def entry_datetime(entry):
+    """Return the timestamp of an entry as a floating point number"""
+    from arf import timestamp_to_datetime
+
+    return timestamp_to_datetime(entry.attrs["timestamp"])
 
 
 def iter_entries(data_file):
@@ -28,28 +42,6 @@ def find_stim_dset(entry):
         if rex.match(name) is not None:
             log.debug("  - stim log dataset: %s", name)
             return entry[name]
-
-
-@lru_cache(maxsize=None)
-def stim_duration(stim_name):
-    """
-    Returns the duration of a stimulus (in s). This can only really be done by
-    downloading the stimulus from the registry, because the start/stop times are
-    not reliable. We try to speed this up by memoizing the function and caching
-    the downloaded files.
-
-    """
-    import wave
-
-    from nbank import default_registry
-
-    from dlab.core import fetch_resource
-
-    neurobank_registry = default_registry()
-    target = fetch_resource(neurobank_registry, stim_name)
-    with open(target, "rb") as fp:
-        reader = wave.open(fp)
-        return 1.0 * reader.getnframes() / reader.getframerate()
 
 
 def entry_metadata(entry):
