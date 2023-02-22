@@ -84,10 +84,10 @@ def combine_recordings(*pprox):
     pass
 
 
-def split_trial(trial, split_fun):
+async def split_trial(trial, split_fun):
     """Split a trial into multiple intervals.
 
-    split_fun: a function that takes the name of the stimulus and returns an
+    split_fun: a function that takes the name of the stimulus and returns a
     list of dictionaries, one per split. Each dict needs to have at least three
     fields: `stim_begin`, the time when the split begins (relative to the start
     of the stimulus; `stim_end`, the time when the split ends; and `name`, the
@@ -113,7 +113,7 @@ def split_trial(trial, split_fun):
 
     stimulus = trial["stimulus"]
     stim_on = stimulus["interval"][0]
-    splits = split_fun(stimulus["name"])
+    splits = await split_fun(stimulus["name"])
     # calculate average gap between splits and use this to determine when
     # the last split should end
     gaps = splits.stim_begin.shift(-1) - splits.stim_end

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
+import pytest
 import logging
 import numpy as np
 import pandas as pd
@@ -210,7 +211,7 @@ stims = {
 }
 
 
-def split_fun(name):
+async def split_fun(name):
     info = stims[name].copy()
     info["foreground"] = info["foreground"].split("-")
     return pd.DataFrame(info).rename(lambda s: s.replace("-", "_"), axis="columns")
@@ -244,10 +245,11 @@ def test_aggregate_events_complex():
     assert all_events.size == sum(len(t["events"]) for t in unit["pprox"])
 
 
-def test_split_trial():
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_split_trial(anyio_backend):
     for trial in unit["pprox"]:
         stim = trial["stimulus"]["name"]
-        split = pprox.split_trial(trial, split_fun)
+        split = await pprox.split_trial(trial, split_fun)
         assert split.shape[0] == len(stims[stim]["stim_end"])
         trial_spikes = np.asarray(trial["events"]) + trial["offset"]
         split_spikes = (
@@ -259,8 +261,9 @@ def test_split_trial():
         )
 
 
-def test_split_trial_empty():
-    split = pprox.split_trial(empty_trial, split_fun)
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_split_trial_empty(anyio_backend):
+    split = await pprox.split_trial(empty_trial, split_fun)
     stim = empty_trial["stimulus"]["name"]
     assert split.shape[0] == len(stims[stim]["stim_end"])
     split_spikes = split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()

@@ -12,6 +12,7 @@ from nbank import registry, util
 from dlab.util import setup_log
 
 log = logging.getLogger("dlab.nbank")
+default_registry = registry.default_registry()
 
 
 async def find_resource(
@@ -68,11 +69,10 @@ async def fetch_resource(
     The file will be cached locally. Returns the path of the file.
     """
     from urllib.parse import urlparse
-
-    from dlab.core import get_user_cache_dir
+    from dlab.core import user_cache_dir
 
     parsed_url = urlparse(url)
-    cache_dir = AsyncPath(get_user_cache_dir()) / parsed_url.netloc
+    cache_dir = AsyncPath(user_cache_dir()) / parsed_url.netloc
     target = cache_dir / resource_id
     if await target.exists():
         return target
@@ -99,7 +99,7 @@ async def fetch_metadata(
     url, params = registry.get_resource(registry_url, resource_id)
     async with session.get(url, params=params) as response:
         response.raise_for_status()
-        return response.json()
+        return await response.json()
 
 
 async def main(argv=None):
