@@ -97,11 +97,12 @@ async def split_trial(trial, split_fun):
 
     Returns a pandas DataFrame with one row per split. Each split contains the
     events between the start of the (split) stimulus and the start of the next
-    (split) stimulus. The times are referenced to the start of the stimulus in
-    that split (t=0). The stim_end field indicates when the stimulus ended
-    (relative to start of the stimulus), and the interval_end field indicates
-    when the interval ended (relative to start of the stimulus). interval_end
-    will be greater than stimulus_end when there is a gap between the end of one
+    (split) stimulus. If there are no events in the interval, the `events` field
+    will be nan. The times are referenced to the start of the stimulus in that
+    split (t=0). The stim_end field indicates when the stimulus ended (relative
+    to start of the stimulus), and the interval_end field indicates when the
+    interval ended (relative to start of the stimulus). interval_end will be
+    greater than stimulus_end when there is a gap between the end of one
     stimulus and the subsequent one. The last split is post-padded by the
     average of the gaps between all the other stimuli.
 

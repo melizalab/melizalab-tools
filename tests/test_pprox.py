@@ -265,6 +265,6 @@ async def test_split_trial(anyio_backend):
 async def test_split_trial_empty(anyio_backend):
     split = await pprox.split_trial(empty_trial, split_fun)
     stim = empty_trial["stimulus"]["name"]
-    assert split.shape[0] == len(stims[stim]["stim_end"])
     split_spikes = split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
+    assert split.shape[0] == len(stims[stim]["stim_end"])
     assert len(split_spikes) == 0
