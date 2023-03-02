@@ -24,13 +24,21 @@ async def find_resource(
 ) -> AsyncPath:
     """Locate a neurobank resource
 
-    This function will try to locate resources from the following locations: a
-    local neurobank archive, a local cache, and finally a remote HTTP archive.
+    This function will try to locate resources from the following locations:
+    - a local directory (alt_base, if set),
+    - a local neurobank archive (using alt_base, if provided),
+    - a local cache
+    - a remote HTTP archive (caching the file for local access later)
+
     It will raise a ValueError if the resource does not exist and a
     FileNotFoundError if the resource cannot be located.
 
     """
     url, params = registry.get_locations(registry_url, resource_id)
+    if alt_base is not None:
+        path = await resolve_local_path(alt_base)
+        if path is not None:
+            return path
     async with session.get(url, params=params) as response:
         if response.status == 404:
             raise ValueError(f"{resource_id}: not a valid resource name")
@@ -40,10 +48,8 @@ async def find_resource(
     for loc in locations:
         if loc["scheme"] not in registry._local_schemes:
             continue
-        path = AsyncPath(util.parse_location(loc, alt_base))
-        if await path.exists():
-            return path
-        async for path in path.parent.glob(f"{path.name}.*"):
+        path = await resolve_local_path(AsyncPath(util.parse_location(loc, alt_base)))
+        if path is not None:
             return path
     # search remote locations
     for loc in locations:
@@ -56,6 +62,19 @@ async def find_resource(
             pass
     # all locations failed; raise an error
     raise FileNotFoundError(f"{resource_id}: unable to locate file")
+
+
+async def resolve_local_path(stem: AsyncPath) -> AsyncPath:
+    """Find a local resource based on a path or path stem.
+
+    Because resource names often don't have extensions, a local filesystem
+    search may be needed to resolve the full path.
+
+    """
+    if await stem.exists():
+        return stem
+    async for path in stem.parent.glob(f"{stem.name}.*"):
+        return path
 
 
 async def fetch_resource(
