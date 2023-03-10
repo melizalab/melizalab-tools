@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for using kilsort/phy data """
-import asyncio
-from aiohttp import ClientSession
 import re
 import json
 import logging
@@ -11,6 +9,8 @@ from pathlib import Path
 from functools import lru_cache
 from typing import Iterator, Dict
 
+import anyio
+from httpx import AsyncClient
 import ewave
 import h5py as h5
 import numpy as np
@@ -70,7 +70,7 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
 
 
 @lru_cache(maxsize=None)
-async def stim_duration(session: ClientSession, stim_name: str) -> float:
+async def stim_duration(session: AsyncClient, stim_name: str) -> float:
     """
     Returns the duration of a stimulus (in s). This can only really be done by
     downloading the stimulus from the registry, because the start/stop times are
@@ -84,7 +84,7 @@ async def stim_duration(session: ClientSession, stim_name: str) -> float:
 
 
 async def oeaudio_to_trials(
-    session: ClientSession,
+    session: AsyncClient,
     data_file: h5.File,
     sync_dset: str,
     sync_thresh: float = 1.0,
@@ -326,7 +326,7 @@ async def group_spikes_script(argv=None):
     setup_log(log, args.debug)
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
-    async with ClientSession() as session:
+    async with AsyncClient() as session:
         resource_info = await nbank.fetch_metadata(
             session, nbank.default_registry, args.recording.stem
         )
@@ -478,4 +478,4 @@ async def group_spikes_script(argv=None):
 
 
 def run_group_spikes():
-    asyncio.run(group_spikes_script())
+    anyio.run(group_spikes_script)

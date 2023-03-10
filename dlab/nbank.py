@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
-import asyncio
 import logging
 from typing import Dict, Union
 
-from aiohttp import ClientSession
-from aiopath import AsyncPath
+from anyio import Path
+from httpx import AsyncClient, HTTPStatusError
 from nbank import registry, util
 
 from dlab.util import setup_log
@@ -16,12 +15,12 @@ default_registry = registry.default_registry()
 
 
 async def find_resource(
-    session: ClientSession,
+    session: AsyncClient,
     registry_url: str,
     resource_id: str,
-    alt_base: Union[AsyncPath, str, None] = None,
+    alt_base: Union[Path, str, None] = None,
     no_download: bool = False,
-) -> AsyncPath:
+) -> Path:
     """Locate a neurobank resource
 
     This function will try to locate resources from the following locations:
@@ -39,16 +38,14 @@ async def find_resource(
         path = await resolve_local_path(alt_base)
         if path is not None:
             return path
-    async with session.get(url, params=params) as response:
-        if response.status == 404:
-            raise ValueError(f"{resource_id}: not a valid resource name")
-        response.raise_for_status()
-        locations = await response.json()
+    response = await session.get(url, params=params)
+    response.raise_for_status()
+    locations = response.json()
     # search for local files
     for loc in locations:
         if loc["scheme"] not in registry._local_schemes:
             continue
-        path = await resolve_local_path(AsyncPath(util.parse_location(loc, alt_base)))
+        path = await resolve_local_path(Path(util.parse_location(loc, alt_base)))
         if path is not None:
             return path
     # search remote locations
@@ -64,7 +61,7 @@ async def find_resource(
     raise FileNotFoundError(f"{resource_id}: unable to locate file")
 
 
-async def resolve_local_path(stem: AsyncPath) -> AsyncPath:
+async def resolve_local_path(stem: Path) -> Path:
     """Find a local resource based on a path or path stem.
 
     Because resource names often don't have extensions, a local filesystem
@@ -78,12 +75,11 @@ async def resolve_local_path(stem: AsyncPath) -> AsyncPath:
 
 
 async def fetch_resource(
-    session: ClientSession,
+    session: AsyncClient,
     url: str,
     resource_id: str,  # this could be parsed out of the url
-    chunk_size: int = 8192,
     no_download: bool = False,
-) -> AsyncPath:
+) -> Path:
     """Fetch a downloadable resource from the registry.
 
     The file will be cached locally. Returns the path of the file.
@@ -92,7 +88,7 @@ async def fetch_resource(
     from dlab.core import user_cache_dir
 
     parsed_url = urlparse(url)
-    cache_dir = AsyncPath(user_cache_dir()) / parsed_url.netloc
+    cache_dir = Path(user_cache_dir()) / parsed_url.netloc
     target = cache_dir / resource_id
     if await target.exists():
         return target
@@ -100,26 +96,26 @@ async def fetch_resource(
         raise FileNotFoundError(f"{url}: resource not found in local cache")
     await cache_dir.mkdir(parents=True, exist_ok=True)
     log.debug("- fetching %s from registry", resource_id)
-    async with session.get(url) as response:
-        if response.status == 404:
+    async with session.stream("GET", url) as response:
+        if response.status_code == 404:
             raise FileNotFoundError(f"{url}: resource not found")
-        elif response.status == 415:
+        elif response.status_code == 415:
             # should be possible to get the error message from registry?
             raise FileNotFoundError(f"{url}: this data type is not downloadable")
-        async with target.open("wb") as fp:
-            async for data in response.content.iter_chunked(chunk_size):
+        async with await target.open("wb") as fp:
+            async for data in response.aiter_bytes():
                 await fp.write(data)
     return target
 
 
 async def fetch_metadata(
-    session: ClientSession, registry_url: str, resource_id: str
+    session: AsyncClient, registry_url: str, resource_id: str
 ) -> Dict:
     """Fetch metadata for a resource"""
     url, params = registry.get_resource(registry_url, resource_id)
-    async with session.get(url, params=params) as response:
-        response.raise_for_status()
-        return await response.json()
+    response = await session.get(url, params=params)
+    response.raise_for_status()
+    return response.json()
 
 
 def add_registry_argument(parser, dest="registry_url"):
@@ -134,6 +130,7 @@ def add_registry_argument(parser, dest="registry_url"):
 
 
 async def main(argv=None):
+    from anyio import create_task_group
     import argparse
 
     p = argparse.ArgumentParser(description="locate neurobank resources ")
@@ -142,28 +139,37 @@ async def main(argv=None):
     p.add_argument(
         "-b",
         "--base",
-        type=AsyncPath,
+        type=Path,
         help="set an alternative base directory to search for local resources",
     )
     p.add_argument("id", help="the identifier of the resource", nargs="+")
     args = p.parse_args(argv)
     setup_log(log, args.debug)
 
-    async with ClientSession(headers={"Accept": "application/json"}) as session:
-        tasks = [
-            find_resource(session, args.registry_url, id, alt_base=args.base)
-            for id in args.id
-        ]
-        for id, task in zip(args.id, asyncio.as_completed(tasks)):
-            try:
-                path = await task
-            except ValueError:
-                log.info("%s: no such resource", id)
-            except FileNotFoundError:
-                log.info("%s: not found, unable to download", id)
-            else:
-                log.info("%s: %s", id, path)
+    # async with AsyncClient() as session:
+    #     for id in args.id:
+    #         md = await fetch_metadata(session, args.registry_url, id)
+    #         print(md)
+
+    async def _find_and_show(session, id):
+        try:
+            path = await find_resource(
+                session, args.registry_url, id, alt_base=args.base
+            )
+        except HTTPStatusError:
+            log.info("%s: no such resource", id)
+        except FileNotFoundError:
+            log.info("%s: not found, unable to download", id)
+        else:
+            log.info("%s: %s", id, path)
+
+    headers = {"Accept": "application/json"}
+    async with AsyncClient(headers=headers) as session, create_task_group() as tg:
+        for id in args.id:
+            tg.start_soon(_find_and_show, session, id)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from anyio import run
+
+    run(main)

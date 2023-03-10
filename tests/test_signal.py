@@ -13,7 +13,6 @@ kernels = [
     "cosinus",
     "epanech",
     "hanning",
-    "hamming",
 ]
 
 
