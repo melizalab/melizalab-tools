@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for processing spike trains (point processes) """
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+
 import numpy as np
 from numpy.typing import ArrayLike
 

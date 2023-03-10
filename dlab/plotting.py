@@ -7,6 +7,7 @@ but there is no direct import of matplotlib.
 
 """
 from typing import Tuple
+
 import numpy as np
 
 
@@ -23,8 +24,9 @@ def spectrogram(
 ):
     """Plot a spectrogram of a signal, with some useful defaults for birdsong"""
     from math import ceil, log
+
     from ewave import rescale
-    from libtfr import mfft_precalc, fgrid, tgrid
+    from libtfr import fgrid, mfft_precalc, tgrid
 
     data = rescale(signal, np.float64)
     window_samples = int(window_s * sampling_rate_hz)

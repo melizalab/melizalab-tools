@@ -6,9 +6,9 @@ from typing import Dict, Union
 
 from anyio import Path
 from httpx import AsyncClient, HTTPStatusError
-from nbank import registry, util
 
 from dlab.util import setup_log
+from nbank import registry, util
 
 log = logging.getLogger("dlab.nbank")
 default_registry = registry.default_registry()
@@ -85,6 +85,7 @@ async def fetch_resource(
     The file will be cached locally. Returns the path of the file.
     """
     from urllib.parse import urlparse
+
     from dlab.core import user_cache_dir
 
     parsed_url = urlparse(url)
@@ -130,8 +131,9 @@ def add_registry_argument(parser, dest="registry_url"):
 
 
 async def main(argv=None):
-    from anyio import create_task_group
     import argparse
+
+    from anyio import create_task_group
 
     p = argparse.ArgumentParser(description="locate neurobank resources ")
     p.add_argument("--debug", help="show verbose log messages", action="store_true")

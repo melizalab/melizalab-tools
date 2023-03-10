@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Signal processing functions """
-import numpy as np
 from typing import Tuple
+
+import numpy as np
 
 
 def kernel(name: str, bandwidth: float, dt: float) -> Tuple[np.ndarray, np.ndarray]:

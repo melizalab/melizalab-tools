@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for using kilsort/phy data """
-import re
 import json
 import logging
+import re
 from collections import namedtuple
-from pathlib import Path
 from functools import lru_cache
-from typing import Iterator, Dict
+from pathlib import Path
+from typing import Dict, Iterator
 
 import anyio
-from httpx import AsyncClient
 import ewave
 import h5py as h5
 import numpy as np
 import pandas as pd
 import quickspikes as qs
+from httpx import AsyncClient
 
-from dlab import pprox, nbank
+from dlab import nbank, pprox
 
 log = logging.getLogger("dlab.kilo")
 
@@ -109,9 +109,10 @@ async def oeaudio_to_trials(
 
     """
     from itertools import zip_longest
+
     from dlab.extracellular import (
-        entry_time,
         entry_datetime,
+        entry_time,
         find_stim_dset,
         iter_entries,
     )
@@ -209,8 +210,8 @@ def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
 
 
 async def group_spikes_script(argv=None):
-    import os
     import argparse
+    import os
 
     from dlab.core import __version__
     from dlab.extracellular import entry_metadata, iter_entries
