@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Shared code for all scripts and modules """
-__version__ = "2023.03.10"
+__version__ = "2023.03.13"
 APP_NAME = "dlab"
 APP_AUTHOR = "melizalab"
 
