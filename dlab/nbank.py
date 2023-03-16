@@ -3,14 +3,16 @@
 """Functions for interfacing with the neurobank repository """
 import logging
 from typing import Dict, Union
+from urllib.parse import urlparse
+import json
 
-from anyio import Path
+from anyio import Path, create_task_group
 from httpx import AsyncClient, HTTPStatusError
 
-from dlab.util import setup_log
+from dlab import cache
 from nbank import registry, util
 
-log = logging.getLogger("dlab.nbank")
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 default_registry = registry.default_registry()
 
 
@@ -37,6 +39,7 @@ async def find_resource(
     if alt_base is not None:
         path = await resolve_local_path(alt_base)
         if path is not None:
+            logging.debug("%s: found in alt_base", resource_id)
             return path
     response = await session.get(url, params=params)
     response.raise_for_status()
@@ -47,6 +50,7 @@ async def find_resource(
             continue
         path = await resolve_local_path(Path(util.parse_location(loc, alt_base)))
         if path is not None:
+            logging.debug("%s: found in local repository", resource_id)
             return path
     # search remote locations
     for loc in locations:
@@ -84,19 +88,13 @@ async def fetch_resource(
 
     The file will be cached locally. Returns the path of the file.
     """
-    from urllib.parse import urlparse
-
-    from dlab.core import user_cache_dir
-
-    parsed_url = urlparse(url)
-    cache_dir = Path(user_cache_dir()) / parsed_url.netloc
-    target = cache_dir / resource_id
+    target = await cache.locate(resource_id, urlparse(url).netloc)
     if await target.exists():
+        logging.debug("%s: found in local cache", resource_id)
         return target
     elif no_download:
         raise FileNotFoundError(f"{url}: resource not found in local cache")
-    await cache_dir.mkdir(parents=True, exist_ok=True)
-    log.debug("- fetching %s from registry", resource_id)
+    logging.debug("%s: fetching from registry", resource_id)
     async with session.stream("GET", url) as response:
         if response.status_code == 404:
             raise FileNotFoundError(f"{url}: resource not found")
@@ -112,11 +110,19 @@ async def fetch_resource(
 async def fetch_metadata(
     session: AsyncClient, registry_url: str, resource_id: str
 ) -> Dict:
-    """Fetch metadata for a resource"""
-    url, params = registry.get_resource(registry_url, resource_id)
-    response = await session.get(url, params=params)
-    response.raise_for_status()
-    return response.json()
+    """Fetch metadata for a resource. Results will be cached locally."""
+    target = await cache.locate(resource_id, urlparse(registry_url).netloc)
+    if await target.exists():
+        logging.debug("%s: metadata found in local cache", resource_id)
+        return json.loads(await target.read_text())
+    else:
+        logging.debug("%s: fetching metadata from registry", resource_id)
+        url, params = registry.get_resource(registry_url, resource_id)
+        response = await session.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        await target.write_text(json.dumps(data))
+        return data
 
 
 def add_registry_argument(parser, dest="registry_url"):
@@ -133,8 +139,6 @@ def add_registry_argument(parser, dest="registry_url"):
 async def main(argv=None):
     import argparse
 
-    from anyio import create_task_group
-
     p = argparse.ArgumentParser(description="locate neurobank resources ")
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     add_registry_argument(p)
@@ -144,14 +148,19 @@ async def main(argv=None):
         type=Path,
         help="set an alternative base directory to search for local resources",
     )
-    p.add_argument("id", help="the identifier of the resource", nargs="+")
+    p.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="clear the contents of the local cache",
+    )
+    p.add_argument("id", help="identifier(s) of the resource(s) to locate", nargs="*")
     args = p.parse_args(argv)
-    setup_log(log, args.debug)
+    logging.basicConfig(
+        format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
+    )
 
-    # async with AsyncClient() as session:
-    #     for id in args.id:
-    #         md = await fetch_metadata(session, args.registry_url, id)
-    #         print(md)
+    if args.clear_cache:
+        await cache.clear(urlparse(args.registry_url).netloc)
 
     async def _find_and_show(session, id):
         try:
@@ -159,11 +168,11 @@ async def main(argv=None):
                 session, args.registry_url, id, alt_base=args.base
             )
         except HTTPStatusError:
-            log.info("%s: no such resource", id)
+            logging.info("%s: no such resource", id)
         except FileNotFoundError:
-            log.info("%s: not found, unable to download", id)
+            logging.info("%s: not found, unable to download", id)
         else:
-            log.info("%s: %s", id, path)
+            logging.info("%s: %s", id, path)
 
     headers = {"Accept": "application/json"}
     async with AsyncClient(headers=headers) as session, create_task_group() as tg:

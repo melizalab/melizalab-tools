@@ -2,7 +2,6 @@
 # -*- mode: python -*-
 """ Utility functions for scripts and modules """
 import argparse
-import logging
 from functools import singledispatch
 
 import numpy as np
@@ -13,6 +12,8 @@ def setup_log(log, debug=False):
 
     log: generate by calling e.g. `log = logging.getLogger("dlab.extracellular")`
     """
+    import logging
+
     ch = logging.StreamHandler()
     formatter = logging.Formatter("%(message)s")
     loglevel = logging.DEBUG if debug else logging.INFO

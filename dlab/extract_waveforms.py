@@ -10,14 +10,11 @@ import pandas as pd
 
 import nbank
 
-log = logging.getLogger("dlab")
-
 
 if __name__ == "__main__":
     import argparse
 
     from dlab.core import __version__, get_or_verify_datafile
-    from dlab.util import setup_log
 
     script_version = "2022.06.24"
 
@@ -69,23 +66,25 @@ if __name__ == "__main__":
         help="pprox files with spike times",
     )
     args = p.parse_args()
-    setup_log(log, args.debug)
+    logging.basicConfig(
+        format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
+    )
 
     datafile, arf_info = get_or_verify_datafile(args.recording, args.debug)
 
     with h5.File(datafile, "r") as arf:
         for spikefile in args.pprox:
-            log.info(" - processing spike times in '%s':", spikefile.name)
+            logging.info(" - processing spike times in '%s':", spikefile.name)
             spike_data = json.load(spikefile)
             # check that the recording matches the ARF file
-            log.info("   - source recording: %s", spike_data["recording"])
+            logging.info("   - source recording: %s", spike_data["recording"])
             dset_channel = spike_data["kilosort_source_channel"]
             # TODO verify that that index is 1-based
             dset_name = f"CH{dset_channel + 1}"
-            log.info("   - main channel: %s", dset_name)
+            logging.info("   - main channel: %s", dset_name)
             resource_info = nbank.describe(spike_data["recording"])
             if resource_info["sha1"] != arf_info["sha1"]:
-                log.warning(
+                logging.warning(
                     "   - warning: recording does not match the supplied ARF file, skipping"
                 )
                 continue
@@ -133,7 +132,7 @@ if __name__ == "__main__":
 
             #     spike_idx = (np.asarray(trial["events"]) * sampling_rate).astype("int64") + trial["recording"]["start"]
             #     nspikes = spike_idx.size
-            #     log.debug("    - trial %d: %d spikes from entry %d", trial["index"], nspikes, entry)
+            #     logging.debug("    - trial %d: %d spikes from entry %d", trial["index"], nspikes, entry)
             #     spike_times.append(spike_idx)
             #     spike_entries.append(np.ones(nspikes, dtype="int32") * entry)
             # all_spike_entries = np.concatenate(spike_entries)

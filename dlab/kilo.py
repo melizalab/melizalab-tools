@@ -19,7 +19,7 @@ from httpx import AsyncClient
 
 from dlab import nbank, pprox
 
-log = logging.getLogger("dlab.kilo")
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 Trial = namedtuple(
     "Trial",
@@ -90,7 +90,6 @@ async def oeaudio_to_trials(
     sync_thresh: float = 1.0,
     prepad: float = 1.0,
 ) -> Iterator[Trial]:
-
     """Extracts trial information from an oeaudio-present experiment ARF file
 
     When using oeaudio-present, a single recording is made in response to all
@@ -121,29 +120,29 @@ async def oeaudio_to_trials(
     det = qs.detector(sync_thresh, 10)
     trials = []
     for entry_num, entry in iter_entries(data_file):
-        log.info(" - entry: '%s'", entry.name)
+        logging.info(" - entry: '%s'", entry.name)
         entry_start = entry_time(entry)
-        log.info("  - start time: %s", entry_datetime(entry))
+        logging.info("  - start time: %s", entry_datetime(entry))
         if expt_start is None:
             expt_start = entry_start
 
-        log.info("  - parsing stimulus log")
+        logging.info("  - parsing stimulus log")
         stims = list(oeaudio_stims(find_stim_dset(entry)))
-        log.info("    - detected %d stimuli", len(stims))
-        log.info("  - sync track: '%s'", sync_dset)
+        logging.info("    - detected %d stimuli", len(stims))
+        logging.info("  - sync track: '%s'", sync_dset)
         sync = entry[sync_dset]
         sync_data = sync[:].astype("d")
         det.scale_thresh(sync_data.mean(), sync_data.std())
         stim_onsets = np.asarray(det(sync_data))
-        log.info("    - detected %d clicks", stim_onsets.size)
+        logging.info("    - detected %d clicks", stim_onsets.size)
         dset_offset = sync.attrs["offset"]
         dset_end = sync.size
         sampling_rate = sync.attrs["sampling_rate"]
         stim_sample_offset = int(dset_offset * sampling_rate)
-        log.info("  - recording clock offset: %d", stim_sample_offset)
+        logging.info("  - recording clock offset: %d", stim_sample_offset)
 
         if len(stims) != stim_onsets.size:
-            log.warning(
+            logging.warning(
                 "  - WARNING: number of stimuli does not match number of clicks. This recording may need to be discarded"
             )
 
@@ -154,7 +153,7 @@ async def oeaudio_to_trials(
             stim_seconds = await stim_duration(session, stim.name)
             stim_samples = int(stim_seconds * sampling_rate)
             if stim_samples > offset - onset:
-                log.warning(
+                logging.warning(
                     "  - WARNING: stimulus %s is longer than the duration of the trial",
                     stim,
                 )
@@ -175,7 +174,7 @@ def assign_events_flat(events: pd.DataFrame, sampling_rate: float):
     """Assign event_times to clusters, generating a large toelis object"""
     nevents, _ = events.shape
     nclusters = events.index.unique().size
-    log.info("- grouping %d spikes into %d clusters...", nevents, nclusters)
+    logging.info("- grouping %d spikes into %d clusters...", nevents, nclusters)
     return events.groupby("clust").apply(
         lambda df: df.time.sort_values().to_numpy() / sampling_rate * 1000.0
     )
@@ -215,7 +214,7 @@ async def group_spikes_script(argv=None):
 
     from dlab.core import __version__
     from dlab.extracellular import entry_metadata, iter_entries
-    from dlab.util import json_serializable, setup_log
+    from dlab.util import json_serializable
 
     version = "2023.02.22"
 
@@ -324,7 +323,9 @@ async def group_spikes_script(argv=None):
         " 'cluster_info.tsv', and 'temp_wh.dat'",
     )
     args = p.parse_args(argv)
-    setup_log(log, args.debug)
+    logging.basicConfig(
+        format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
+    )
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
     async with AsyncClient() as session:
@@ -333,16 +334,16 @@ async def group_spikes_script(argv=None):
         )
         recording_name = resource_info["name"]
         resource_url = nbank.registry.full_url(nbank.default_registry, recording_name)
-        log.info("- kilosort output directory: %s", args.sortdir)
+        logging.info("- kilosort output directory: %s", args.sortdir)
         timefile = args.sortdir / "spike_times.npy"
         clustfile = args.sortdir / "spike_clusters.npy"
         infofile = args.sortdir / "cluster_info.tsv"
-        log.info("  - spike times: %s", timefile)
-        log.info("  - spike clusters: %s", clustfile)
+        logging.info("  - spike times: %s", timefile)
+        logging.info("  - spike clusters: %s", clustfile)
         events = pd.DataFrame(
             {"time": np.load(timefile).squeeze(), "clust": np.load(clustfile)},
         ).set_index("clust")
-        log.info("  - cluster info: %s", infofile)
+        logging.info("  - cluster info: %s", infofile)
         info = pd.read_csv(infofile, sep="\t", index_col=0)
         recfile = args.sortdir / "temp_wh.dat"
         params = read_kilo_params(args.sortdir / "params.py")
@@ -351,10 +352,10 @@ async def group_spikes_script(argv=None):
             recording, (recording.size // params["nchannels"], params["nchannels"])
         )
         nsamples, nchannels = recording.shape
-        log.info("  - filtered recording: %s", recfile)
-        log.info("    - %d samples, %d channels", nsamples, nchannels)
+        logging.info("  - filtered recording: %s", recfile)
+        logging.info("    - %d samples, %d channels", nsamples, nchannels)
         if args.cluster is not None:
-            log.info("- only analyzing clusters: %s", args.cluster)
+            logging.info("- only analyzing clusters: %s", args.cluster)
             events = events.loc[args.cluster]
 
         if args.toelis:
@@ -365,7 +366,9 @@ async def group_spikes_script(argv=None):
             if not args.dry_run:
                 with open(outfile, "wt") as ofp:
                     toelis.write(ofp, clusters)
-                log.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
+                logging.info(
+                    "- saved %d spikes to '%s'", toelis.count(clusters), outfile
+                )
             return
 
         if args.recording.exists():
@@ -374,7 +377,7 @@ async def group_spikes_script(argv=None):
             datafile = await nbank.find_resource(
                 session, nbank.default_registry, str(args.recording)
             )
-        log.info("- splitting '%s' into trials:", datafile)
+        logging.info("- splitting '%s' into trials:", datafile)
         with h5.File(datafile, "r") as afp:
             trials = pd.DataFrame(
                 await oeaudio_to_trials(
@@ -384,7 +387,7 @@ async def group_spikes_script(argv=None):
             entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
 
         # this pandas magic sorts the events by cluster and trial
-        log.info("- sorting events into trials:")
+        logging.info("- sorting events into trials:")
         events["trial"] = (
             trials.recording_start.searchsorted(events.time, side="left") - 1
         )
@@ -403,7 +406,7 @@ async def group_spikes_script(argv=None):
             clust_trials = trials.join(cluster.rename("events"))
             n_spikes = clust_trials.events.apply(len).agg("sum")
             if clust_type == "noise" or (clust_type == "mua" and not args.mua):
-                log.info(
+                logging.info(
                     "  - cluster %d (%d spikes, %s) -> skipped",
                     clust_id,
                     n_spikes,
@@ -413,7 +416,7 @@ async def group_spikes_script(argv=None):
             total_spikes += n_spikes
             total_clusters += 1
             outfile = args.output / f"{recording_name}_c{clust_id}.pprox"
-            log.info(
+            logging.info(
                 "  ✓ cluster %d (%d spikes, %s) -> %s",
                 clust_id,
                 n_spikes,
@@ -433,7 +436,7 @@ async def group_spikes_script(argv=None):
                 entry_metadata=entry_attrs,
                 **resource_info["metadata"],
             )
-            log.info(
+            logging.info(
                 "    - computing average spike waveform from channel %d",
                 clust_info["ch"],
             )
@@ -471,7 +474,7 @@ async def group_spikes_script(argv=None):
             if not args.dry_run:
                 with open(outfile, "wt") as ofp:
                     json.dump(clust_trials, ofp, default=json_serializable)
-        log.info(
+        logging.info(
             "- a total of %d spikes were assigned to %d clusters",
             total_spikes,
             total_clusters,
