@@ -15,6 +15,7 @@ import h5py as h5
 import numpy as np
 import pandas as pd
 import quickspikes as qs
+import toelis
 from httpx import AsyncClient
 
 from dlab import nbank, pprox
@@ -186,9 +187,7 @@ def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
         if isinstance(trial.events, float):
             events = []
         else:
-            events = (
-                (trial.events.astype("d") - trial.stimulus_start) / sampling_rate,
-            )
+            events = (trial.events.astype("d") - trial.stimulus_start) / sampling_rate
         pproc = {
             "events": events,
             "offset": trial.stimulus_start / sampling_rate,
@@ -364,8 +363,6 @@ async def group_spikes_script(argv=None):
             events = events.loc[args.cluster]
 
         if args.toelis:
-            import toelis
-
             clusters = assign_events_flat(events, params["sampling_rate"])
             outfile = (args.output / recording_name).with_suffix(".toe_lis")
             if not args.dry_run:
@@ -399,6 +396,11 @@ async def group_spikes_script(argv=None):
         clusters = events.groupby("clust").apply(
             lambda df: df.groupby("trial").apply(lambda x: x.time.to_numpy())
         )
+        # for some reason the trials end up in columns if we're only looking at
+        # a subset of clusters. This sort of undefined behavior in pandas is
+        # sure annoying.
+        if args.cluster is not None:
+            clusters = clusters.stack("trial")
 
         total_spikes = 0
         total_clusters = 0
