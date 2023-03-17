@@ -175,7 +175,9 @@ async def main(argv=None):
             logging.info("%s: %s", id, path)
 
     headers = {"Accept": "application/json"}
-    async with AsyncClient(headers=headers) as session, create_task_group() as tg:
+    async with AsyncClient(
+        timeout=None, headers=headers
+    ) as session, create_task_group() as tg:
         for id in args.id:
             tg.start_soon(_find_and_show, session, id)
 

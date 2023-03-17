@@ -11,9 +11,7 @@ To install: `pip install melizalab-tools`
 
 ### console scripts
 
-- `song-detect`: This is a wrapper for the [quicksong](https://github.com/melizalab/quicksong/) package, an algorithm for automatically segmenting acoustic recordings into songs. 
-
-- `group-kilo-spikes`
+- `group-kilo-spikes`: sort spike times output from [kilosort](https://github.com/MouseLand/Kilosort) and [phy2](https://github.com/cortex-lab/phy/) into pprox files.
 
 ### other stuff
 

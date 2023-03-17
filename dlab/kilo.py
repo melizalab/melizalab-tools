@@ -183,9 +183,14 @@ def assign_events_flat(events: pd.DataFrame, sampling_rate: float):
 def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
     """Convert pandas trials to pproc"""
     for trial in trials.itertuples():
-        # TODO need to handle empty trials
+        if isinstance(trial.events, float):
+            events = []
+        else:
+            events = (
+                (trial.events.astype("d") - trial.stimulus_start) / sampling_rate,
+            )
         pproc = {
-            "events": (trial.events.astype("d") - trial.stimulus_start) / sampling_rate,
+            "events": events,
             "offset": trial.stimulus_start / sampling_rate,
             "index": trial.Index,
             "interval": (
@@ -328,7 +333,7 @@ async def group_spikes_script(argv=None):
     )
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 
-    async with AsyncClient() as session:
+    async with AsyncClient(timeout=None) as session:
         resource_info = await nbank.fetch_metadata(
             session, nbank.default_registry, args.recording.stem
         )
@@ -391,20 +396,20 @@ async def group_spikes_script(argv=None):
         events["trial"] = (
             trials.recording_start.searchsorted(events.time, side="left") - 1
         )
-        clusters = (
-            events.groupby("clust")
-            .apply(lambda df: df.groupby("trial").apply(lambda x: x.time.to_numpy()))
-            .unstack("clust")
-            .unstack("clust")  # I have no idea why this is necessary
+        clusters = events.groupby("clust").apply(
+            lambda df: df.groupby("trial").apply(lambda x: x.time.to_numpy())
         )
 
         total_spikes = 0
         total_clusters = 0
-        for clust_id, cluster in clusters.items():
+        for clust_id, cluster in clusters.groupby("clust"):
             clust_info = info.loc[clust_id]
             clust_type = clust_info["group"]
-            clust_trials = trials.join(cluster.rename("events"))
-            n_spikes = clust_trials.events.apply(len).agg("sum")
+            n_spikes = cluster.apply(len).agg("sum")
+            # left join to trial information table - empty trials will be nan
+            clust_trials = trials.join(
+                cluster.reset_index(0, drop=True).rename("events")
+            )
             if clust_type == "noise" or (clust_type == "mua" and not args.mua):
                 logging.info(
                     "  - cluster %d (%d spikes, %s) -> skipped",
@@ -423,7 +428,6 @@ async def group_spikes_script(argv=None):
                 clust_type,
                 outfile,
             )
-
             clust_trials = pprox.from_trials(
                 trials_to_pprox(clust_trials, params["sampling_rate"]),
                 recording=resource_url,
