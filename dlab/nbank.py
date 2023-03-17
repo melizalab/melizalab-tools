@@ -37,7 +37,8 @@ async def find_resource(
     """
     url, params = registry.get_locations(registry_url, resource_id)
     if alt_base is not None:
-        path = await resolve_local_path(alt_base)
+        stem = Path(alt_base) / resource_id
+        path = await resolve_local_path(stem)
         if path is not None:
             logging.debug("%s: found in alt_base", resource_id)
             return path
