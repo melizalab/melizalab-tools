@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
-""" Functions for using kilsort/phy data """
+""" Functions for using kilosort/phy data """
 import json
 import logging
 import re
@@ -19,6 +19,7 @@ import toelis
 from httpx import AsyncClient
 
 from dlab import nbank, pprox
+from dlab.spikes import SpikeWaveforms, save_waveforms
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
@@ -220,7 +221,7 @@ async def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable
 
-    version = "2023.02.22"
+    version = "2023.04.18"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -287,19 +288,7 @@ async def group_spikes_script(argv=None):
         "--save-waveforms",
         "-W",
         action="store_true",
-        help="save representative waveforms from each unit's main channel in npy format",
-    )
-    p.add_argument(
-        "--waveform-num-spikes",
-        type=int,
-        default=200,
-        help="maximum number of spikes to use for average waveform",
-    )
-    p.add_argument(
-        "--waveform-seed",
-        type=int,
-        default=12345,
-        help="random seed for selecting spikes",
+        help="save representative waveforms from each unit's main channel in an hdf5 file",
     )
     p.add_argument(
         "--waveform-pre-peak",
@@ -313,12 +302,6 @@ async def group_spikes_script(argv=None):
         default=5.0,
         help="samples after the spike to keep (default %(default).1f ms)",
     )
-    p.add_argument(
-        "--waveform-upsample",
-        type=int,
-        default=3,
-        help="factor to upsample spikes before aligning them (default %(default)d)",
-    )
     p.add_argument("recording", type=Path, help="path of ARF recording file")
     p.add_argument(
         "sortdir",
@@ -331,6 +314,7 @@ async def group_spikes_script(argv=None):
         format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
     )
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+    logging.info("- %s version %s", p.prog, version)
 
     async with AsyncClient(timeout=None) as session:
         resource_info = await nbank.fetch_metadata(
@@ -442,44 +426,43 @@ async def group_spikes_script(argv=None):
                 entry_metadata=entry_attrs,
                 **resource_info["metadata"],
             )
-            logging.info(
-                "    - computing average spike waveform from channel %d",
-                clust_info["ch"],
-            )
-            n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
-            n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
-            spikes = events.loc[clust_id]
-            spikes = spikes[
-                (spikes.time > n_before) & (spikes.time < (nsamples - n_after))
-            ]
-            selected = spikes.sample(
-                min(args.waveform_num_spikes, n_spikes), random_state=args.waveform_seed
-            )
-            times = sorted(selected.time)
-            waveforms = qs.peaks(
-                recording[:, clust_info["ch"]], times, n_before, n_after
-            )
-            if args.waveform_upsample > 1:
-                # quick and dirty check for inverted signal
-                mean_spike = waveforms.mean(0)
-                flip = np.sign(mean_spike.min() + mean_spike.max())
-                _, waveforms = qs.realign_spikes(
-                    times,
-                    waveforms * flip,
-                    args.waveform_upsample,
-                    expected_peak=n_before,
-                )
-                waveforms *= flip
-            clust_trials["waveform"] = {
-                "mean": waveforms.mean(0),
-                "sampling_rate": params["sampling_rate"] * args.waveform_upsample,
-            }
-            if args.save_waveforms:
-                np.save(args.output / (outfile.stem + "_spikes.npy"), waveforms)
-
             if not args.dry_run:
                 with open(outfile, "wt") as ofp:
                     json.dump(clust_trials, ofp, default=json_serializable)
+            if args.save_waveforms:
+                outfile = args.output / (outfile.stem + "_spikes.h5")
+                logging.info(
+                    "    - waveforms on channel %d -> %s",
+                    clust_info["ch"],
+                    outfile,
+                )
+                n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
+                n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
+                spikes = events.loc[clust_id]
+                spikes = spikes[
+                    (spikes.time > n_before) & (spikes.time < (nsamples - n_after))
+                ]
+                waveforms = qs.peaks(
+                    recording[:, clust_info["ch"]],
+                    spikes.time,
+                    n_before,
+                    n_after,
+                )
+                if not args.dry_run:
+                    save_waveforms(
+                        outfile,
+                        SpikeWaveforms(
+                            waveforms.T, spikes.time, params["sampling_rate"], n_before
+                        ),
+                        recording=resource_url,
+                        processed_by=f"{p.prog} {version}",
+                        kilosort_amplitude=clust_info["Amplitude"],
+                        kilosort_contam_pct=clust_info["ContamPct"],
+                        kilosort_source_channel=clust_info["ch"],
+                        kilosort_probe_depth=clust_info["depth"],
+                        kilosort_n_spikes=clust_info["n_spikes"],
+                    )
+
         logging.info(
             "- a total of %d spikes were assigned to %d clusters",
             total_spikes,
