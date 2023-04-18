@@ -317,7 +317,7 @@ async def group_spikes_script(argv=None):
         "--waveform-upsample",
         type=int,
         default=3,
-        help="factor to upsample spikes before aligning them (default %(default)0.1f)",
+        help="factor to upsample spikes before aligning them (default %(default)d)",
     )
     p.add_argument("recording", type=Path, help="path of ARF recording file")
     p.add_argument(
@@ -467,7 +467,7 @@ async def group_spikes_script(argv=None):
                     times,
                     waveforms * flip,
                     args.waveform_upsample,
-                    expected_peak=n_before * args.waveform_upsample,
+                    expected_peak=n_before,
                 )
                 waveforms *= flip
             clust_trials["waveform"] = {
