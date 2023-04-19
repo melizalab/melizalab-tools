@@ -52,7 +52,7 @@ def rate(
 
     Returns (rate estimate, bin times)
     """
-    counts, bins = psth(spikes, binwidth, start, stop)
+    counts, bins = psth(spikes, binwidth, start=start, stop=stop)
     return np.convolve(counts, kernel, mode="same"), bins
 
 

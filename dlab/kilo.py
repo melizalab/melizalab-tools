@@ -357,7 +357,7 @@ async def group_spikes_script(argv=None):
                 )
             return
 
-        if args.recording.exists():
+        if args.recording.is_file():
             datafile = args.recording
         else:
             datafile = await nbank.find_resource(
