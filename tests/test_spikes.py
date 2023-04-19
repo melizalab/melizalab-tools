@@ -28,7 +28,7 @@ def test_psth_clip():
     stop = 4.0
     binwidth = 0.01
     events = [1.1, 2.1, 2.9, 4.01]
-    counts, bins = spikes.psth(events, binwidth, start, stop)
+    counts, bins = spikes.psth(events, binwidth, start=start, stop=stop)
     assert counts.sum() == sum(1 for e in events if e >= start and e < 4.0)
     assert counts.size == bins.size
 
@@ -50,5 +50,5 @@ def test_rate_scale():
     bandwidth = 0.1
     events = (1.1, 2.1, 2.9, 4.01)
     k, kt = kernel("gaussian", bandwidth, binwidth)
-    r, rt = spikes.rate(events, binwidth, k, 0.0, 5.0)
+    r, rt = spikes.rate(events, binwidth, k, start=0.0, stop=5.0)
     assert r.sum() * binwidth == pytest.approx(len(events))
