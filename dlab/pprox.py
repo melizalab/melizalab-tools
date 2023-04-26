@@ -10,8 +10,10 @@ pprox objects are just python dictionaries.
 Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 
 """
+from typing import Iterable, Dict
 
-_schema = "https://meliza.org/spec:2/pprox.json#"
+_base_schema = "https://meliza.org/spec:2/pprox.json#"
+_stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
 
 
 def empty():
@@ -19,9 +21,9 @@ def empty():
     return from_trials([])
 
 
-def from_trials(trials, **metadata):
+def from_trials(trials: Iterable, *, schema: str = _base_schema, **metadata) -> Dict:
     """Wrap a sequence of trials in a pprox object, optionally specifying top-level metadata"""
-    d = {"$schema": _schema, "pprox": tuple(trials)}
+    d = {"$schema": schema, "pprox": tuple(trials)}
     d.update(**metadata)
     return d
 
@@ -87,7 +89,7 @@ def combine_recordings(*pprox):
 async def split_trial(trial, split_fun):
     """Split a trial into multiple intervals.
 
-    split_fun: a function that takes the name of the stimulus and returns a
+    split_fun: a coroutine that takes the name of the stimulus and returns a
     list of dictionaries, one per split. Each dict needs to have at least three
     fields: `stim_begin`, the time when the split begins (relative to the start
     of the stimulus; `stim_end`, the time when the split ends; and `name`, the

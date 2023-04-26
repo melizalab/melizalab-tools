@@ -221,7 +221,7 @@ async def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable
 
-    version = "2023.04.18"
+    version = "2023.04.26"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -280,9 +280,11 @@ async def group_spikes_script(argv=None):
         help="save multiunit clusters along with single units",
     )
     p.add_argument(
-        "--name",
-        "-n",
-        help="base name of the unit (default is based on 'recording' field of trials pprox) ",
+        "--artifact-reject-thresh",
+        type=float,
+        default=6.0,
+        help="threshold for rejecting artifact spikes (max absolute amplitude"
+        " more than x times max absolute amplitude of the mean spike)",
     )
     p.add_argument(
         "--save-waveforms",
@@ -377,25 +379,13 @@ async def group_spikes_script(argv=None):
         events["trial"] = (
             trials.recording_start.searchsorted(events.time, side="left") - 1
         )
-        clusters = events.groupby("clust").apply(
-            lambda df: df.groupby("trial").apply(lambda x: x.time.to_numpy())
-        )
-        # for some reason the trials end up in columns if we're only looking at
-        # a subset of clusters. This sort of undefined behavior in pandas is
-        # sure annoying.
-        if args.cluster is not None:
-            clusters = clusters.stack("trial")
 
         total_spikes = 0
         total_clusters = 0
-        for clust_id, cluster in clusters.groupby("clust"):
+        for clust_id, cluster in events.groupby("clust"):
             clust_info = info.loc[clust_id]
             clust_type = clust_info["group"]
-            n_spikes = cluster.apply(len).agg("sum")
-            # left join to trial information table - empty trials will be nan
-            clust_trials = trials.join(
-                cluster.reset_index(0, drop=True).rename("events")
-            )
+            n_spikes = len(cluster)
             if clust_type == "noise" or (clust_type == "mua" and not args.mua):
                 logging.info(
                     "  - cluster %d (%d spikes, %s) -> skipped",
@@ -404,18 +394,53 @@ async def group_spikes_script(argv=None):
                     clust_type,
                 )
                 continue
+            logging.info(
+                "  ✓ cluster %d (%d spikes, %s)",
+                clust_id,
+                n_spikes,
+                clust_type,
+            )
+            # remove artifact spikes
+            n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
+            n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
+            spikes = cluster[
+                (cluster.time > n_before) & (cluster.time < (nsamples - n_after))
+            ]
+            waveforms = qs.peaks(
+                recording[:, clust_info["ch"]],
+                spikes.time,
+                n_before=n_before,
+                n_after=n_after,
+            )
+            mean_spike = waveforms.mean(0)
+            included = np.abs(waveforms).max(-1) < (
+                np.abs(mean_spike).max(-1) * args.artifact_reject_thresh
+            )
+            n_included = included.sum()
+            if n_included < n_spikes:
+                cluster = cluster[included]
+                waveforms = waveforms[included]
+                logging.info(
+                    "    - %d artifact spike(s) excluded", n_spikes - n_included
+                )
+            # aggregate spikes by trial and left join to trial information table
+            # - empty trials will be nan
+            clust_trials = trials.join(
+                cluster.groupby("trial")
+                .apply(lambda x: x.time.to_numpy())
+                .rename("events")
+            )
             total_spikes += n_spikes
             total_clusters += 1
             outfile = args.output / f"{recording_name}_c{clust_id}.pprox"
             logging.info(
-                "  ✓ cluster %d (%d spikes, %s) -> %s",
-                clust_id,
-                n_spikes,
-                clust_type,
+                "    - %d spikes -> %s",
+                n_included,
                 outfile,
             )
             clust_trials = pprox.from_trials(
                 trials_to_pprox(clust_trials, params["sampling_rate"]),
+                schema=pprox._stimtrial_schema,
                 recording=resource_url,
                 processed_by=[f"{p.prog} {version}"],
                 kilosort_amplitude=clust_info["Amplitude"],
@@ -429,30 +454,20 @@ async def group_spikes_script(argv=None):
             if not args.dry_run:
                 with open(outfile, "wt") as ofp:
                     json.dump(clust_trials, ofp, default=json_serializable)
-            if args.save_waveforms:
-                outfile = args.output / (outfile.stem + "_spikes.h5")
-                logging.info(
-                    "    - waveforms on channel %d -> %s",
-                    clust_info["ch"],
-                    outfile,
-                )
-                n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
-                n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
-                spikes = events.loc[clust_id]
-                spikes = spikes[
-                    (spikes.time > n_before) & (spikes.time < (nsamples - n_after))
-                ]
-                waveforms = qs.peaks(
-                    recording[:, clust_info["ch"]],
-                    spikes.time,
-                    n_before,
-                    n_after,
-                )
-                if not args.dry_run:
+                if args.save_waveforms:
+                    outfile = args.output / (outfile.stem + "_spikes.h5")
+                    logging.info(
+                        "    - waveforms on channel %d -> %s",
+                        clust_info["ch"],
+                        outfile,
+                    )
                     save_waveforms(
                         outfile,
                         SpikeWaveforms(
-                            waveforms.T, spikes.time, params["sampling_rate"], n_before
+                            waveforms,
+                            cluster.time.to_numpy(),
+                            params["sampling_rate"],
+                            n_before,
                         ),
                         recording=resource_url,
                         processed_by=f"{p.prog} {version}",

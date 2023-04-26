@@ -59,7 +59,7 @@ def rate(
 @dataclass
 class SpikeWaveforms:
     """
-    waveform: ntimes x nspikes array (NB: the output of `quickspikes.peaks` needs to be transposed)
+    waveform: nspikes x npoints array
     times: nspikes array (times of spikes in units of samples)
     sampling_rate: the sampling rate of the spikes and the spike times (in Hz)
     peak_index: the index corresponding to the time of the spike in the waveform
@@ -88,7 +88,7 @@ def save_waveforms(
     """
     spikes = np.asarray(waveforms.waveforms)
     times = np.asarray(waveforms.times)
-    nspikes, ntimes = spikes.shape
+    ntimes, nspikes = spikes.shape
     if ntimes != times.size:
         raise ValueError(
             "number of rows in waveform array must match number of elements in times array"
