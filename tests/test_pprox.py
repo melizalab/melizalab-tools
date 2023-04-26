@@ -219,7 +219,7 @@ async def split_fun(name):
 
 def test_make_pprox():
     pp = pprox.from_trials(trials, test_attribute="blank")
-    assert pp["$schema"] == pprox._schema
+    assert pp["$schema"] == pprox._base_schema
     assert pp["test_attribute"] == "blank"
     assert pp["pprox"] == trials
 
