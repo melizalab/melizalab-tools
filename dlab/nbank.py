@@ -35,13 +35,13 @@ async def find_resource(
     FileNotFoundError if the resource cannot be located.
 
     """
-    url, params = registry.get_locations(registry_url, resource_id)
     if alt_base is not None:
         stem = Path(alt_base) / resource_id
         path = await resolve_local_path(stem)
         if path is not None:
             logging.debug("%s: found in alt_base", resource_id)
             return path
+    url, params = registry.get_locations(registry_url, resource_id)
     response = await session.get(url, params=params)
     response.raise_for_status()
     locations = response.json()
