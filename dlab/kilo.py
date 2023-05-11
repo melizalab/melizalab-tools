@@ -71,7 +71,6 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
             yield Stimulus(stim_name, time)
 
 
-@lru_cache(maxsize=None)
 async def stim_duration(session: AsyncClient, stim_name: str) -> float:
     """
     Returns the duration of a stimulus (in s). This can only really be done by
@@ -221,7 +220,7 @@ async def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable
 
-    version = "2023.04.26"
+    version = "2023.05.11"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -287,10 +286,10 @@ async def group_spikes_script(argv=None):
         " more than x times max absolute amplitude of the mean spike)",
     )
     p.add_argument(
-        "--save-waveforms",
+        "--no-waveforms",
         "-W",
         action="store_true",
-        help="save representative waveforms from each unit's main channel in an hdf5 file",
+        help="if set, do not save representative waveforms from each unit's main channel in an hdf5 file",
     )
     p.add_argument(
         "--waveform-pre-peak",
@@ -454,7 +453,7 @@ async def group_spikes_script(argv=None):
             if not args.dry_run:
                 with open(outfile, "wt") as ofp:
                     json.dump(clust_trials, ofp, default=json_serializable)
-                if args.save_waveforms:
+                if not args.no_waveforms:
                     outfile = args.output / (outfile.stem + "_spikes.h5")
                     logging.info(
                         "    - waveforms on channel %d -> %s",
