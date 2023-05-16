@@ -59,7 +59,7 @@ def rate(
 @dataclass
 class SpikeWaveforms:
     """
-    waveform: nspikes x npoints array
+    waveform: (npoints, nspikes) array
     times: nspikes array (times of spikes in units of samples)
     sampling_rate: the sampling rate of the spikes and the spike times (in Hz)
     peak_index: the index corresponding to the time of the spike in the waveform

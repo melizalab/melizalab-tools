@@ -220,7 +220,7 @@ async def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable
 
-    version = "2023.05.11"
+    version = "2023.05.16"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -416,7 +416,10 @@ async def group_spikes_script(argv=None):
                 np.abs(mean_spike).max(-1) * args.artifact_reject_thresh
             )
             n_included = included.sum()
-            if n_included < n_spikes:
+            if n_included == 0:
+                logging.warn("   - all spikes marked as artifacts (sorting error?)")
+                continue
+            elif n_included < n_spikes:
                 cluster = cluster[included]
                 waveforms = waveforms[included]
                 logging.info(
