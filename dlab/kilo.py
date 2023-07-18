@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import quickspikes as qs
 import toelis
-from httpx import AsyncClient
+from httpx import AsyncClient, HTTPStatusError
 
 from dlab import nbank, pprox
 from dlab.spikes import SpikeWaveforms, save_waveforms
@@ -220,7 +220,7 @@ async def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable
 
-    version = "2023.05.16"
+    version = "2023.07.18"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -318,11 +318,28 @@ async def group_spikes_script(argv=None):
     logging.info("- %s version %s", p.prog, version)
 
     async with AsyncClient(timeout=None) as session:
-        resource_info = await nbank.fetch_metadata(
-            session, nbank.default_registry, args.recording.stem
-        )
-        recording_name = resource_info["name"]
-        resource_url = nbank.registry.full_url(nbank.default_registry, recording_name)
+        logging.info("- using stimulus times from %s", args.recording)
+        try:
+            resource_info = await nbank.fetch_metadata(
+                session, nbank.default_registry, args.recording.stem
+            )
+            recording_name = resource_info["name"]
+            resource_url = nbank.registry.full_url(
+                nbank.default_registry, recording_name
+            )
+            logging.info("  - registered at %s", resource_url)
+        except HTTPStatusError:
+            if args.debug:
+                resource_info = {"metadata": {}}
+                recording_name = args.recording.stem
+                resource_url = "(debug)"
+                logging.warn(
+                    "  - warning: recording has not been deposited, proceeding anyway in debug mode"
+                )
+            else:
+                logging.error("  - error: recording must be deposited in neurobank")
+                p.exit(-1)
+
         logging.info("- kilosort output directory: %s", args.sortdir)
         timefile = args.sortdir / "spike_times.npy"
         clustfile = args.sortdir / "spike_clusters.npy"
