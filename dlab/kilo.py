@@ -220,7 +220,7 @@ async def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable
 
-    version = "2023.07.18"
+    version = "2023.07.19"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -282,7 +282,7 @@ async def group_spikes_script(argv=None):
         "--artifact-reject-thresh",
         type=float,
         default=6.0,
-        help="threshold for rejecting artifact spikes (max absolute amplitude"
+        help="threshold for rejecting artifact spikes (default %(default).1f; max absolute amplitude"
         " more than x times max absolute amplitude of the mean spike)",
     )
     p.add_argument(
@@ -348,7 +348,7 @@ async def group_spikes_script(argv=None):
         logging.info("  - spike clusters: %s", clustfile)
         events = pd.DataFrame(
             {"time": np.load(timefile).squeeze(), "clust": np.load(clustfile)},
-        ).set_index("clust")
+        )
         logging.info("  - cluster info: %s", infofile)
         info = pd.read_csv(infofile, sep="\t", index_col=0)
         recfile = args.sortdir / "temp_wh.dat"
@@ -362,8 +362,19 @@ async def group_spikes_script(argv=None):
         logging.info("    - %d samples, %d channels", nsamples, nchannels)
         if args.cluster is not None:
             logging.info("- only analyzing clusters: %s", args.cluster)
-            events = events.loc[args.cluster]
+            events = events[events.cluster == args.cluster]
 
+        # find duplicates - this is rare but needs to be caught
+        duplicates = events.duplicated()
+        if duplicates.any():
+            dupl_clusts = events[duplicates].clust
+            logging.warn(
+                "  - warning: removing spikes with duplicate times from clusters %s",
+                ",".join(str(c) for c in dupl_clusts),
+            )
+            events = events[~duplicates]
+
+        events.set_index("clust", inplace=True)
         if args.toelis:
             clusters = assign_events_flat(events, params["sampling_rate"])
             outfile = (args.output / recording_name).with_suffix(".toe_lis")
