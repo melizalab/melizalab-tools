@@ -2,7 +2,7 @@
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
 import logging
-from typing import Dict, Union
+from typing import Dict, Union, Optional
 from urllib.parse import urlparse
 import json
 
@@ -16,10 +16,29 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 default_registry = registry.default_registry()
 
 
+async def search_resources(
+    session: AsyncClient, *, registry_url: str = default_registry, **params
+):
+    """This is an asynchronous version of the core nbank.search function"""
+    url, _ = registry.find_resource(registry_url)
+    r = await session.get(url, params=params, headers={"Accept": "application/json"})
+    r.raise_for_status()
+    for d in r.json():
+        yield d
+    while "next" in r.links:
+        url = r.links["next"]["url"]
+        # parameters are already part of the URL
+        r = await session.get(url, headers={"Accept": "application/json"})
+        r.raise_for_status()
+        for d in r.json():
+            yield d
+
+
 async def find_resource(
     session: AsyncClient,
-    registry_url: str,
     resource_id: str,
+    *,
+    registry_url: str = default_registry,
     alt_base: Union[Path, str, None] = None,
     no_download: bool = False,
 ) -> Path:
@@ -81,8 +100,8 @@ async def resolve_local_path(stem: Path) -> Path:
 
 async def fetch_resource(
     session: AsyncClient,
-    url: str,
-    resource_id: str,  # this could be parsed out of the url
+    resource_id: str,
+    url: str = default_registry,
     no_download: bool = False,
 ) -> Path:
     """Fetch a downloadable resource from the registry.
@@ -109,7 +128,10 @@ async def fetch_resource(
 
 
 async def fetch_metadata(
-    session: AsyncClient, registry_url: str, resource_id: str
+    session: AsyncClient,
+    resource_id: str,
+    *,
+    registry_url: str = default_registry,
 ) -> Dict:
     """Fetch metadata for a resource. Results will be cached locally."""
     target = await cache.locate(resource_id, urlparse(registry_url).netloc)
@@ -166,7 +188,7 @@ async def main(argv=None):
     async def _find_and_show(session, id):
         try:
             path = await find_resource(
-                session, args.registry_url, id, alt_base=args.base
+                session, id, registry_url=args.registry_url, alt_base=args.base
             )
         except HTTPStatusError:
             logging.info("%s: no such resource", id)
