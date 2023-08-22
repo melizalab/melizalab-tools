@@ -108,7 +108,7 @@ async def fetch_resource(
 
     The file will be cached locally. Returns the path of the file.
     """
-    target = await cache.locate(resource_id, urlparse(url).netloc)
+    target = await cache.locate(resource_id, Path(urlparse(url).netloc) / "resources")
     if await target.exists():
         logging.debug("%s: found in local cache", resource_id)
         return target
@@ -134,7 +134,9 @@ async def fetch_metadata(
     registry_url: str = default_registry,
 ) -> Dict:
     """Fetch metadata for a resource. Results will be cached locally."""
-    target = await cache.locate(resource_id, urlparse(registry_url).netloc)
+    target = await cache.locate(
+        resource_id, Path(urlparse(registry_url).netloc) / "metadata"
+    )
     if await target.exists():
         logging.debug("%s: metadata found in local cache", resource_id)
         return json.loads(await target.read_text())

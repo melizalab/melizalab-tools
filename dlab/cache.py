@@ -2,6 +2,7 @@
 # -*- mode: python -*-
 """ Local cache, primarily for storing neurobank resources """
 import logging
+from typing import Union
 
 from anyio import Path, run_process
 import appdirs
@@ -12,7 +13,7 @@ user_dir = appdirs.user_cache_dir(APP_NAME, APP_AUTHOR)
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
-async def locate(name: str, subdir: str) -> Path:
+async def locate(name: Union[Path, str], subdir: Union[Path, str]) -> Path:
     """Return any anyio.Path for a cached resource, creating subdir in the cache if needed"""
     cache_dir = Path(user_dir) / subdir
     await cache_dir.mkdir(parents=True, exist_ok=True)
