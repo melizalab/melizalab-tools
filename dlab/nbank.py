@@ -2,7 +2,7 @@
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
 import logging
-from typing import Dict, Union, Optional
+from typing import Dict, Union
 from urllib.parse import urlparse
 import json
 
@@ -78,7 +78,7 @@ async def find_resource(
             continue
         url = util.parse_location(loc)
         try:
-            return await fetch_resource(session, url, resource_id, no_download)
+            return await fetch_resource(session, resource_id, url, no_download)
         except FileNotFoundError:
             pass
     # all locations failed; raise an error
