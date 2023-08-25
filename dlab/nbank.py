@@ -3,7 +3,7 @@
 """Functions for interfacing with the neurobank repository """
 import logging
 import concurrent.futures
-from typing import Tuple, Dict, Union, TypeAlias, Iterator, Sequence
+from typing import Tuple, Dict, Union, Iterator, Sequence
 from urllib.parse import urlparse
 from pathlib import Path
 
@@ -18,7 +18,7 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 default_registry = registry.default_registry()
 
 
-MaybeResourcePath: TypeAlias = Tuple[str, Union[Path, FileNotFoundError]]
+MaybeResourcePath = Tuple[str, Union[Path, FileNotFoundError]]
 
 
 def find_resources(

@@ -13,13 +13,14 @@ Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 import uuid
 import itertools
 from typing import (
+    Any,
     Iterable,
     TypedDict,
     Sequence,
     Callable,
     Iterator,
     Tuple,
-    NotRequired,
+    Union,
 )
 
 import numpy as np
@@ -37,8 +38,6 @@ class Stimulus(TypedDict):
 
 class Trial(TypedDict):
     events: Sequence[float]
-    offset: NotRequired[float]
-    index: NotRequired[int]
 
 
 class StimTrial(Trial):

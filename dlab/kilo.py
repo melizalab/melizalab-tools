@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Iterator, NamedTuple, Iterable
+from typing import Dict, Iterator, NamedTuple, Iterable, Optional
 
 import ewave
 import h5py as h5
@@ -71,7 +71,7 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
             yield Stimulus(stim_name, time)
 
 
-def stim_durations(stim_names: Iterable[str]) -> Dict[str, float]:
+def get_stim_durations(stim_names: Iterable[str]) -> Dict[str, float]:
     """
     Looks up durations (in s) for a sequence of stimuli. This can only really be done by
     opening the wave files.
@@ -131,10 +131,9 @@ def oeaudio_to_trials(
             expt_start = entry_start
 
         logging.info("  - parsing stimulus log")
-        stims = stim_durations(
-            stim.name for stim in oeaudio_stims(find_stim_dset(entry))
-        )
-        logging.info("    - detected %d stimuli", len(stims))
+        entry_stimuli = list(oeaudio_stims(find_stim_dset(entry)))
+        stim_durations = get_stim_durations(stim.name for stim in entry_stimuli)
+        logging.info("    - detected %d stimuli", len(entry_stimuli))
         logging.info("  - sync track: '%s'", sync_dset)
         sync = entry[sync_dset]
         sync_data = sync[:].astype("d")
@@ -147,16 +146,19 @@ def oeaudio_to_trials(
         stim_sample_offset = int(dset_offset * sampling_rate)
         logging.info("  - recording clock offset: %d", stim_sample_offset)
 
-        if len(stims) != stim_onsets.size:
+        if len(entry_stimuli) != stim_onsets.size:
             logging.warning(
                 "  - WARNING: number of stimuli does not match number of clicks. This recording may need to be discarded"
             )
 
         padding_samples = int(prepad * sampling_rate)
         for stim, onset, offset in zip_longest(
-            stims, stim_onsets, stim_onsets[1:], fillvalue=dset_end + padding_samples
+            entry_stimuli,
+            stim_onsets,
+            stim_onsets[1:],
+            fillvalue=dset_end + padding_samples,
         ):
-            stim_name, stim_seconds = stim
+            stim_seconds = stim_durations[stim.name]
             stim_samples = int(stim_seconds * sampling_rate)
             if stim_samples > offset - onset:
                 logging.warning(
@@ -225,7 +227,7 @@ def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable
 
-    version = "2023.07.19"
+    version = "2023.08.25"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
