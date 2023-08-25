@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for processing spike trains (point processes) """
-from typing import Optional, Tuple, Any
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Optional, Tuple
 
 import h5py as h5
 import numpy as np

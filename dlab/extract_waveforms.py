@@ -5,11 +5,9 @@ import json
 import logging
 
 import h5py as h5
+import nbank
 import numpy as np
 import pandas as pd
-
-import nbank
-
 
 if __name__ == "__main__":
     import argparse

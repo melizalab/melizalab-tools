@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
-import logging
 import concurrent.futures
-from typing import Tuple, Dict, Union, Iterator, Sequence
-from urllib.parse import urlparse
+import logging
 from pathlib import Path
+from typing import Dict, Iterator, Sequence, Tuple, Union
+from urllib.parse import urlparse
 
 from httpx import Client
 from nbank import registry, util
-from nbank.core import search, describe, describe_many
 from nbank.archive import resolve_extension
+from nbank.core import describe, describe_many, search
 
 from dlab import cache
 

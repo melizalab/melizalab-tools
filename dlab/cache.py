@@ -2,9 +2,9 @@
 # -*- mode: python -*-
 """ Local cache, primarily for storing neurobank resources """
 import logging
-from typing import Union
 from pathlib import Path
 from shutil import rmtree
+from typing import Union
 
 import appdirs
 

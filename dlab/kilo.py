@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Iterator, NamedTuple, Iterable, Optional
+from typing import Dict, Iterable, Iterator, NamedTuple, Optional
 
 import ewave
 import h5py as h5

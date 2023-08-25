@@ -10,22 +10,12 @@ pprox objects are just python dictionaries.
 Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 
 """
-import uuid
 import itertools
-from typing import (
-    Any,
-    Iterable,
-    TypedDict,
-    Sequence,
-    Callable,
-    Iterator,
-    Tuple,
-    Union,
-)
+import uuid
+from typing import Any, Callable, Iterable, Iterator, Sequence, Tuple, TypedDict, Union
 
 import numpy as np
 import pandas as pd
-
 
 _base_schema = "https://meliza.org/spec:2/pprox.json#"
 _stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
