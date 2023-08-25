@@ -2,47 +2,29 @@
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
 import logging
-from typing import Dict, Union
+import concurrent.futures
+from typing import Tuple, Dict, Union
 from urllib.parse import urlparse
-import json
+from pathlib import Path
 
-from anyio import Path, create_task_group
-from httpx import AsyncClient, HTTPStatusError
+from httpx import Client
+from nbank import registry, util
+from nbank.core import search
+from nbank.archive import resolve_extension
 
 from dlab import cache
-from nbank import registry, util
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 default_registry = registry.default_registry()
 
 
-async def search_resources(
-    session: AsyncClient, *, registry_url: str = default_registry, **params
-):
-    """This is an asynchronous version of the core nbank.search function"""
-    url, _ = registry.find_resource(registry_url)
-    r = await session.get(url, params=params, headers={"Accept": "application/json"})
-    r.raise_for_status()
-    for d in r.json():
-        yield d
-    while "next" in r.links:
-        url = r.links["next"]["url"]
-        # parameters are already part of the URL
-        r = await session.get(url, headers={"Accept": "application/json"})
-        r.raise_for_status()
-        for d in r.json():
-            yield d
-
-
-async def find_resource(
-    session: AsyncClient,
-    resource_id: str,
-    *,
+def find_resources(
+    *resource_ids: str,
     registry_url: str = default_registry,
     alt_base: Union[Path, str, None] = None,
     no_download: bool = False,
-) -> Path:
-    """Locate a neurobank resource
+) -> Dict[str, Union[Path, ValueError, FileNotFoundError]]:
+    """Locate resources using neurobank.
 
     This function will try to locate resources from the following locations:
     - a local directory (alt_base, if set),
@@ -50,104 +32,81 @@ async def find_resource(
     - a local cache
     - a remote HTTP archive (caching the file for local access later)
 
-    It will raise a ValueError if the resource does not exist and a
-    FileNotFoundError if the resource cannot be located.
+    Returns a dictionary of results. The result for each requested id is a Path
+    if the resource was successfully located, a ValueError if the resource does
+    not exist, or a FileNotFoundError if the resource cannot be located.
 
     """
+    results = {}
     if alt_base is not None:
-        stem = Path(alt_base) / resource_id
-        path = await resolve_local_path(stem)
-        if path is not None:
-            logging.debug("%s: found in alt_base", resource_id)
-            return path
-    url, params = registry.get_locations(registry_url, resource_id)
-    response = await session.get(url, params=params)
-    response.raise_for_status()
-    locations = response.json()
-    # search for local files
-    for loc in locations:
-        if loc["scheme"] not in registry._local_schemes:
-            continue
-        path = await resolve_local_path(Path(util.parse_location(loc, alt_base)))
-        if path is not None:
-            logging.debug("%s: found in local repository", resource_id)
-            return path
-    # search remote locations
-    for loc in locations:
-        if loc["scheme"] in registry._local_schemes:
-            continue
-        url = util.parse_location(loc)
-        try:
-            return await fetch_resource(session, resource_id, url, no_download)
-        except FileNotFoundError:
-            pass
-    # all locations failed; raise an error
-    raise FileNotFoundError(f"{resource_id}: unable to locate file")
+        for resource_id in resource_ids:
+            stem = Path(alt_base) / resource_id
+            try:
+                results[resource_id] = resolve_extension(stem)
+                logging.debug("%s: found in alt_base", resource_id)
+            except FileNotFoundError:
+                pass
+    url, query = registry.get_locations_bulk(
+        registry_url, [id for id in resource_ids if id not in results]
+    )
+    to_fetch = {}
+    with Client() as client:
+        response = util.query_registry_bulk(client, url, query)
+        for resource in response:
+            name = resource["name"]
+            # search for local files
+            for loc in resource["locations"]:
+                if loc["scheme"] not in registry._local_schemes:
+                    continue
+                stem = util.parse_location(loc, alt_base)
+                try:
+                    results[name] = resolve_extension(stem)
+                    logging.debug("%s: found in local repository", resource_id)
+                except FileNotFoundError:
+                    pass
+            # search remote locations
+            for loc in resource["locations"]:
+                if loc["scheme"] in registry._local_schemes:
+                    continue
+                to_fetch[name] = util.parse_location(loc)
+    with Client() as client, concurrent.futures.ThreadPoolExecutor() as executor:
+        future_to_name = {
+            executor.submit(fetch_resource, client, name, url, no_download): name
+            for name, url in to_fetch.items()
+        }
+        for future in concurrent.futures.as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                path = future.result()
+            except FileNotFoundError as err:
+                path = err
+            results[name] = path
+    return results
 
 
-async def resolve_local_path(stem: Path) -> Path:
-    """Find a local resource based on a path or path stem.
-
-    Because resource names often don't have extensions, a local filesystem
-    search may be needed to resolve the full path.
-
-    """
-    if await stem.exists():
-        return stem
-    async for path in stem.parent.glob(f"{stem.name}.*"):
-        return path
-
-
-async def fetch_resource(
-    session: AsyncClient,
+def fetch_resource(
+    client: Client,
     resource_id: str,
-    url: str = default_registry,
+    url: str,
     no_download: bool = False,
-) -> Path:
-    """Fetch a downloadable resource from the registry.
-
-    The file will be cached locally. Returns the path of the file.
-    """
-    target = await cache.locate(resource_id, Path(urlparse(url).netloc) / "resources")
-    if await target.exists():
+) -> Tuple[str, Union[Path, FileNotFoundError]]:
+    """Fetch a downloadable resource from the registry."""
+    target = cache.locate(resource_id, Path(urlparse(url).netloc) / "resources")
+    if target.exists():
         logging.debug("%s: found in local cache", resource_id)
         return target
     elif no_download:
         raise FileNotFoundError(f"{url}: resource not found in local cache")
     logging.debug("%s: fetching from registry", resource_id)
-    async with session.stream("GET", url) as response:
+    with client.stream("GET", url) as response:
         if response.status_code == 404:
             raise FileNotFoundError(f"{url}: resource not found")
         elif response.status_code == 415:
-            # should be possible to get the error message from registry?
             raise FileNotFoundError(f"{url}: this data type is not downloadable")
-        async with await target.open("wb") as fp:
-            async for data in response.aiter_bytes():
-                await fp.write(data)
+        with target.open("wb") as fp:
+            for data in response.iter_bytes():
+                fp.write(data)
     return target
-
-
-async def fetch_metadata(
-    session: AsyncClient,
-    resource_id: str,
-    *,
-    registry_url: str = default_registry,
-) -> Dict:
-    """Fetch metadata for a resource. Results will be cached locally."""
-    target = await cache.locate(
-        resource_id, Path(urlparse(registry_url).netloc) / "metadata"
-    )
-    if await target.exists():
-        logging.debug("%s: metadata found in local cache", resource_id)
-        return json.loads(await target.read_text())
-    else:
-        logging.debug("%s: fetching metadata from registry", resource_id)
-        url, params = registry.get_resource(registry_url, resource_id)
-        response = await session.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        await target.write_text(json.dumps(data))
-        return data
 
 
 def add_registry_argument(parser, dest="registry_url"):
@@ -161,7 +120,7 @@ def add_registry_argument(parser, dest="registry_url"):
     )
 
 
-async def main(argv=None):
+def main(argv=None):
     import argparse
 
     p = argparse.ArgumentParser(description="locate neurobank resources ")
@@ -185,29 +144,11 @@ async def main(argv=None):
     )
 
     if args.clear_cache:
-        await cache.clear(urlparse(args.registry_url).netloc)
+        cache.clear(urlparse(args.registry_url).netloc)
 
-    async def _find_and_show(session, id):
-        try:
-            path = await find_resource(
-                session, id, registry_url=args.registry_url, alt_base=args.base
-            )
-        except HTTPStatusError:
-            logging.info("%s: no such resource", id)
-        except FileNotFoundError:
-            logging.info("%s: not found, unable to download", id)
-        else:
-            logging.info("%s: %s", id, path)
-
-    headers = {"Accept": "application/json"}
-    async with AsyncClient(
-        timeout=None, headers=headers
-    ) as session, create_task_group() as tg:
-        for id in args.id:
-            tg.start_soon(_find_and_show, session, id)
+    if len(args.id) > 0:
+        find_resources(*args.id, registry_url=args.registry_url)
 
 
 if __name__ == "__main__":
-    from anyio import run
-
-    run(main)
+    main()
