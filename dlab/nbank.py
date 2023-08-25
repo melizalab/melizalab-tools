@@ -3,13 +3,13 @@
 """Functions for interfacing with the neurobank repository """
 import logging
 import concurrent.futures
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, TypeAlias, Iterator, Sequence
 from urllib.parse import urlparse
 from pathlib import Path
 
 from httpx import Client
 from nbank import registry, util
-from nbank.core import search
+from nbank.core import search, describe, describe_many
 from nbank.archive import resolve_extension
 
 from dlab import cache
@@ -18,12 +18,15 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 default_registry = registry.default_registry()
 
 
+MaybeResourcePath: TypeAlias = Tuple[str, Union[Path, ValueError, FileNotFoundError]]
+
+
 def find_resources(
     *resource_ids: str,
     registry_url: str = default_registry,
     alt_base: Union[Path, str, None] = None,
     no_download: bool = False,
-) -> Dict[str, Union[Path, ValueError, FileNotFoundError]]:
+) -> Iterator[MaybeResourcePath]:
     """Locate resources using neurobank.
 
     This function will try to locate resources from the following locations:
@@ -32,81 +35,111 @@ def find_resources(
     - a local cache
     - a remote HTTP archive (caching the file for local access later)
 
-    Returns a dictionary of results. The result for each requested id is a Path
+    Yields results as they become available. The result for each requested id is a Path
     if the resource was successfully located, a ValueError if the resource does
     not exist, or a FileNotFoundError if the resource cannot be located.
 
     """
-    results = {}
+    to_locate = set(resource_ids)
     if alt_base is not None:
         for resource_id in resource_ids:
             stem = Path(alt_base) / resource_id
             try:
-                results[resource_id] = resolve_extension(stem)
+                yield (resource_id, resolve_extension(stem))
+                to_locate.remove(resource_id)
                 logging.debug("%s: found in alt_base", resource_id)
             except FileNotFoundError:
                 pass
-    url, query = registry.get_locations_bulk(
-        registry_url, [id for id in resource_ids if id not in results]
-    )
-    to_fetch = {}
-    with Client() as client:
-        response = util.query_registry_bulk(client, url, query)
-        for resource in response:
-            name = resource["name"]
-            # search for local files
-            for loc in resource["locations"]:
-                if loc["scheme"] not in registry._local_schemes:
-                    continue
-                stem = util.parse_location(loc, alt_base)
-                try:
-                    results[name] = resolve_extension(stem)
-                    logging.debug("%s: found in local repository", resource_id)
-                except FileNotFoundError:
-                    pass
-            # search remote locations
-            for loc in resource["locations"]:
-                if loc["scheme"] in registry._local_schemes:
-                    continue
-                to_fetch[name] = util.parse_location(loc)
+    url, query = registry.get_locations_bulk(registry_url, to_locate)
     with Client() as client, concurrent.futures.ThreadPoolExecutor() as executor:
+        response = util.query_registry_bulk(client, url, query)
         future_to_name = {
-            executor.submit(fetch_resource, client, name, url, no_download): name
-            for name, url in to_fetch.items()
+            executor.submit(
+                fetch_resource,
+                client,
+                resource["locations"],
+                alt_base=alt_base,
+                no_download=no_download,
+            ): resource["name"]
+            for resource in response
         }
         for future in concurrent.futures.as_completed(future_to_name):
             name = future_to_name[future]
             try:
-                path = future.result()
+                yield (name, future.result())
             except FileNotFoundError as err:
-                path = err
-            results[name] = path
-    return results
+                yield (name, err)
+
+
+def find_resource(
+    resource_id: str,
+    *,
+    registry_url: str = default_registry,
+    alt_base: Union[Path, str, None] = None,
+    no_download: bool = False,
+) -> Path:
+    """Locate a resource using neurobank. This is a convenience wrapper for find_resources"""
+    results = find_resources(
+        resource_id,
+        registry_url=registry_url,
+        alt_base=alt_base,
+        no_download=no_download,
+    )
+    result = results[resource_id]
+    if isinstance(result, Path):
+        return result
+    else:
+        raise result
 
 
 def fetch_resource(
     client: Client,
-    resource_id: str,
-    url: str,
+    locations: Sequence[Dict],
+    *,
+    alt_base: Union[Path, str, None] = None,
     no_download: bool = False,
-) -> Tuple[str, Union[Path, FileNotFoundError]]:
-    """Fetch a downloadable resource from the registry."""
-    target = cache.locate(resource_id, Path(urlparse(url).netloc) / "resources")
-    if target.exists():
-        logging.debug("%s: found in local cache", resource_id)
-        return target
-    elif no_download:
-        raise FileNotFoundError(f"{url}: resource not found in local cache")
-    logging.debug("%s: fetching from registry", resource_id)
-    with client.stream("GET", url) as response:
-        if response.status_code == 404:
-            raise FileNotFoundError(f"{url}: resource not found")
-        elif response.status_code == 415:
-            raise FileNotFoundError(f"{url}: this data type is not downloadable")
-        with target.open("wb") as fp:
-            for data in response.iter_bytes():
-                fp.write(data)
-    return target
+) -> Path:
+    """Fetch a resource.
+
+    Given a sequence of locations where a resource could be found, this function
+    will try to locate the file, prioritizing local archives.
+
+    """
+    # search for local files
+    for loc in locations:
+        if loc["scheme"] not in registry._local_schemes:
+            continue
+        stem = util.parse_location(loc, alt_base)
+        try:
+            target = resolve_extension(stem)
+            logging.debug("%s: found in local repository", loc["resource_name"])
+            return target
+        except FileNotFoundError:
+            pass
+    for loc in locations:
+        if loc["scheme"] in registry._local_schemes:
+            continue
+        resource_id = loc["resource_name"]
+        url = util.parse_location(loc)
+        target = cache.locate(resource_id, Path(urlparse(url).netloc) / "resources")
+        if target.exists():
+            logging.debug("%s: found in local cache", resource_id)
+            return target
+        if no_download:
+            continue
+        logging.debug("%s: fetching from registry", resource_id)
+        with client.stream("GET", url) as response:
+            if response.status_code == 404:
+                logging.warn("%s: resource not found at %s", resource_id, url)
+            elif response.status_code == 415:
+                logging.warn("%s: resource not downloadable from %s", resource_id, url)
+            with target.open("wb") as fp:
+                for data in response.iter_bytes():
+                    fp.write(data)
+            return target
+    raise FileNotFoundError(
+        f"{resource_id}: resource not found in local archive, cache, or downloadable remote"
+    )
 
 
 def add_registry_argument(parser, dest="registry_url"):
@@ -147,7 +180,8 @@ def main(argv=None):
         cache.clear(urlparse(args.registry_url).netloc)
 
     if len(args.id) > 0:
-        find_resources(*args.id, registry_url=args.registry_url)
+        for name, location in find_resources(*args.id, registry_url=args.registry_url):
+            logging.info("%s: %s", name, location)
 
 
 if __name__ == "__main__":
