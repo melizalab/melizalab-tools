@@ -18,7 +18,7 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 default_registry = registry.default_registry()
 
 
-MaybeResourcePath: TypeAlias = Tuple[str, Union[Path, ValueError, FileNotFoundError]]
+MaybeResourcePath: TypeAlias = Tuple[str, Union[Path, FileNotFoundError]]
 
 
 def find_resources(
@@ -35,9 +35,9 @@ def find_resources(
     - a local cache
     - a remote HTTP archive (caching the file for local access later)
 
-    Yields results as they become available. The result for each requested id is a Path
-    if the resource was successfully located, a ValueError if the resource does
-    not exist, or a FileNotFoundError if the resource cannot be located.
+    Yields results as they become available. The result for each requested id is
+    a Path if the resource was successfully located, or exist, or a
+    FileNotFoundError if the resource cannot be located.
 
     """
     to_locate = set(resource_ids)

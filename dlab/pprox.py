@@ -10,28 +10,62 @@ pprox objects are just python dictionaries.
 Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 
 """
-from typing import Iterable, Dict
+import uuid
+import itertools
+from typing import (
+    Iterable,
+    TypedDict,
+    Sequence,
+    Callable,
+    Iterator,
+    Tuple,
+    NotRequired,
+)
+
+import numpy as np
+import pandas as pd
+
 
 _base_schema = "https://meliza.org/spec:2/pprox.json#"
 _stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
 
 
-def empty():
+class Stimulus(TypedDict):
+    name: str
+    interval: Tuple[float, float]
+
+
+class Trial(TypedDict):
+    events: Sequence[float]
+    offset: NotRequired[float]
+    index: NotRequired[int]
+
+
+class StimTrial(Trial):
+    interval: Tuple[float, float]
+    stimulus: Stimulus
+
+
+class Collection(TypedDict):
+    pprox: Sequence[Trial]
+
+
+def empty() -> Collection:
     """Returns a new, empty pprox object"""
     return from_trials([])
 
 
-def from_trials(trials: Iterable, *, schema: str = _base_schema, **metadata) -> Dict:
+def from_trials(
+    trials: Iterable[Trial], *, schema: str = _base_schema, **metadata
+) -> Collection:
     """Wrap a sequence of trials in a pprox object, optionally specifying top-level metadata"""
     d = {"$schema": schema, "pprox": tuple(trials)}
     d.update(**metadata)
     return d
 
 
-def wrap_uuid(b):
+def wrap_uuid(b: Union[bytes, str]) -> str:
     """Wrap a UUID (string or bytes) in a URN string"""
-    import uuid
-
     try:
         b = b.decode("ascii")
     except AttributeError:
@@ -39,20 +73,18 @@ def wrap_uuid(b):
     return uuid.UUID(b).urn
 
 
-def groupby(obj, keyfun):
+def groupby(pprox: Collection, keyfun: Callable[[Trial], Any]) -> Iterator:
     """Iterate through pprocs based on keys
 
     For example, if "stim" and "trial" are metadata on the trials, groupby(obj, lambda x: x["stim"]) will yield
     (stim0, [events_trial0, events_trial1]), (stim1, [events_trial0, events_trial1]), ...
 
     """
-    import itertools
-
-    evsorted = sorted(obj["pprox"], key=keyfun)
+    evsorted = sorted(pprox["pprox"], key=keyfun)
     return itertools.groupby(evsorted, key=keyfun)
 
 
-def validate(obj):
+def validate(obj: Collection):
     """Validates object against pprox schema"""
     import jsonschema
     import requests
@@ -60,7 +92,7 @@ def validate(obj):
     pass
 
 
-def trial_iterator(pprox):
+def trial_iterator(pprox: Collection) -> Iterator[Tuple[int, Trial]]:
     """Iterates through trials in pprox, yielding (index, trial)"""
     for i, trial in enumerate(pprox["pprox"]):
         # annotate with sampling rate
@@ -71,10 +103,8 @@ def trial_iterator(pprox):
         yield i, trial
 
 
-def aggregate_events(pprox):
+def aggregate_events(pprox: Collection) -> np.ndarray:
     """Aggregate all the events in a pprox into a single array, using the offset field to adjust times"""
-    import numpy as np
-
     all_events = [
         np.asarray(trial["events"]) + trial["offset"] for trial in pprox["pprox"]
     ]
@@ -86,12 +116,14 @@ def combine_recordings(*pprox):
     pass
 
 
-async def split_trial(trial, split_fun):
+def split_trial(
+    trial: StimTrial, split_fun: Callable[[str], pd.DataFrame]
+) -> pd.DataFrame:
     """Split a trial into multiple intervals.
 
-    split_fun: a coroutine that takes the name of the stimulus and returns a
-    list of dictionaries, one per split. Each dict needs to have at least three
-    fields: `stim_begin`, the time when the split begins (relative to the start
+    split_fun: a function that takes the name of the stimulus and returns a
+    pandas DataFrame with one row per split. The DataFrame needs to have at least three
+    columns: `stim_begin`, the time when the split begins (relative to the start
     of the stimulus; `stim_end`, the time when the split ends; and `name`, the
     name that should be given to the split. Any additional fields will be stored
     as metadata on the new trials. Alternatively, `split_fun` can return a
@@ -112,11 +144,9 @@ async def split_trial(trial, split_fun):
     the interval and the stimulus.
 
     """
-    import pandas as pd
-
     stimulus = trial["stimulus"]
     stim_on = stimulus["interval"][0]
-    splits = await split_fun(stimulus["name"])
+    splits = split_fun(stimulus["name"])
     # calculate average gap between splits and use this to determine when
     # the last split should end
     gaps = splits.stim_begin.shift(-1) - splits.stim_end

@@ -4,38 +4,38 @@
 import json
 import logging
 import re
-from collections import namedtuple
-from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterator
+from typing import Dict, Iterator, NamedTuple, Iterable
 
-import anyio
 import ewave
 import h5py as h5
 import numpy as np
 import pandas as pd
 import quickspikes as qs
 import toelis
-from httpx import AsyncClient, HTTPStatusError
+from httpx import Client, HTTPStatusError
 
 from dlab import nbank, pprox
 from dlab.spikes import SpikeWaveforms, save_waveforms
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-Trial = namedtuple(
-    "Trial",
-    [
-        "recording_entry",
-        "recording_start",
-        "recording_end",
-        "stimulus_name",
-        "stimulus_start",
-        "stimulus_end",
-    ],
-)
 
-Stimulus = namedtuple("Stimulus", ["name", "start", "end"], defaults=[None])
+class Trial(NamedTuple):
+    """Represents the structure of a trial. All time units are in samples."""
+
+    recording_entry: int
+    recording_start: int
+    recording_end: int
+    stimulus_name: str
+    stimulus_start: int
+    stimulus_end: int
+
+
+class Stimulus(NamedTuple):
+    name: str
+    start: int
+    end: Optional[int] = None
 
 
 def read_kilo_params(fname: Path) -> Dict:
@@ -57,7 +57,7 @@ def read_kilo_params(fname: Path) -> Dict:
 
 def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
     """Parse the messages in the 'stim' dataset to get a table of stimuli with
-    start samples. Note that these need to be corrected for offset of the
+    start samples. Note that these will need to be corrected for offset of the
     recording and network lag.
 
     """
@@ -71,21 +71,24 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
             yield Stimulus(stim_name, time)
 
 
-async def stim_duration(session: AsyncClient, stim_name: str) -> float:
+def stim_durations(stim_names: Iterable[str]) -> Dict[str, float]:
     """
-    Returns the duration of a stimulus (in s). This can only really be done by
-    downloading the stimulus from the registry, because the start/stop times are
-    not reliable. We try to speed this up by memoizing the function and caching
-    the downloaded files.
+    Looks up durations (in s) for a sequence of stimuli. This can only really be done by
+    opening the wave files.
 
     """
-    target = await nbank.find_resource(session, nbank.default_registry, stim_name)
-    with ewave.wavfile(str(target)) as fp:
-        return 1.0 * fp.nframes / fp.sampling_rate
+    output = {}
+    for name, path in nbank.find_resources(
+        *stim_names, registry_url=nbank.default_registry
+    ):
+        if isinstance(path, FileNotFoundError):
+            raise path
+        with ewave.wavfile(path) as fp:
+            output[name] = 1.0 * fp.nframes / fp.sampling_rate
+    return output
 
 
-async def oeaudio_to_trials(
-    session: AsyncClient,
+def oeaudio_to_trials(
     data_file: h5.File,
     sync_dset: str,
     sync_thresh: float = 1.0,
@@ -128,7 +131,9 @@ async def oeaudio_to_trials(
             expt_start = entry_start
 
         logging.info("  - parsing stimulus log")
-        stims = list(oeaudio_stims(find_stim_dset(entry)))
+        stims = stim_durations(
+            stim.name for stim in oeaudio_stims(find_stim_dset(entry))
+        )
         logging.info("    - detected %d stimuli", len(stims))
         logging.info("  - sync track: '%s'", sync_dset)
         sync = entry[sync_dset]
@@ -151,7 +156,7 @@ async def oeaudio_to_trials(
         for stim, onset, offset in zip_longest(
             stims, stim_onsets, stim_onsets[1:], fillvalue=dset_end + padding_samples
         ):
-            stim_seconds = await stim_duration(session, stim.name)
+            stim_name, stim_seconds = stim
             stim_samples = int(stim_seconds * sampling_rate)
             if stim_samples > offset - onset:
                 logging.warning(
@@ -212,7 +217,7 @@ def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
         yield pproc
 
 
-async def group_spikes_script(argv=None):
+def group_spikes_script(argv=None):
     import argparse
     import os
 
@@ -317,203 +322,184 @@ async def group_spikes_script(argv=None):
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     logging.info("- %s version %s", p.prog, version)
 
-    async with AsyncClient(timeout=None) as session:
-        logging.info("- using stimulus times from %s", args.recording)
-        try:
-            resource_info = await nbank.fetch_metadata(
-                session, nbank.default_registry, args.recording.stem
-            )
-            recording_name = resource_info["name"]
-            resource_url = nbank.registry.full_url(
-                nbank.default_registry, recording_name
-            )
-            logging.info("  - registered at %s", resource_url)
-        except HTTPStatusError:
-            if args.debug:
-                resource_info = {"metadata": {}}
-                recording_name = args.recording.stem
-                resource_url = "(debug)"
-                logging.warn(
-                    "  - warning: recording has not been deposited, proceeding anyway in debug mode"
-                )
-            else:
-                logging.error("  - error: recording must be deposited in neurobank")
-                p.exit(-1)
-
-        logging.info("- kilosort output directory: %s", args.sortdir)
-        timefile = args.sortdir / "spike_times.npy"
-        clustfile = args.sortdir / "spike_clusters.npy"
-        infofile = args.sortdir / "cluster_info.tsv"
-        logging.info("  - spike times: %s", timefile)
-        logging.info("  - spike clusters: %s", clustfile)
-        events = pd.DataFrame(
-            {"time": np.load(timefile).squeeze(), "clust": np.load(clustfile)},
-        )
-        logging.info("  - cluster info: %s", infofile)
-        info = pd.read_csv(infofile, sep="\t", index_col=0)
-        recfile = args.sortdir / "temp_wh.dat"
-        params = read_kilo_params(args.sortdir / "params.py")
-        recording = np.memmap(recfile, mode="c", dtype=params["dtype"])
-        recording = np.reshape(
-            recording, (recording.size // params["nchannels"], params["nchannels"])
-        )
-        nsamples, nchannels = recording.shape
-        logging.info("  - filtered recording: %s", recfile)
-        logging.info("    - %d samples, %d channels", nsamples, nchannels)
-        if args.cluster is not None:
-            logging.info("- only analyzing clusters: %s", args.cluster)
-            events = events[events.cluster == args.cluster]
-
-        # find duplicates - this is rare but needs to be caught
-        duplicates = events.duplicated()
-        if duplicates.any():
-            dupl_clusts = events[duplicates].clust
+    logging.info("- using stimulus times from %s", args.recording)
+    try:
+        resource_info = nbank.describe(nbank.default_registry, args.recording.stem)
+        recording_name = resource_info["name"]
+        resource_url = nbank.registry.full_url(nbank.default_registry, recording_name)
+        logging.info("  - registered at %s", resource_url)
+    except HTTPStatusError:
+        if args.debug:
+            resource_info = {"metadata": {}}
+            recording_name = args.recording.stem
+            resource_url = "(debug)"
             logging.warn(
-                "  - warning: removing spikes with duplicate times from clusters %s",
-                ",".join(str(c) for c in dupl_clusts),
+                "  - warning: recording has not been deposited, proceeding anyway in debug mode"
             )
-            events = events[~duplicates]
-
-        events.set_index("clust", inplace=True)
-        if args.toelis:
-            clusters = assign_events_flat(events, params["sampling_rate"])
-            outfile = (args.output / recording_name).with_suffix(".toe_lis")
-            if not args.dry_run:
-                with open(outfile, "wt") as ofp:
-                    toelis.write(ofp, clusters)
-                logging.info(
-                    "- saved %d spikes to '%s'", toelis.count(clusters), outfile
-                )
-            return
-
-        if args.recording.is_file():
-            datafile = args.recording
         else:
-            datafile = await nbank.find_resource(
-                session, nbank.default_registry, str(args.recording)
-            )
-        logging.info("- splitting '%s' into trials:", datafile)
-        with h5.File(datafile, "r") as afp:
-            trials = pd.DataFrame(
-                await oeaudio_to_trials(
-                    session, afp, args.sync, args.sync_thresh, args.prepad
-                )
-            )
-            entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
+            logging.error("  - error: recording must be deposited in neurobank")
+            p.exit(-1)
 
-        # this pandas magic sorts the events by cluster and trial
-        logging.info("- sorting events into trials:")
-        events["trial"] = (
-            trials.recording_start.searchsorted(events.time, side="left") - 1
+    logging.info("- kilosort output directory: %s", args.sortdir)
+    timefile = args.sortdir / "spike_times.npy"
+    clustfile = args.sortdir / "spike_clusters.npy"
+    infofile = args.sortdir / "cluster_info.tsv"
+    logging.info("  - spike times: %s", timefile)
+    logging.info("  - spike clusters: %s", clustfile)
+    events = pd.DataFrame(
+        {"time": np.load(timefile).squeeze(), "clust": np.load(clustfile)},
+    )
+    logging.info("  - cluster info: %s", infofile)
+    info = pd.read_csv(infofile, sep="\t", index_col=0)
+    recfile = args.sortdir / "temp_wh.dat"
+    params = read_kilo_params(args.sortdir / "params.py")
+    recording = np.memmap(recfile, mode="c", dtype=params["dtype"])
+    recording = np.reshape(
+        recording, (recording.size // params["nchannels"], params["nchannels"])
+    )
+    nsamples, nchannels = recording.shape
+    logging.info("  - filtered recording: %s", recfile)
+    logging.info("    - %d samples, %d channels", nsamples, nchannels)
+    if args.cluster is not None:
+        logging.info("- only analyzing clusters: %s", args.cluster)
+        events = events[events.cluster == args.cluster]
+
+    # find duplicates - this is rare but needs to be caught
+    duplicates = events.duplicated()
+    if duplicates.any():
+        dupl_clusts = events[duplicates].clust
+        logging.warn(
+            "  - warning: removing spikes with duplicate times from clusters %s",
+            ",".join(str(c) for c in dupl_clusts),
         )
+        events = events[~duplicates]
 
-        total_spikes = 0
-        total_clusters = 0
-        for clust_id, cluster in events.groupby("clust"):
-            clust_info = info.loc[clust_id]
-            clust_type = clust_info["group"]
-            n_spikes = len(cluster)
-            if clust_type == "noise" or (clust_type == "mua" and not args.mua):
-                logging.info(
-                    "  - cluster %d (%d spikes, %s) -> skipped",
-                    clust_id,
-                    n_spikes,
-                    clust_type,
-                )
-                continue
+    events.set_index("clust", inplace=True)
+    if args.toelis:
+        clusters = assign_events_flat(events, params["sampling_rate"])
+        outfile = (args.output / recording_name).with_suffix(".toe_lis")
+        if not args.dry_run:
+            with open(outfile, "wt") as ofp:
+                toelis.write(ofp, clusters)
+            logging.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
+        return
+
+    if args.recording.is_file():
+        datafile = args.recording
+    else:
+        datafile = nbank.find_resource(
+            str(args.recording), registry_url=nbank.default_registry
+        )
+    logging.info("- splitting '%s' into trials:", datafile)
+    with h5.File(datafile, "r") as afp:
+        trials = pd.DataFrame(
+            oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad)
+        )
+        entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
+
+    # this pandas magic sorts the events by cluster and trial
+    logging.info("- sorting events into trials:")
+    events["trial"] = trials.recording_start.searchsorted(events.time, side="left") - 1
+
+    total_spikes = 0
+    total_clusters = 0
+    for clust_id, cluster in events.groupby("clust"):
+        clust_info = info.loc[clust_id]
+        clust_type = clust_info["group"]
+        n_spikes = len(cluster)
+        if clust_type == "noise" or (clust_type == "mua" and not args.mua):
             logging.info(
-                "  ✓ cluster %d (%d spikes, %s)",
+                "  - cluster %d (%d spikes, %s) -> skipped",
                 clust_id,
                 n_spikes,
                 clust_type,
             )
-            # remove artifact spikes
-            n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
-            n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
-            spikes = cluster[
-                (cluster.time > n_before) & (cluster.time < (nsamples - n_after))
-            ]
-            waveforms = qs.peaks(
-                recording[:, clust_info["ch"]],
-                spikes.time,
-                n_before=n_before,
-                n_after=n_after,
-            )
-            mean_spike = waveforms.mean(0)
-            included = np.abs(waveforms).max(-1) < (
-                np.abs(mean_spike).max(-1) * args.artifact_reject_thresh
-            )
-            n_included = included.sum()
-            if n_included == 0:
-                logging.warn("   - all spikes marked as artifacts (sorting error?)")
-                continue
-            elif n_included < n_spikes:
-                cluster = cluster[included]
-                waveforms = waveforms[included]
-                logging.info(
-                    "    - %d artifact spike(s) excluded", n_spikes - n_included
-                )
-            # aggregate spikes by trial and left join to trial information table
-            # - empty trials will be nan
-            clust_trials = trials.join(
-                cluster.groupby("trial")
-                .apply(lambda x: x.time.to_numpy())
-                .rename("events")
-            )
-            total_spikes += n_spikes
-            total_clusters += 1
-            outfile = args.output / f"{recording_name}_c{clust_id}.pprox"
-            logging.info(
-                "    - %d spikes -> %s",
-                n_included,
-                outfile,
-            )
-            clust_trials = pprox.from_trials(
-                trials_to_pprox(clust_trials, params["sampling_rate"]),
-                schema=pprox._stimtrial_schema,
-                recording=resource_url,
-                processed_by=[f"{p.prog} {version}"],
-                kilosort_amplitude=clust_info["Amplitude"],
-                kilosort_contam_pct=clust_info["ContamPct"],
-                kilosort_source_channel=clust_info["ch"],
-                kilosort_probe_depth=clust_info["depth"],
-                kilosort_n_spikes=clust_info["n_spikes"],
-                entry_metadata=entry_attrs,
-                **resource_info["metadata"],
-            )
-            if not args.dry_run:
-                with open(outfile, "wt") as ofp:
-                    json.dump(clust_trials, ofp, default=json_serializable)
-                if not args.no_waveforms:
-                    outfile = args.output / (outfile.stem + "_spikes.h5")
-                    logging.info(
-                        "    - waveforms on channel %d -> %s",
-                        clust_info["ch"],
-                        outfile,
-                    )
-                    save_waveforms(
-                        outfile,
-                        SpikeWaveforms(
-                            waveforms,
-                            cluster.time.to_numpy(),
-                            params["sampling_rate"],
-                            n_before,
-                        ),
-                        recording=resource_url,
-                        processed_by=f"{p.prog} {version}",
-                        kilosort_amplitude=clust_info["Amplitude"],
-                        kilosort_contam_pct=clust_info["ContamPct"],
-                        kilosort_source_channel=clust_info["ch"],
-                        kilosort_probe_depth=clust_info["depth"],
-                        kilosort_n_spikes=clust_info["n_spikes"],
-                    )
-
+            continue
         logging.info(
-            "- a total of %d spikes were assigned to %d clusters",
-            total_spikes,
-            total_clusters,
+            "  ✓ cluster %d (%d spikes, %s)",
+            clust_id,
+            n_spikes,
+            clust_type,
         )
+        # remove artifact spikes
+        n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
+        n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
+        spikes = cluster[
+            (cluster.time > n_before) & (cluster.time < (nsamples - n_after))
+        ]
+        waveforms = qs.peaks(
+            recording[:, clust_info["ch"]],
+            spikes.time,
+            n_before=n_before,
+            n_after=n_after,
+        )
+        mean_spike = waveforms.mean(0)
+        included = np.abs(waveforms).max(-1) < (
+            np.abs(mean_spike).max(-1) * args.artifact_reject_thresh
+        )
+        n_included = included.sum()
+        if n_included == 0:
+            logging.warn("   - all spikes marked as artifacts (sorting error?)")
+            continue
+        elif n_included < n_spikes:
+            cluster = cluster[included]
+            waveforms = waveforms[included]
+            logging.info("    - %d artifact spike(s) excluded", n_spikes - n_included)
+        # aggregate spikes by trial and left join to trial information table
+        # - empty trials will be nan
+        clust_trials = trials.join(
+            cluster.groupby("trial").apply(lambda x: x.time.to_numpy()).rename("events")
+        )
+        total_spikes += n_spikes
+        total_clusters += 1
+        outfile = args.output / f"{recording_name}_c{clust_id}.pprox"
+        logging.info(
+            "    - %d spikes -> %s",
+            n_included,
+            outfile,
+        )
+        clust_trials = pprox.from_trials(
+            trials_to_pprox(clust_trials, params["sampling_rate"]),
+            schema=pprox._stimtrial_schema,
+            recording=resource_url,
+            processed_by=[f"{p.prog} {version}"],
+            kilosort_amplitude=clust_info["Amplitude"],
+            kilosort_contam_pct=clust_info["ContamPct"],
+            kilosort_source_channel=clust_info["ch"],
+            kilosort_probe_depth=clust_info["depth"],
+            kilosort_n_spikes=clust_info["n_spikes"],
+            entry_metadata=entry_attrs,
+            **resource_info["metadata"],
+        )
+        if not args.dry_run:
+            with open(outfile, "wt") as ofp:
+                json.dump(clust_trials, ofp, default=json_serializable)
+            if not args.no_waveforms:
+                outfile = args.output / (outfile.stem + "_spikes.h5")
+                logging.info(
+                    "    - waveforms on channel %d -> %s",
+                    clust_info["ch"],
+                    outfile,
+                )
+                save_waveforms(
+                    outfile,
+                    SpikeWaveforms(
+                        waveforms,
+                        cluster.time.to_numpy(),
+                        params["sampling_rate"],
+                        n_before,
+                    ),
+                    recording=resource_url,
+                    processed_by=f"{p.prog} {version}",
+                    kilosort_amplitude=clust_info["Amplitude"],
+                    kilosort_contam_pct=clust_info["ContamPct"],
+                    kilosort_source_channel=clust_info["ch"],
+                    kilosort_probe_depth=clust_info["depth"],
+                    kilosort_n_spikes=clust_info["n_spikes"],
+                )
 
-
-def run_group_spikes():
-    anyio.run(group_spikes_script)
+    logging.info(
+        "- a total of %d spikes were assigned to %d clusters",
+        total_spikes,
+        total_clusters,
+    )
