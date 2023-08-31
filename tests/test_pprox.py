@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # -*- mode: python -*-
-import pytest
 import logging
 import numpy as np
 import pandas as pd
@@ -260,7 +259,7 @@ def test_split_trial():
         )
 
 
-def test_split_trial_empty(anyio_backend):
+def test_split_trial_empty():
     split = pprox.split_trial(empty_trial, split_fun)
     stim = empty_trial["stimulus"]["name"]
     split_spikes = split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
