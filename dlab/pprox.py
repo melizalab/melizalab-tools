@@ -28,9 +28,6 @@ class Stimulus(TypedDict):
 
 class Trial(TypedDict):
     events: Sequence[float]
-
-
-class StimTrial(Trial):
     interval: Tuple[float, float]
     stimulus: Stimulus
 
@@ -105,9 +102,7 @@ def combine_recordings(*pprox):
     pass
 
 
-def split_trial(
-    trial: StimTrial, split_fun: Callable[[str], pd.DataFrame]
-) -> pd.DataFrame:
+def split_trial(trial: Trial, split_fun: Callable[[str], pd.DataFrame]) -> pd.DataFrame:
     """Split a trial into multiple intervals.
 
     split_fun: a function that takes the name of the stimulus and returns a

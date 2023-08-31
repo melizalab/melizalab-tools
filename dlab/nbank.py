@@ -3,9 +3,9 @@
 """Functions for interfacing with the neurobank repository """
 import concurrent.futures
 import logging
-from pathlib import Path
-from typing import Dict, Iterator, Sequence, Tuple, Union
+from typing import Tuple, Dict, Union, Iterator, Sequence
 from urllib.parse import urlparse
+from pathlib import Path
 
 from httpx import Client
 from nbank import registry, util
@@ -50,6 +50,8 @@ def find_resources(
                 logging.debug("%s: found in alt_base", resource_id)
             except FileNotFoundError:
                 pass
+    if len(to_locate) == 0:
+        return
     url, query = registry.get_locations_bulk(registry_url, to_locate)
     with Client() as client, concurrent.futures.ThreadPoolExecutor() as executor:
         response = util.query_registry_bulk(client, url, query)
@@ -64,11 +66,15 @@ def find_resources(
             for resource in response
         }
         for future in concurrent.futures.as_completed(future_to_name):
-            name = future_to_name[future]
+            resource_id = future_to_name[future]
             try:
-                yield (name, future.result())
+                result = future.result()
             except FileNotFoundError as err:
-                yield (name, err)
+                result = err
+            to_locate.remove(resource_id)
+            yield (resource_id, result)
+    for resource_id in to_locate:
+        yield (resource_id, FileNotFoundError("no such resource"))
 
 
 def find_resource(
@@ -79,17 +85,16 @@ def find_resource(
     no_download: bool = False,
 ) -> Path:
     """Locate a resource using neurobank. This is a convenience wrapper for find_resources"""
-    results = find_resources(
+    for _, result in find_resources(
         resource_id,
         registry_url=registry_url,
         alt_base=alt_base,
         no_download=no_download,
-    )
-    result = results[resource_id]
-    if isinstance(result, Path):
-        return result
-    else:
-        raise result
+    ):
+        if isinstance(result, Path):
+            return result
+        else:
+            raise result
 
 
 def fetch_resource(
@@ -129,16 +134,20 @@ def fetch_resource(
             continue
         logging.debug("%s: fetching from registry", resource_id)
         with client.stream("GET", url) as response:
-            if response.status_code == 404:
-                logging.warn("%s: resource not found at %s", resource_id, url)
-            elif response.status_code == 415:
-                logging.warn("%s: resource not downloadable from %s", resource_id, url)
+            if response.status_code != 200:
+                logging.warn(
+                    "%s: not available at %s (http status %d)",
+                    resource_id,
+                    url,
+                    response.status_code,
+                )
+                continue
             with target.open("wb") as fp:
                 for data in response.iter_bytes():
                     fp.write(data)
             return target
     raise FileNotFoundError(
-        f"{resource_id}: resource not found in local archive, cache, or downloadable remote"
+        "resource not found in local archive, cache, or downloadable remote"
     )
 
 
@@ -180,7 +189,9 @@ def main(argv=None):
         cache.clear(urlparse(args.registry_url).netloc)
 
     if len(args.id) > 0:
-        for name, location in find_resources(*args.id, registry_url=args.registry_url):
+        for name, location in find_resources(
+            *args.id, registry_url=args.registry_url, alt_base=args.base
+        ):
             logging.info("%s: %s", name, location)
 
 
