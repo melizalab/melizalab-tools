@@ -131,11 +131,14 @@ def split_trial(trial: Trial, split_fun: Callable[[str], pd.DataFrame]) -> pd.Da
     stimulus = trial["stimulus"]
     stim_on = stimulus["interval"][0]
     splits = split_fun(stimulus["name"])
-    # calculate average gap between splits and use this to determine when
-    # the last split should end
-    gaps = splits.stim_begin.shift(-1) - splits.stim_end
-    gaps.iloc[-1] = gaps.mean()
-    splits["interval_end"] = splits.stim_end + gaps
+    if len(splits) == 1:
+        splits["interval_end"] = splits.stim_end
+    else:
+        # calculate average gap between splits and use this to determine when
+        # the last split should end
+        gaps = splits.stim_begin.shift(-1) - splits.stim_end
+        gaps.iloc[-1] = gaps.mean()
+        splits["interval_end"] = splits.stim_end + gaps
     last_split_end = splits.interval_end.iloc[-1]
     spikes = pd.Series(trial["events"], dtype="f") - stim_on
     spikes = spikes[spikes < last_split_end]
