@@ -15,7 +15,8 @@ import quickspikes as qs
 import toelis
 from httpx import Client, HTTPStatusError
 
-from dlab import nbank, pprox
+from dlab import neurobank as nbank
+from dlab import pprox
 from dlab.spikes import SpikeWaveforms, save_waveforms
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
