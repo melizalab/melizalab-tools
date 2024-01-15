@@ -148,8 +148,12 @@ def oeaudio_to_trials(
         log.info("  - recording clock offset: %d", stim_sample_offset)
 
         if len(entry_stimuli) != stim_onsets.size:
-            log.warning(
-                "  - WARNING: number of stimuli does not match number of clicks. This recording may need to be discarded"
+            logging.error(
+                "  - Number of stimuli: %s is different from number of clicks: %s" % (len(entry_stimuli), stim_onsets.size)
+            )
+            raise ValueError(
+                "  - Error: number of stimuli not equal to number of clicks. Either discard recording or change sync threshold."
+
             )
 
         padding_samples = int(prepad * sampling_rate)
