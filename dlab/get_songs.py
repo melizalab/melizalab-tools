@@ -23,8 +23,8 @@ you're happy with the output, use the `--deposit` flag can be used to deposit
 the WAVE files in neurobank along with metadata.
 
 """
-import logging
 import os
+import logging
 from pathlib import Path
 from typing import Tuple, Sequence
 
@@ -52,9 +52,9 @@ def get_interval(path: Path, dataset: str, interval_ms: Sequence[float]) -> Sign
 def script(argv=None):
     import argparse
     import yaml
-    from dlab.util import setup_log
 
     from dlab.core import __version__
+    from dlab.util import setup_log
 
     script_version = "2024.01.15"
 
@@ -82,6 +82,7 @@ def script(argv=None):
     p.add_argument(
         "--highpass",
         type=float,
+        default=300,
         help="cutoff frequency for a highpass butterworth filter to apply between resampling and rescaling",
     )
     p.add_argument(
@@ -92,78 +93,93 @@ def script(argv=None):
     )
     p.add_argument(
         "--dtype",
-        help="specify data type of the output sound file (defaults to the data type in the arf file",
+        default="int16",
+        help="specify data type of the output sound file (default: %s(default))",
     )
     p.add_argument(
         "--deposit",
+        type=Path,
         help="deposit files in neurobank archive (requires write access to registry)",
     )
     p.add_argument("songs", type=Path, help="YAML file with songs to extract")
     args = p.parse_args(argv)
-    setup_log(log, args.debug)
+    setup_log(args.debug)
 
     with open(args.songs) as fp:
         songs = yaml.safe_load(fp)
 
     for song in songs:
-        log.info("%s: ", song["source"])
+        log.info(f"{song['source']}:")
         try:
-            path = nbank.find_resource(song["source"])
+            path = nbank.find_resource(song["source"], registry_url=args.registry_url)
         except FileNotFoundError:
             path = Path(song["source"])
             if path.exists():
-                log.info(" - using local path")
+                log.debug(" - using local path")
             else:
-                log.info(" - unable to find resource")
+                log.warning(" - unable to find resource, skipping")
                 continue
+        log.info(" - using %s", path)
 
         song_data = get_interval(path, song["dataset"], song["interval_ms"])
+        song_data.name = song["name"]
         log.info(
-            f" - loaded {song['dataset']}: {song_data.signal.size} samples, RMS {song_data.dBFS:.2f} dBFS"
+            f" - read from dataset {song['dataset']}: {song_data.signal.size} samples, RMS {song_data.dBFS:.2f} dBFS"
         )
 
-        # resample(song_data, args.rate)
-        # print(f" - adjusted sampling rate to {song_data['sampling_rate']}")
-        # if args.highpass:
-        #     hp_filter(song_data, args.highpass, args.filter_order)
-        #     print(
-        #         f" - highpass with cutoff of {args.highpass}. RMS is now {song_data['dBFS']:.2f} dBFS"
-        #     )
+        song_data = resample(song_data, args.rate)
+        log.info(f" - adjusted sampling rate to {song_data.sampling_rate}")
+        if args.highpass:
+            song_data = hp_filter(song_data, args.highpass, args.filter_order)
+            log.info(
+                f" - highpass with cutoff of {args.highpass} Hz. RMS is now {song_data.dBFS:.2f} dBFS"
+            )
 
-        # rescale(song_data, args.dBFS)
-        # absmax = np.amax(np.absolute(song_data["signal"]))
-        # print(f" - adjusted RMS to {song_data['dBFS']:.2f} dBFS (peak is {absmax:.3f})")
+        song_data = rescale(song_data, args.dBFS)
+        absmax = np.amax(np.absolute(song_data.signal))
+        log.info(f" - adjusted RMS to {song_data.dBFS:.2f} dBFS (peak is {absmax:.3f})")
 
-        # out_file = song["name"] + ".wav"
-        # dtype = args.dtype or song_data["signal"].dtype
-        # with ewave.open(
-        #     out_file, mode="w", sampling_rate=song_data["sampling_rate"], dtype=dtype
-        # ) as fp:
-        #     fp.write(song_data["signal"])
-        # print(f" - wrote data to {out_file}")
+        out_file = Path(song_data.name + ".wav")
+        with ewave.open(
+            out_file,
+            mode="w",
+            sampling_rate=song_data.sampling_rate,
+            dtype=args.dtype,
+        ) as fp:
+            fp.write(song_data.signal)
+        log.info(f" - wrote data to {out_file}")
 
-        # if args.deposit:
-        #     metadata = {
-        #         "source_resource": song["source"],
-        #         "source_dataset": song["dataset"],
-        #         "source_interval_ms": song["interval_ms"],
-        #         "dBFS": song_data["dBFS"],
-        #     }
-        #     if args.highpass:
-        #         metadata.update(
-        #             highpass_cutoff=args.highpass,
-        #             highpass_order=args.filter_order,
-        #             highpass_filter="butterworth",
-        #         )
-        #     for res in nbank.deposit(
-        #         args.deposit,
-        #         (out_file,),
-        #         dtype="vocalization-wav",
-        #         hash=True,
-        #         auto_id=True,
-        #         **metadata,
-        #     ):
-        #         print(f" - deposited in {args.deposit} as {res['id']}")
+        if args.deposit:
+            metadata = {
+                "source_resource": song["source"],
+                "source_dataset": song["dataset"],
+                "source_interval_ms": song["interval_ms"],
+                "dBFS": song_data.dBFS,
+                "created_by": f"{p.prog} {script_version}",
+            }
+            if args.highpass:
+                metadata.update(
+                    highpass_cutoff=args.highpass,
+                    highpass_order=args.filter_order,
+                    highpass_filter="butterworth",
+                )
+            try:
+                res = next(
+                    nbank.deposit(
+                        args.deposit,
+                        (out_file,),
+                        dtype="vocalization-wav",
+                        auth=nbank.default_auth,
+                        hash=True,
+                        auto_id=True,
+                        **metadata,
+                    )
+                )
+                log.info(f" - deposited in {args.deposit} as {res['id']}")
+            except nbank.HTTPStatusError as err:
+                log.warning(f" ✗ unable to deposit {out_file} to {args.deposit}")
+                nbank.log_error(err)
+        log.info("")
 
 
 if __name__ == "__main__":
