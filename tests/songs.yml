@@ -1,0 +1,54 @@
+- name: O103
+  source: O103_song
+  dataset: entry_00004/pcm_000
+  interval_ms: [90.0, 2185.0]
+- name: O84
+  source: O84_song
+  dataset: entry_00004/pcm_000
+  interval_ms: [2970.0, 4922.0]
+- name: O88
+  source: O88_song
+  dataset: entry_00003/pcm_000
+  interval_ms: [3530.0, 5350.0]
+- name: O93
+  source: O93_song
+  dataset: entry_00000/pcm_000
+  interval_ms: [4019.0, 6145.0]
+  comment: fan noise
+- name: O95
+  source: O95_song
+  dataset: entry_00002/pcm_000
+  interval_ms: [3975.0, 5815.0]
+- name: pk47
+  source: pk47_song
+  dataset: pk47_sono_51_1239_4328/pcm
+  interval_ms: [167.0, 1594.0]
+- name: pk36
+  source: pk36_song
+  dataset: entry_0248/pcm
+  interval_ms: [461.0, 2852.0]
+- name: pk41
+  source: pk41_song
+  dataset: entry_0007/pcm
+  interval_ms: [4948.0, 7320.0]
+- name: pk91
+  source: pk91_song
+  dataset: entry_0032/pcm
+  interval_ms: [3143.0, 5699.0]
+  comment: fan noise
+- name: pk49
+  source: pk49_song
+  dataset: entry_0199/pcm
+  interval_ms: [1319.0, 3264.0]
+- name: bk143
+  source: bk143_song
+  dataset: bk143_sono_1733_1168_4077/pcm
+  interval_ms: [374.0, 2828.0]
+- name: bk158
+  source: bk158_song
+  dataset: entry_0035/pcm
+  interval_ms: [1184.0, 3336.0]
+- name: bk169
+  source: bk169_song
+  dataset: bk169_sono_202_11068_17482/pcm
+  interval_ms: [212.0, 2333.0]
