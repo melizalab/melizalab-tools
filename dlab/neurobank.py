@@ -7,16 +7,17 @@ from typing import Tuple, Dict, Union, Iterator, Sequence
 from urllib.parse import urlparse
 from pathlib import Path
 
-from httpx import Client
+from httpx import Client, NetRCAuth, HTTPStatusError
 from nbank import registry, util
 from nbank.archive import resolve_extension
-from nbank.core import describe, describe_many, search
+from nbank.core import describe, describe_many, search, deposit
+from nbank.script import log_error
 
 from dlab import cache
 
-logging.getLogger(__name__).addHandler(logging.NullHandler())
+log = logging.getLogger(__name__)
 default_registry = registry.default_registry()
-
+default_auth = NetRCAuth(None)
 
 MaybeResourcePath = Tuple[str, Union[Path, FileNotFoundError]]
 
@@ -47,7 +48,7 @@ def find_resources(
             try:
                 yield (resource_id, resolve_extension(stem))
                 to_locate.remove(resource_id)
-                logging.debug("%s: found in alt_base", resource_id)
+                log.debug("%s: found in alt_base", resource_id)
             except FileNotFoundError:
                 pass
     if len(to_locate) == 0:
@@ -117,7 +118,7 @@ def fetch_resource(
         stem = util.parse_location(loc, alt_base)
         try:
             target = resolve_extension(stem)
-            logging.debug("%s: found in local repository", loc["resource_name"])
+            log.debug("%s: found in local repository", loc["resource_name"])
             return target
         except FileNotFoundError:
             pass
@@ -128,14 +129,14 @@ def fetch_resource(
         url = util.parse_location(loc)
         target = cache.locate(resource_id, Path(urlparse(url).netloc) / "resources")
         if target.exists():
-            logging.debug("%s: found in local cache", resource_id)
+            log.debug("%s: found in local cache", resource_id)
             return target
         if no_download:
             continue
-        logging.debug("%s: fetching from registry", resource_id)
+        log.debug("%s: fetching from registry", resource_id)
         with client.stream("GET", url) as response:
             if response.status_code != 200:
-                logging.warn(
+                log.warn(
                     "%s: not available at %s (http status %d)",
                     resource_id,
                     url,
@@ -164,6 +165,7 @@ def add_registry_argument(parser, dest="registry_url"):
 
 def main(argv=None):
     import argparse
+    from dlab.util import setup_log
 
     p = argparse.ArgumentParser(description="locate neurobank resources ")
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
@@ -181,9 +183,7 @@ def main(argv=None):
     )
     p.add_argument("id", help="identifier(s) of the resource(s) to locate", nargs="*")
     args = p.parse_args(argv)
-    logging.basicConfig(
-        format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
-    )
+    setup_log(args.debug)
 
     if args.clear_cache:
         cache.clear(urlparse(args.registry_url).netloc)
@@ -194,6 +194,18 @@ def main(argv=None):
         ):
             logging.info("%s: %s", name, location)
 
+
+__all__ = [
+    "deposit",
+    "find_resources",
+    "find_resource",
+    "fetch_resource",
+    "add_registry_argument",
+    "default_registry",
+    "default_auth",
+    "log_error",
+    "HTTPStatusError",
+]
 
 if __name__ == "__main__":
     main()

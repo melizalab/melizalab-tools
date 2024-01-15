@@ -3,18 +3,15 @@
 """ Signal processing functions """
 import dataclasses
 from typing import Tuple, Optional
-import logging
 
 import numpy as np
 
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class Signal:
-    name: Optional[str]
     signal: np.ndarray
     sampling_rate: float  # in Hz
+    name: Optional[str] = None
     duration: float = dataclasses.field(init=False)  # in s
     dBFS: float = dataclasses.field(init=False)
 
