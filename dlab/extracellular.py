@@ -5,7 +5,7 @@ import json
 import logging
 import re
 
-logging.getLogger(__name__).addHandler(logging.NullHandler())
+log = logging.getLogger(__name__)
 
 
 def entry_time(entry):
@@ -32,7 +32,7 @@ def find_stim_dset(entry):
     rex = re.compile(r"Network_Events-.*?TEXT")
     for name in entry:
         if rex.match(name) is not None:
-            logging.debug("  - stim log dataset: %s", name)
+            log.debug("  - stim log dataset: %s", name)
             return entry[name]
 
 

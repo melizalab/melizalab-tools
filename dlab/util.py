@@ -2,25 +2,18 @@
 # -*- mode: python -*-
 """ Utility functions for scripts and modules """
 import argparse
+import logging
 from functools import singledispatch
 
 import numpy as np
 
 
-def setup_log(log, debug=False):
-    """Set up logging for a module.
-
-    log: generate by calling e.g. `log = logging.getLogger("dlab.extracellular")`
-    """
-    import logging
-
-    ch = logging.StreamHandler()
-    formatter = logging.Formatter("%(message)s")
-    loglevel = logging.DEBUG if debug else logging.INFO
-    log.setLevel(loglevel)
-    ch.setLevel(loglevel)
-    ch.setFormatter(formatter)
-    log.addHandler(ch)
+def setup_log(debug=False):
+    logging.basicConfig(
+        format="%(message)s", level=logging.DEBUG if debug else logging.INFO
+    )
+    # suppress info messages from httpx
+    logging.getLogger("httpx").setLevel(logging.DEBUG if debug else logging.WARNING)
 
 
 class ParseKeyVal(argparse.Action):

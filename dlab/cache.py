@@ -11,7 +11,7 @@ import appdirs
 APP_NAME = "dlab"
 APP_AUTHOR = "melizalab"
 user_dir = appdirs.user_cache_dir(APP_NAME, APP_AUTHOR)
-logging.getLogger(__name__).addHandler(logging.NullHandler())
+log = logging.getLogger(__name__)
 
 
 def locate(name: Union[Path, str], subdir: Union[Path, str]) -> Path:
@@ -24,5 +24,5 @@ def locate(name: Union[Path, str], subdir: Union[Path, str]) -> Path:
 def clear(subdir: str) -> None:
     """Clear the contents of the cache"""
     cache_dir = Path(user_dir) / subdir
-    logging.debug("clearing local cache dir %s:", cache_dir)
+    log.debug("clearing local cache dir %s:", cache_dir)
     rmtree(cache_dir, ignore_errors=True)
