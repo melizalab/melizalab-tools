@@ -58,7 +58,9 @@ def script(argv=None):
 
     script_version = "2024.01.16"
 
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(
         "-v",
@@ -71,25 +73,25 @@ def script(argv=None):
         "--rate",
         type=int,
         default=44100,
-        help="sampling rate for the output files",
+        help="sampling rate for the output files (default: %(default)d Hz)",
     )
     p.add_argument(
         "--dBFS",
         type=float,
         default=-20,
-        help="target level (dBFS) for the output files",
+        help="target amplitude for the output files (default: %(default)s dBFS)",
     )
     p.add_argument(
         "--highpass",
         type=float,
         default=300,
-        help="cutoff frequency for a highpass butterworth filter to apply between resampling and rescaling",
+        help="cutoff frequency for a highpass butterworth filter to apply between resampling and rescaling (default: %(default)s Hz)",
     )
     p.add_argument(
         "--filter-order",
         type=int,
         default=10,
-        help="order for the butterworth highpass filter (default %(default)d)",
+        help="order for the butterworth highpass filter (default: %(default)d)",
     )
     p.add_argument(
         "--dtype",

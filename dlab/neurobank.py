@@ -156,6 +156,7 @@ def add_registry_argument(parser, dest="registry_url"):
     """Add a registry argument to an argparse parser"""
     parser.add_argument(
         "-r",
+        "--registry",
         dest=dest,
         help="URL of the registry service. "
         "Default is to use the environment variable '%s'" % registry._env_registry,
