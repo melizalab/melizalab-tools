@@ -72,8 +72,6 @@ def groupby(pprox: Collection, keyfun: Callable[[Trial], Any]) -> Iterator:
 
 def validate(obj: Collection):
     """Validates object against pprox schema"""
-    import jsonschema
-    import requests
 
     pass
 

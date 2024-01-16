@@ -26,12 +26,12 @@ the WAVE files in neurobank along with metadata.
 import os
 import logging
 from pathlib import Path
-from typing import Tuple, Sequence
+from typing import Sequence
 
 import numpy as np
 import ewave
 from dlab import neurobank as nbank
-from dlab.signal import Signal, resample, hp_filter, rescale, dBFS
+from dlab.signal import Signal, resample, hp_filter, rescale
 
 # disable locking - neurobank archive is probably on an NFS share
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
@@ -56,7 +56,7 @@ def script(argv=None):
     from dlab.core import __version__
     from dlab.util import setup_log
 
-    script_version = "2024.01.15"
+    script_version = "2024.01.16"
 
     p = argparse.ArgumentParser()
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
@@ -94,7 +94,7 @@ def script(argv=None):
     p.add_argument(
         "--dtype",
         default="int16",
-        help="specify data type of the output sound file (default: %s(default))",
+        help="specify data type of the output sound file (default: %(default)s)",
     )
     p.add_argument(
         "--deposit",

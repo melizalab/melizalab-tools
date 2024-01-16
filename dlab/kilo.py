@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import quickspikes as qs
 import toelis
-from httpx import Client, HTTPStatusError
+from httpx import HTTPStatusError
 
 from dlab import neurobank as nbank
 from dlab import pprox
