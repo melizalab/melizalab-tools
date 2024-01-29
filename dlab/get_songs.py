@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """Extract songs from the neurobank repository to use as stimuli.
 
@@ -23,15 +22,16 @@ you're happy with the output, use the `--deposit` flag can be used to deposit
 the WAVE files in neurobank along with metadata.
 
 """
-import os
 import logging
+import os
 from pathlib import Path
 from typing import Sequence
 
-import numpy as np
 import ewave
+import numpy as np
+
 from dlab import neurobank as nbank
-from dlab.signal import Signal, resample, hp_filter, rescale
+from dlab.signal import Signal, hp_filter, resample, rescale
 
 # disable locking - neurobank archive is probably on an NFS share
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
@@ -44,13 +44,14 @@ def get_interval(path: Path, dataset: str, interval_ms: Sequence[float]) -> Sign
     with h5.File(path, "r") as fp:
         dset = fp[dataset]
         sampling_rate = dset.attrs["sampling_rate"]
-        start, stop, *rest = (int(t * sampling_rate / 1000) for t in interval_ms)
+        start, stop, *_rest = (int(t * sampling_rate / 1000) for t in interval_ms)
         data = dset[slice(start, stop)].astype("float32")
         return Signal(signal=data, sampling_rate=sampling_rate)
 
 
 def script(argv=None):
     import argparse
+
     import yaml
 
     from dlab.core import __version__

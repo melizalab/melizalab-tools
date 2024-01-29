@@ -1,6 +1,6 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 import pytest
+
 from dlab import signal
 
 binsize = 0.01

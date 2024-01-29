@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Local cache, primarily for storing neurobank resources """
 import logging

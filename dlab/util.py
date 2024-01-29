@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Utility functions for scripts and modules """
 import argparse

@@ -1,8 +1,7 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Signal processing functions """
 import dataclasses
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -126,7 +125,7 @@ def rescale(signal: Signal, target: float) -> Signal:
 
 def ramp_signal(signal: Signal, ramp: float = 0.002) -> Signal:
     """Apply a squared cosine ramp to the beginning and end of signal."""
-    from numpy import linspace, pi, sin, cos
+    from numpy import cos, linspace, pi, sin
 
     s = signal.signal.copy()
     n = int(ramp * signal.sampling_rate)

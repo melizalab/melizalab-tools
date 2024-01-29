@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """Common functions for plotting things. 
 
@@ -67,4 +66,4 @@ def adjust_raster_ticks(ax, gap=0):
     miny, maxy = ax.get_ylim()
     ht = ax.get_window_extent().height
     for p in ax.lines:
-        p.set_markersize(ht / ((maxy - miny)) - gap)
+        p.set_markersize(ht / (maxy - miny) - gap)

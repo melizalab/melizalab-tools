@@ -1,13 +1,12 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
 import concurrent.futures
 import logging
-from typing import Tuple, Dict, Union, Iterator, Sequence
-from urllib.parse import urlparse
 from pathlib import Path
+from typing import Dict, Iterator, Sequence, Tuple, Union
+from urllib.parse import urlparse
 
-from httpx import Client, NetRCAuth, HTTPStatusError
+from httpx import Client, HTTPStatusError, NetRCAuth
 from nbank import registry, util
 from nbank.archive import resolve_extension
 from nbank.core import deposit, describe
@@ -136,7 +135,7 @@ def fetch_resource(
         log.debug("%s: fetching from registry", resource_id)
         with client.stream("GET", url) as response:
             if response.status_code != 200:
-                log.warn(
+                log.warning(
                     "%s: not available at %s (http status %d)",
                     resource_id,
                     url,
@@ -166,6 +165,7 @@ def add_registry_argument(parser, dest="registry_url"):
 
 def main(argv=None):
     import argparse
+
     from dlab.util import setup_log
 
     p = argparse.ArgumentParser(description="locate neurobank resources ")
@@ -197,16 +197,16 @@ def main(argv=None):
 
 
 __all__ = [
-    "deposit",
-    "find_resources",
-    "find_resource",
-    "fetch_resource",
-    "add_registry_argument",
-    "default_registry",
-    "default_auth",
-    "log_error",
     "HTTPStatusError",
+    "add_registry_argument",
+    "default_auth",
+    "default_registry",
+    "deposit",
     "describe",
+    "fetch_resource",
+    "find_resource",
+    "find_resources",
+    "log_error",
 ]
 
 if __name__ == "__main__":

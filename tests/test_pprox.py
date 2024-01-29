@@ -1,8 +1,9 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 import logging
+
 import numpy as np
 import pandas as pd
+
 from dlab import pprox
 
 log = logging.getLogger("dlab")

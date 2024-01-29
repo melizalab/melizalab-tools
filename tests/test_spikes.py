@@ -1,6 +1,6 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 import pytest
+
 from dlab import spikes
 
 
@@ -49,6 +49,7 @@ def test_rate_scale():
     binwidth = 0.01
     bandwidth = 0.1
     events = (1.1, 2.1, 2.9, 4.01)
-    k, kt = kernel("gaussian", bandwidth, binwidth)
+    k, _kt = kernel("gaussian", bandwidth, binwidth)
     r, rt = spikes.rate(events, binwidth, k, start=0.0, stop=5.0)
+    assert r.size == rt.size
     assert r.sum() * binwidth == pytest.approx(len(events))

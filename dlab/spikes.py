@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for processing spike trains (point processes) """
 from dataclasses import dataclass
@@ -88,7 +87,7 @@ def save_waveforms(
     """
     spikes = np.asarray(waveforms.waveforms)
     times = np.asarray(waveforms.times)
-    ntimes, nspikes = spikes.shape
+    ntimes, _nspikes = spikes.shape
     if ntimes != times.size:
         raise ValueError(
             "number of rows in waveform array must match number of elements in times array"

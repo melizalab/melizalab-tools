@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Functions for using kilosort/phy data """
 import json
@@ -45,7 +44,7 @@ def read_kilo_params(fname: Path) -> Dict:
     from itertools import chain
 
     parser = ConfigParser()
-    with open(fname, "rt") as lines:
+    with open(fname) as lines:
         lines = chain(("[top]",), lines)
         parser.read_file(lines)
     sect = parser["top"]
@@ -159,8 +158,9 @@ def oeaudio_to_trials(
 
         if len(entry_stimuli) != stim_onsets.size:
             logging.error(
-                "  - Number of stimuli: %s is different from number of clicks: %s"
-                % (len(entry_stimuli), stim_onsets.size)
+                "  - Number of stimuli: %s is different from number of clicks: %s",
+                len(entry_stimuli),
+                stim_onsets.size,
             )
             raise ValueError(
                 "  - Error: number of stimuli not equal to number of clicks. Either discard recording or change sync threshold."
@@ -405,7 +405,7 @@ def group_spikes_script(argv=None):
         clusters = assign_events_flat(events, params["sampling_rate"])
         outfile = (args.output / recording_name).with_suffix(".toe_lis")
         if not args.dry_run:
-            with open(outfile, "wt") as ofp:
+            with open(outfile, "w") as ofp:
                 toelis.write(ofp, clusters)
             log.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
         return
@@ -500,7 +500,7 @@ def group_spikes_script(argv=None):
             **resource_info["metadata"],
         )
         if not args.dry_run:
-            with open(outfile, "wt") as ofp:
+            with open(outfile, "w") as ofp:
                 json.dump(clust_trials, ofp, default=json_serializable)
             if not args.no_waveforms:
                 outfile = args.output / (outfile.stem + "_spikes.h5")

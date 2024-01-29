@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # -*- mode: python -*-
 """ Commandline script to extract waveforms from extracellular recordings """
 import json
