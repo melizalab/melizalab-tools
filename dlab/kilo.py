@@ -75,11 +75,11 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
 class StimulusFinder:
     """Looks up stimuli using neurobank and/or files in a local directory"""
 
-    def __init__(nbank_registry_url: str, alt_base: Optional[Path] = None):
+    def __init__(self, nbank_registry_url: str, alt_base: Optional[Path] = None):
         self.registry_url = nbank_registry_url
         self.alt_base = alt_base
 
-    def get_durations(names: Iterable[str]) -> Dict[str, float]:
+    def get_durations(self, names: Iterable[str]) -> Dict[str, float]:
         """Looks up durations (in s) for a sequence of stimuli. Searches
         neurobank first and then tries local directory.
 
@@ -92,6 +92,7 @@ class StimulusFinder:
                     raise res
             else:
                 path = res
+            log.debug("  - found '%s' at %s", name, path)
             with ewave.wavfile(path) as fp:
                 output[name] = 1.0 * fp.nframes / fp.sampling_rate
         return output
@@ -241,7 +242,7 @@ def group_spikes_script(argv=None):
     from dlab.extracellular import entry_metadata, iter_entries
     from dlab.util import json_serializable, setup_log
 
-    version = "2023.08.25"
+    version = "2024.01.29"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
@@ -270,7 +271,6 @@ def group_spikes_script(argv=None):
         type=float,
         help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
     )
-    nbank.add_registry_argument(p)
     p.add_argument(
         "--prepad",
         type=float,
@@ -327,9 +327,9 @@ def group_spikes_script(argv=None):
         help="samples after the spike to keep (default %(default).1f ms)",
     )
     p.add_argument(
-        "--local-stim-dir"
+        "--local-stim-dir",
         type=Path,
-        help="DEBUG/TESTING ONLY. Search this directory for stimulus files."
+        help="DEBUG/TESTING ONLY. Search this directory for stimulus files.",
     )
     p.add_argument("recording", type=Path, help="path of ARF recording file")
     p.add_argument(
@@ -419,7 +419,9 @@ def group_spikes_script(argv=None):
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
         trials = pd.DataFrame(
-            oeaudio_to_trials(afp, stim_finder, args.sync, args.sync_thresh, args.prepad)
+            oeaudio_to_trials(
+                afp, stim_finder, args.sync, args.sync_thresh, args.prepad
+            )
         )
         entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
 

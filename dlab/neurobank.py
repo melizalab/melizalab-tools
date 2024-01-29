@@ -10,7 +10,7 @@ from pathlib import Path
 from httpx import Client, NetRCAuth, HTTPStatusError
 from nbank import registry, util
 from nbank.archive import resolve_extension
-from nbank.core import deposit
+from nbank.core import deposit, describe
 from nbank.script import log_error
 
 from dlab import cache
@@ -206,6 +206,7 @@ __all__ = [
     "default_auth",
     "log_error",
     "HTTPStatusError",
+    "describe",
 ]
 
 if __name__ == "__main__":
