@@ -72,25 +72,34 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
             yield Stimulus(stim_name, time)
 
 
-def get_stim_durations(stim_names: Iterable[str]) -> Dict[str, float]:
-    """
-    Looks up durations (in s) for a sequence of stimuli. This can only really be done by
-    opening the wave files.
+class StimulusFinder:
+    """Looks up stimuli using neurobank and/or files in a local directory"""
 
-    """
-    output = {}
-    for name, path in nbank.find_resources(
-        *stim_names, registry_url=nbank.default_registry
-    ):
-        if isinstance(path, FileNotFoundError):
-            raise path
-        with ewave.wavfile(path) as fp:
-            output[name] = 1.0 * fp.nframes / fp.sampling_rate
-    return output
+    def __init__(nbank_registry_url: str, alt_base: Optional[Path] = None):
+        self.registry_url = nbank_registry_url
+        self.alt_base = alt_base
+
+    def get_durations(names: Iterable[str]) -> Dict[str, float]:
+        """Looks up durations (in s) for a sequence of stimuli. Searches
+        neurobank first and then tries local directory.
+
+        """
+        output = {}
+        for name, res in nbank.find_resources(*names, registry_url=self.registry_url):
+            if isinstance(res, FileNotFoundError):
+                path = (self.alt_base / name).with_suffix(".wav")
+                if not path.exists():
+                    raise res
+            else:
+                path = res
+            with ewave.wavfile(path) as fp:
+                output[name] = 1.0 * fp.nframes / fp.sampling_rate
+        return output
 
 
 def oeaudio_to_trials(
     data_file: h5.File,
+    stim_finder: StimulusFinder,
     sync_dset: str,
     sync_thresh: float = 1.0,
     prepad: float = 1.0,
@@ -133,7 +142,7 @@ def oeaudio_to_trials(
 
         log.info("  - parsing stimulus log")
         entry_stimuli = list(oeaudio_stims(find_stim_dset(entry)))
-        stim_durations = get_stim_durations(stim.name for stim in entry_stimuli)
+        stim_durations = stim_finder.get_durations(stim.name for stim in entry_stimuli)
         log.info("    - detected %d stimuli", len(entry_stimuli))
         log.info("  - sync track: '%s'", sync_dset)
         sync = entry[sync_dset]
@@ -149,11 +158,11 @@ def oeaudio_to_trials(
 
         if len(entry_stimuli) != stim_onsets.size:
             logging.error(
-                "  - Number of stimuli: %s is different from number of clicks: %s" % (len(entry_stimuli), stim_onsets.size)
+                "  - Number of stimuli: %s is different from number of clicks: %s"
+                % (len(entry_stimuli), stim_onsets.size)
             )
             raise ValueError(
                 "  - Error: number of stimuli not equal to number of clicks. Either discard recording or change sync threshold."
-
             )
 
         padding_samples = int(prepad * sampling_rate)
@@ -244,6 +253,7 @@ def group_spikes_script(argv=None):
         version=f"%(prog)s {version} (melizalab-tools {__version__})",
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    nbank.add_registry_argument(p)
     p.add_argument(
         "--dry-run",
         help="do everything except write the output files",
@@ -260,6 +270,7 @@ def group_spikes_script(argv=None):
         type=float,
         help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
     )
+    nbank.add_registry_argument(p)
     p.add_argument(
         "--prepad",
         type=float,
@@ -315,6 +326,11 @@ def group_spikes_script(argv=None):
         default=5.0,
         help="samples after the spike to keep (default %(default).1f ms)",
     )
+    p.add_argument(
+        "--local-stim-dir"
+        type=Path,
+        help="DEBUG/TESTING ONLY. Search this directory for stimulus files."
+    )
     p.add_argument("recording", type=Path, help="path of ARF recording file")
     p.add_argument(
         "sortdir",
@@ -327,11 +343,12 @@ def group_spikes_script(argv=None):
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     log.info("- %s version %s", p.prog, version)
 
+    log.info("- using neurobank registry at %s", args.registry_url)
     log.info("- using stimulus times from %s", args.recording)
     try:
-        resource_info = nbank.describe(nbank.default_registry, args.recording.stem)
+        resource_info = nbank.describe(args.registry_url, args.recording.stem)
         recording_name = resource_info["name"]
-        resource_url = nbank.registry.full_url(nbank.default_registry, recording_name)
+        resource_url = nbank.registry.full_url(args.registry_url, recording_name)
         log.info("  - registered at %s", resource_url)
     except HTTPStatusError:
         if args.debug:
@@ -344,6 +361,10 @@ def group_spikes_script(argv=None):
         else:
             log.error("  - error: recording must be deposited in neurobank")
             p.exit(-1)
+
+    if args.local_stim_dir is not None:
+        log.info("  - using %s as fallback for looking up stimuli")
+    stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
 
     log.info("- kilosort output directory: %s", args.sortdir)
     timefile = args.sortdir / "spike_times.npy"
@@ -398,7 +419,7 @@ def group_spikes_script(argv=None):
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
         trials = pd.DataFrame(
-            oeaudio_to_trials(afp, args.sync, args.sync_thresh, args.prepad)
+            oeaudio_to_trials(afp, stim_finder, args.sync, args.sync_thresh, args.prepad)
         )
         entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
 
