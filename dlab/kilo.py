@@ -86,6 +86,8 @@ class StimulusFinder:
         output = {}
         for name, res in nbank.find_resources(*names, registry_url=self.registry_url):
             if isinstance(res, FileNotFoundError):
+                if self.alt_base is None:
+                    raise res
                 path = (self.alt_base / name).with_suffix(".wav")
                 if not path.exists():
                     raise res
@@ -142,7 +144,14 @@ def oeaudio_to_trials(
 
         log.info("  - parsing stimulus log")
         entry_stimuli = list(oeaudio_stims(find_stim_dset(entry)))
-        stim_durations = stim_finder.get_durations(stim.name for stim in entry_stimuli)
+        try:
+            stim_durations = stim_finder.get_durations(
+                stim.name for stim in entry_stimuli
+            )
+        except FileNotFoundError as err:
+            raise RuntimeError(
+                "unable to find a stimulus to look up duration. Was it deposited in neurobank?"
+            ) from err
         log.info("    - detected %d stimuli", len(entry_stimuli))
         log.info("  - sync track: '%s'", sync_dset)
         sync = entry[sync_dset]
@@ -350,7 +359,7 @@ def group_spikes_script(argv=None):
         recording_name = resource_info["name"]
         resource_url = nbank.registry.full_url(args.registry_url, recording_name)
         log.info("  - registered at %s", resource_url)
-    except HTTPStatusError:
+    except TypeError:
         if args.debug:
             resource_info = {"metadata": {}}
             recording_name = args.recording.stem
@@ -363,7 +372,7 @@ def group_spikes_script(argv=None):
             p.exit(-1)
 
     if args.local_stim_dir is not None:
-        log.info("  - using %s as fallback for looking up stimuli")
+        log.info("  - using %s as fallback for looking up stimuli", args.local_stim_dir)
     stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
 
     log.info("- kilosort output directory: %s", args.sortdir)
@@ -431,11 +440,14 @@ def group_spikes_script(argv=None):
 
     total_spikes = 0
     total_clusters = 0
+    good_clust_types = ("good",)
+    if args.mua:
+        good_clust_types += ("mua",)
     for clust_id, cluster in events.groupby("clust"):
         clust_info = info.loc[clust_id]
         clust_type = clust_info["group"]
         n_spikes = len(cluster)
-        if clust_type == "noise" or (clust_type == "mua" and not args.mua):
+        if clust_type not in good_clust_types:
             log.info(
                 "  - cluster %d (%d spikes, %s) -> skipped",
                 clust_id,

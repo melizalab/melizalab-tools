@@ -74,7 +74,7 @@ def find_resources(
             to_locate.remove(resource_id)
             yield (resource_id, result)
     for resource_id in to_locate:
-        yield (resource_id, FileNotFoundError("no such resource"))
+        yield (resource_id, FileNotFoundError(f"no such resource {resource_id}"))
 
 
 def find_resource(
