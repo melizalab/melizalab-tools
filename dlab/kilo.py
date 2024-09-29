@@ -340,6 +340,12 @@ def group_spikes_script(argv=None):
         type=Path,
         help="DEBUG/TESTING ONLY. Search this directory for stimulus files.",
     )
+    p.add_argument(
+        "--temp_wh",
+        type=str,
+        default='temp_wh.dat',
+        help="Alternative name for temp_wh.dat file (whitened & filtered recording) in phy folder",
+    )
     p.add_argument("recording", type=Path, help="path of ARF recording file")
     p.add_argument(
         "sortdir",
@@ -386,7 +392,7 @@ def group_spikes_script(argv=None):
     )
     log.info("  - cluster info: %s", infofile)
     info = pd.read_csv(infofile, sep="\t", index_col=0)
-    recfile = args.sortdir / "temp_wh.dat"
+    recfile = args.sortdir / args.temp_wh
     params = read_kilo_params(args.sortdir / "params.py")
     recording = np.memmap(recfile, mode="c", dtype=params["dtype"])
     recording = np.reshape(
@@ -446,6 +452,14 @@ def group_spikes_script(argv=None):
     for clust_id, cluster in events.groupby("clust"):
         clust_info = info.loc[clust_id]
         clust_type = clust_info["group"]
+        if 'Amplitude' not in clust_info: # spike-interface sorted data
+            amp_tag = 'amp'
+        else:
+            amp_tag = 'Amplitude'
+        if "ContamPct" not in clust_info:  # spike-interface sorted data
+            contam_tag = 'rp_contamination'
+        else:
+            contam_tag = 'ContamPct'
         n_spikes = len(cluster)
         if clust_type not in good_clust_types:
             log.info(
@@ -503,8 +517,8 @@ def group_spikes_script(argv=None):
             schema=pprox._stimtrial_schema,
             recording=resource_url,
             processed_by=[f"{p.prog} {version}"],
-            kilosort_amplitude=clust_info["Amplitude"],
-            kilosort_contam_pct=clust_info["ContamPct"],
+            kilosort_amplitude=clust_info[amp_tag],
+            kilosort_contam_pct=clust_info[contam_tag],
             kilosort_source_channel=clust_info["ch"],
             kilosort_probe_depth=clust_info["depth"],
             kilosort_n_spikes=clust_info["n_spikes"],
@@ -531,8 +545,8 @@ def group_spikes_script(argv=None):
                     ),
                     recording=resource_url,
                     processed_by=f"{p.prog} {version}",
-                    kilosort_amplitude=clust_info["Amplitude"],
-                    kilosort_contam_pct=clust_info["ContamPct"],
+                    kilosort_amplitude=clust_info[amp_tag],
+                    kilosort_contam_pct=clust_info[contam_tag],
                     kilosort_source_channel=clust_info["ch"],
                     kilosort_probe_depth=clust_info["depth"],
                     kilosort_n_spikes=clust_info["n_spikes"],
@@ -547,3 +561,4 @@ def group_spikes_script(argv=None):
 
 if __name__ == "__main__":
     group_spikes_script()
+
