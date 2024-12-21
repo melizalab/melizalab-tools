@@ -1,16 +1,17 @@
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository """
 import concurrent.futures
+import json
 import logging
 from pathlib import Path
-from typing import Dict, Iterator, Sequence, Tuple, Union
+from typing import Dict, Iterator, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
 
 from httpx import Client, HTTPStatusError, NetRCAuth
 from nbank import registry, util
 from nbank.archive import resolve_extension
-from nbank.core import deposit, describe
-from nbank.script import log_error
+from nbank.core import deposit, describe, describe_many
+from nbank.registry import log_error
 
 from dlab import cache
 
@@ -19,21 +20,22 @@ default_registry = registry.default_registry()
 default_auth = NetRCAuth(None)
 
 MaybeResourcePath = Tuple[str, Union[Path, FileNotFoundError]]
+MaybeResourceMetadata = Tuple[str, Union[dict, FileNotFoundError]]
 
 
 def find_resources(
     *resource_ids: str,
-    registry_url: str = default_registry,
+    registry_url: Optional[str] = default_registry,
     alt_base: Union[Path, str, None] = None,
     no_download: bool = False,
 ) -> Iterator[MaybeResourcePath]:
-    """Locate resources using neurobank.
+    """Locate resources using neurobank or a local directory.
 
     This function will try to locate resources from the following locations:
     - a local directory (alt_base, if set),
-    - a local neurobank archive (using alt_base, if provided),
-    - a local cache
-    - a remote HTTP archive (caching the file for local access later)
+    - a local neurobank archive (using registry_url and alt_base, if provided),
+    - a local cache of previously fetched resources
+    - a remote HTTP archive (using registry_url, caching the file for local access later)
 
     Yields results as they become available. The result for each requested id is
     a Path if the resource was successfully located, or exist, or a
@@ -42,13 +44,14 @@ def find_resources(
     """
     to_locate = set(resource_ids)
     if alt_base is not None:
+        path = Path(alt_base)
         for resource_id in resource_ids:
-            stem = Path(alt_base) / resource_id
+            stem = alt_base / resource_id
             try:
                 yield (resource_id, resolve_extension(stem))
                 to_locate.remove(resource_id)
                 log.debug("%s: found in alt_base", resource_id)
-            except FileNotFoundError:
+            except FileNotFoundError as err:
                 pass
     if len(to_locate) == 0:
         return
@@ -151,6 +154,40 @@ def fetch_resource(
     )
 
 
+def describe_resources(
+    *resource_ids: str,
+    registry_url: Optional[str] = default_registry,
+    alt_base: Union[Path, str, None] = None,
+) -> Iterator[MaybeResourceMetadata]:
+    """Fetch resource metadata using neurobank or a local directory.
+
+    This function will try to load resource metadta from the following locations:
+    - a local directory (alt_base, if set),
+    - a remote neurobank registry
+
+    Yields results as they become available. The result for each requested id is
+    a dict if the metadata was successfully loaded or FileNotFoundError if the resource cannot be located.
+
+    """
+    to_locate = set(resource_ids)
+    if alt_base is not None:
+        alt_base = Path(alt_base)
+        for resource_id in resource_ids:
+            path = (alt_base / resource_id).with_suffix(".json")
+            if path.exists():
+                yield (resource_id, json.loads(path.read_text()))
+                to_locate.remove(resource_id)
+                log.debug("%s: found in alt_base", resource_id)
+    if len(to_locate) == 0:
+        return
+    try:
+        for result in describe_many(registry_url, *to_locate):
+            yield (result["name"], result)
+    except Exception:
+        for name in to_locate:
+            yield (name, FileNotFoundError("not found in local dir, unable to access registry"))
+
+
 def add_registry_argument(parser, dest="registry_url"):
     """Add a registry argument to an argparse parser"""
     parser.add_argument(
@@ -206,6 +243,7 @@ __all__ = [
     "fetch_resource",
     "find_resource",
     "find_resources",
+    "describe_resources",
     "log_error",
 ]
 

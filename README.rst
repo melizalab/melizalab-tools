@@ -12,6 +12,8 @@ modules
    `pprox <https://meliza.org/spec:2/pprox/>`__ objects, a data format
    for storing multi-trial point process data (e.g. spike times evoked
    by stimulus presentation).
+-  ``dlab.neurobank``: some convenient wrappers for interacting with a
+   `neurobank <https://github.com/melizalab/neurobank/>`__ repository and archives.
 
 console scripts
 ~~~~~~~~~~~~~~~
