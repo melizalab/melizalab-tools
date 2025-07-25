@@ -5,7 +5,6 @@ Functions in this module should take matplotlib axes as their first argument,
 but there is no direct import of matplotlib.
 
 """
-from typing import Tuple
 
 import numpy as np
 
@@ -17,7 +16,7 @@ def spectrogram(
     *,
     window_s: float = 0.020,
     shift_s: float = 0.010,
-    frequency_range: Tuple[float, float] = (700, 10000),
+    frequency_range: tuple[float, float] = (700, 10000),
     compression: float = 0.1,
     **plot_kwargs
 ):

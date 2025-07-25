@@ -11,7 +11,8 @@ Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 """
 import itertools
 import uuid
-from typing import Any, Callable, Iterable, Iterator, Sequence, Tuple, TypedDict, Union
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from typing import Any, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -22,12 +23,12 @@ _stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
 
 class Stimulus(TypedDict):
     name: str
-    interval: Tuple[float, float]
+    interval: tuple[float, float]
 
 
 class Trial(TypedDict):
     events: Sequence[float]
-    interval: Tuple[float, float]
+    interval: tuple[float, float]
     stimulus: Stimulus
 
 
@@ -49,7 +50,7 @@ def from_trials(
     return d
 
 
-def wrap_uuid(b: Union[bytes, str]) -> str:
+def wrap_uuid(b: bytes | str) -> str:
     """Wrap a UUID (string or bytes) in a URN string"""
     try:
         b = b.decode("ascii")
@@ -75,7 +76,7 @@ def validate(obj: Collection):
     pass
 
 
-def trial_iterator(pprox: Collection) -> Iterator[Tuple[int, Trial]]:
+def trial_iterator(pprox: Collection) -> Iterator[tuple[int, Trial]]:
     """Iterates through trials in pprox, yielding (index, trial)"""
     for i, trial in enumerate(pprox["pprox"]):
         # annotate with sampling rate

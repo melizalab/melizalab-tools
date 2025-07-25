@@ -1,20 +1,73 @@
-[tool.pytest.ini_options]
-filterwarnings = [ "error::FutureWarning" ]
-
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "melizalab-tools"
+version = "2025.07.25"
+description = "Meliza lab scripts and modules for auditory neurophysiology"
+readme = "README.rst"
+requires-python = ">=3.10"
+license = {text = "BSD 3-Clause License"}
+authors = [
+    {name = "C Daniel Meliza", email = "dan@meliza.org"},
+]
+maintainers = [
+    {name = "C Daniel Meliza", email = "dan@meliza.org"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "appdirs>=1.4.4",
+    "arf>=2.7.1",
+    "ewave>=1.0.10",
+    "libtfr>=2.1.9",
+    "neurobank>=0.11.0",
+    "pandas>=2.3.1",
+    "pyyaml>=6.0.2",
+    "quickspikes>=2.0.6",
+    "scipy>=1.15.3",
+    "toelis>=2.1.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/melizalab/melizalab-tools"
+
+[project.scripts]
+group-kilo-spikes = "dlab.kilo:group_spikes_script"
+get-songs = "dlab.get_songs:script"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.5",
+]
 
 [tool.ruff]
-target-version = "py37"
+target-version = "py310"
 extend-exclude = ["attic", "venv"]
 
 [tool.ruff.lint]
-extend-select = [
-  "B",   # flake8-bugbear
-  "I",   # isort
-  "PGH", # pygrep-hooks
-  "RUF", # Ruff-specific
-  "UP",  # pyupgrade
-  "NPY201", # numpy 2.0 migration
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "PGH", # pygrep-hooks
+    "RUF", # Ruff-specific
+    "UP",  # pyupgrade
 ]
-preview = true
+ignore = ["E221", "E501", "E701", "RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["dlab"]

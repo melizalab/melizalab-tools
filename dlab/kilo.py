@@ -3,16 +3,17 @@
 import json
 import logging
 import re
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, NamedTuple, Optional
+from typing import NamedTuple
 
+import arf
 import ewave
 import h5py as h5
 import numpy as np
 import pandas as pd
 import quickspikes as qs
 import toelis
-from httpx import HTTPStatusError
 
 from dlab import neurobank as nbank
 from dlab import pprox
@@ -35,10 +36,10 @@ class Trial(NamedTuple):
 class Stimulus(NamedTuple):
     name: str
     start: int
-    end: Optional[int] = None
+    end: int | None = None
 
 
-def read_kilo_params(fname: Path) -> Dict:
+def read_kilo_params(fname: Path) -> dict:
     """Read the kilosort params.py file"""
     from configparser import ConfigParser
     from itertools import chain
@@ -71,14 +72,57 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
             yield Stimulus(stim_name, time)
 
 
+def entry_time(entry):
+    """Return the timestamp of an entry as a floating point number"""
+    from arf import timestamp_to_float
+
+    return timestamp_to_float(entry.attrs["timestamp"])
+
+
+def iter_entries(data_file):
+    """Iterate through the entries in an arf file in order of time"""
+    return enumerate(sorted(data_file.values(), key=entry_time))
+
+
+def find_stim_dset(entry):
+    """Returns the first dataset that matches 'Network_Events.*_TEXT'"""
+    rex = re.compile(r"Network_Events-.*?TEXT")
+    for name in entry:
+        if rex.match(name) is not None:
+            log.debug("  - stim log dataset: %s", name)
+            return entry[name]
+
+
+def entry_metadata(entry):
+    """Extracts metadata from an entry in an oeaudio-present experiment ARF file.
+
+    Metadata are passed to open-ephys through the network events socket as a
+    json-encoded dictionary. There should be one and only one metadata message
+    per entry, so only the first is returned.
+
+    """
+    re_metadata = re.compile(r"metadata: (\{.*\})")
+    stims = find_stim_dset(entry)
+    for row in stims:
+        message = row["message"].decode("utf-8")
+        m = re_metadata.match(message)
+        try:
+            metadata = json.loads(m.group(1))
+        except (AttributeError, json.JSONDecodeError):
+            pass
+        else:
+            metadata.update(name=entry.name, sampling_rate=stims.attrs["sampling_rate"])
+            return metadata
+
+
 class StimulusFinder:
     """Looks up stimuli using neurobank and/or files in a local directory"""
 
-    def __init__(self, nbank_registry_url: str, alt_base: Optional[Path] = None):
+    def __init__(self, nbank_registry_url: str, alt_base: Path | None = None):
         self.registry_url = nbank_registry_url
         self.alt_base = alt_base
 
-    def get_durations(self, names: Iterable[str]) -> Dict[str, float]:
+    def get_durations(self, names: Iterable[str]) -> dict[str, float]:
         """Looks up durations (in s) for a sequence of stimuli. Searches
         neurobank first and then tries local directory.
 
@@ -126,8 +170,6 @@ def oeaudio_to_trials(
     from itertools import zip_longest
 
     from dlab.extracellular import (
-        entry_datetime,
-        entry_time,
         find_stim_dset,
         iter_entries,
     )
@@ -137,8 +179,8 @@ def oeaudio_to_trials(
     trials = []
     for entry_num, entry in iter_entries(data_file):
         log.info(" - entry: '%s'", entry.name)
-        entry_start = entry_time(entry)
-        log.info("  - start time: %s", entry_datetime(entry))
+        entry_start = arf.timestamp_to_float(entry.attrs["timestamp"])
+        log.info("  - start time: %s", arf.timestamp_to_datetime(entry.attrs["timestamp"]))
         if expt_start is None:
             expt_start = entry_start
 
@@ -247,8 +289,7 @@ def group_spikes_script(argv=None):
     import argparse
     import os
 
-    from dlab.core import __version__
-    from dlab.extracellular import entry_metadata, iter_entries
+    from dlab import __version__
     from dlab.util import json_serializable, setup_log
 
     version = "2024.01.29"

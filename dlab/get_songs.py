@@ -24,8 +24,8 @@ the WAVE files in neurobank along with metadata.
 """
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import ewave
 import numpy as np
@@ -54,7 +54,7 @@ def script(argv=None):
 
     import yaml
 
-    from dlab.core import __version__
+    from dlab import __version__
     from dlab.util import setup_log
 
     script_version = "2024.01.16"

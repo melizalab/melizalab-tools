@@ -35,7 +35,7 @@ class ParseKeyVal(argparse.Action):
         if kv is None:
             kv = dict()
         if not arg.count("=") == 1:
-            raise ValueError("%s argument badly formed; needs key=value" % arg)
+            raise ValueError(f"{arg} argument badly formed; needs key=value")
         else:
             key, val = arg.split("=")
             kv[key] = self.parse_value(val)

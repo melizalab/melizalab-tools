@@ -2,7 +2,7 @@
 """ Functions for processing spike trains (point processes) """
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import h5py as h5
 import numpy as np
@@ -13,9 +13,9 @@ def psth(
     spikes: ArrayLike,
     binwidth: float,
     *,
-    start: Optional[float] = None,
-    stop: Optional[float] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    start: float | None = None,
+    stop: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Compute a PSTH of spike times.
 
     spikes: array or list of spike times
@@ -38,9 +38,9 @@ def rate(
     binwidth: float,
     kernel: ArrayLike,
     *,
-    start: Optional[float] = None,
-    stop: Optional[float] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    start: float | None = None,
+    stop: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Compute a smoothed estimate of spike rate from spike times.
 
     spikes: array or list of spike times

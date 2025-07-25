@@ -3,8 +3,8 @@
 import concurrent.futures
 import json
 import logging
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Dict, Iterator, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
 
 from httpx import Client, HTTPStatusError, NetRCAuth
@@ -19,14 +19,14 @@ log = logging.getLogger(__name__)
 default_registry = registry.default_registry()
 default_auth = NetRCAuth(None)
 
-MaybeResourcePath = Tuple[str, Union[Path, FileNotFoundError]]
-MaybeResourceMetadata = Tuple[str, Union[dict, FileNotFoundError]]
+MaybeResourcePath = tuple[str, Path | FileNotFoundError]
+MaybeResourceMetadata = tuple[str, dict | FileNotFoundError]
 
 
 def find_resources(
     *resource_ids: str,
-    registry_url: Optional[str] = default_registry,
-    alt_base: Union[Path, str, None] = None,
+    registry_url: str | None = default_registry,
+    alt_base: Path | str | None = None,
     no_download: bool = False,
 ) -> Iterator[MaybeResourcePath]:
     """Locate resources using neurobank or a local directory.
@@ -46,12 +46,12 @@ def find_resources(
     if alt_base is not None:
         path = Path(alt_base)
         for resource_id in resource_ids:
-            stem = alt_base / resource_id
+            stem = path / resource_id
             try:
                 yield (resource_id, resolve_extension(stem))
                 to_locate.remove(resource_id)
                 log.debug("%s: found in alt_base", resource_id)
-            except FileNotFoundError as err:
+            except FileNotFoundError:
                 pass
     if len(to_locate) == 0:
         return
@@ -84,7 +84,7 @@ def find_resource(
     resource_id: str,
     *,
     registry_url: str = default_registry,
-    alt_base: Union[Path, str, None] = None,
+    alt_base: Path | str | None = None,
     no_download: bool = False,
 ) -> Path:
     """Locate a resource using neurobank. This is a convenience wrapper for find_resources"""
@@ -102,9 +102,9 @@ def find_resource(
 
 def fetch_resource(
     client: Client,
-    locations: Sequence[Dict],
+    locations: Sequence[dict],
     *,
-    alt_base: Union[Path, str, None] = None,
+    alt_base: Path | str | None = None,
     no_download: bool = False,
 ) -> Path:
     """Fetch a resource.
@@ -156,8 +156,8 @@ def fetch_resource(
 
 def describe_resources(
     *resource_ids: str,
-    registry_url: Optional[str] = default_registry,
-    alt_base: Union[Path, str, None] = None,
+    registry_url: str | None = default_registry,
+    alt_base: Path | str | None = None,
 ) -> Iterator[MaybeResourceMetadata]:
     """Fetch resource metadata using neurobank or a local directory.
 
@@ -195,7 +195,7 @@ def add_registry_argument(parser, dest="registry_url"):
         "--registry",
         dest=dest,
         help="URL of the registry service. "
-        "Default is to use the environment variable '%s'" % registry._env_registry,
+        f"Default is to use the environment variable '{registry._env_registry}'",
         default=default_registry,
     )
 
@@ -240,10 +240,10 @@ __all__ = [
     "default_registry",
     "deposit",
     "describe",
+    "describe_resources",
     "fetch_resource",
     "find_resource",
     "find_resources",
-    "describe_resources",
     "log_error",
 ]
 

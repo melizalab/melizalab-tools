@@ -3,7 +3,6 @@
 import logging
 from pathlib import Path
 from shutil import rmtree
-from typing import Union
 
 import appdirs
 
@@ -13,7 +12,7 @@ user_dir = appdirs.user_cache_dir(APP_NAME, APP_AUTHOR)
 log = logging.getLogger(__name__)
 
 
-def locate(name: Union[Path, str], subdir: Union[Path, str]) -> Path:
+def locate(name: Path | str, subdir: Path | str) -> Path:
     """Return Path for a cached resource, creating subdir in the cache if needed"""
     cache_dir = Path(user_dir) / subdir
     cache_dir.mkdir(parents=True, exist_ok=True)
