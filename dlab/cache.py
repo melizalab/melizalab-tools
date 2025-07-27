@@ -22,5 +22,5 @@ def locate(name: Path | str, subdir: Path | str) -> Path:
 def clear(subdir: str) -> None:
     """Clear the contents of the cache"""
     cache_dir = Path(user_dir) / subdir
-    log.debug("clearing local cache dir %s:", cache_dir)
+    log.info("clearing local cache dir %s", cache_dir)
     rmtree(cache_dir, ignore_errors=True)

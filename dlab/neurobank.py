@@ -62,7 +62,7 @@ def find_resources(
             executor.submit(
                 fetch_resource,
                 client,
-                resource["locations"],
+                resource,
                 alt_base=alt_base,
                 no_download=no_download,
             ): resource["name"]
@@ -102,7 +102,7 @@ def find_resource(
 
 def fetch_resource(
     client: Client,
-    locations: Sequence[dict],
+    resource: dict,
     *,
     alt_base: Path | str | None = None,
     no_download: bool = False,
@@ -113,42 +113,31 @@ def fetch_resource(
     will try to locate the file, prioritizing local archives.
 
     """
-    loc_parsed = (
-        util.parse_location(loc, alt_base=alt_base, http_session=client)
-        for loc in locations
-    )
-    # this will check local locations (with a path attribute) first
-    sorted_locations = sorted(
-        (loc for loc in loc_parsed if loc is not None),
-        key=lambda x: not hasattr(x, "path"),
-    )
-    for location in sorted_locations:
-        if hasattr(location, "path"):
+    resource_id = resource["name"]
+    filename = resource.get("filename", resource_id)
+    for location in resource["locations"]:
+        loc = util.parse_location(location, alt_base=alt_base, http_session=client)
+        if hasattr(loc, "path"):
             log.debug("- found in local repository: %s", location)
-            return location.path
-        elif hasattr(location, "url"):
-            import pdb; pdb.set_trace()  ## DEBUG ##
-            target = cache.locate(resource_id, Path(urlparse(location.url).netloc) / "resources")
+            return loc.path
+        elif hasattr(loc, "url"):
+            target = cache.locate(filename, Path(urlparse(loc.url).netloc) / "resources")
             if target.exists():
                 log.debug("- found in local cache: %s", target)
                 return target
             if no_download:
-                log.debug("- found at %s but configured not to download", location.url)
+                log.debug("- found at %s but configured not to download", loc.url)
                 continue
-            log.debug("- fetching from %s", resource_id)
-            with client.stream("GET", location.url) as response:
-                if response.status_code != 200:
-                    log.warning(
-                        "%s: not available at %s (http status %d)",
-                        resource_id,
-                        url,
-                        response.status_code,
-                    )
-                    continue
-                with target.open("wb") as fp:
-                    for data in response.iter_bytes():
-                        fp.write(data)
-                return target
+            log.debug("- fetching from %s", loc.url)
+            try:
+                return loc.fetch(target)
+            except HTTPStatusError as err:
+                log.warning(
+                    "%s: failed to retrieve from %s (http status %d)",
+                    resource_id,
+                    loc.url,
+                    err.response.status_code,
+                )
     raise FileNotFoundError(
         "resource not found in local archive, cache, or downloadable remote"
     )
