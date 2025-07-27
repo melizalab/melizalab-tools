@@ -113,42 +113,42 @@ def fetch_resource(
     will try to locate the file, prioritizing local archives.
 
     """
-    # search for local files
-    for loc in locations:
-        if loc["scheme"] not in registry._local_schemes:
-            continue
-        stem = util.parse_location(loc, alt_base)
-        try:
-            target = resolve_extension(stem)
-            log.debug("%s: found in local repository", loc["resource_name"])
-            return target
-        except FileNotFoundError:
-            pass
-    for loc in locations:
-        if loc["scheme"] in registry._local_schemes:
-            continue
-        resource_id = loc["resource_name"]
-        url = util.parse_location(loc)
-        target = cache.locate(resource_id, Path(urlparse(url).netloc) / "resources")
-        if target.exists():
-            log.debug("%s: found in local cache", resource_id)
-            return target
-        if no_download:
-            continue
-        log.debug("%s: fetching from registry", resource_id)
-        with client.stream("GET", url) as response:
-            if response.status_code != 200:
-                log.warning(
-                    "%s: not available at %s (http status %d)",
-                    resource_id,
-                    url,
-                    response.status_code,
-                )
+    loc_parsed = (
+        util.parse_location(loc, alt_base=alt_base, http_session=client)
+        for loc in locations
+    )
+    # this will check local locations (with a path attribute) first
+    sorted_locations = sorted(
+        (loc for loc in loc_parsed if loc is not None),
+        key=lambda x: not hasattr(x, "path"),
+    )
+    for location in sorted_locations:
+        if hasattr(location, "path"):
+            log.debug("- found in local repository: %s", location)
+            return location.path
+        elif hasattr(location, "url"):
+            import pdb; pdb.set_trace()  ## DEBUG ##
+            target = cache.locate(resource_id, Path(urlparse(location.url).netloc) / "resources")
+            if target.exists():
+                log.debug("- found in local cache: %s", target)
+                return target
+            if no_download:
+                log.debug("- found at %s but configured not to download", location.url)
                 continue
-            with target.open("wb") as fp:
-                for data in response.iter_bytes():
-                    fp.write(data)
-            return target
+            log.debug("- fetching from %s", resource_id)
+            with client.stream("GET", location.url) as response:
+                if response.status_code != 200:
+                    log.warning(
+                        "%s: not available at %s (http status %d)",
+                        resource_id,
+                        url,
+                        response.status_code,
+                    )
+                    continue
+                with target.open("wb") as fp:
+                    for data in response.iter_bytes():
+                        fp.write(data)
+                return target
     raise FileNotFoundError(
         "resource not found in local archive, cache, or downloadable remote"
     )
