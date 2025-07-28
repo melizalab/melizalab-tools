@@ -48,12 +48,12 @@ def resample(samples: Signal, target: float) -> Signal:
 
 def hp_filter(samples: Signal, cutoff: float, order: int = 12) -> Signal:
     """Highpass filter the samples to remove DC and low-frequency noise"""
-    import scipy.samples as sg
+    from scipy.signal import butter, sosfilt
 
-    sos = sg.butter(
+    sos = butter(
         order, cutoff, fs=samples.sampling_rate, btype="highpass", output="sos"
     )
-    filtered = sg.sosfilt(sos, samples.samples)
+    filtered = sosfilt(sos, samples.samples)
     return Signal(
         name=samples.name,
         samples=filtered,
@@ -92,7 +92,7 @@ def kernel(name: str, bandwidth: float, dt: float) -> tuple[np.ndarray, np.ndarr
     Generate a smoothing kernel function with bandwidth.
 
     name:      the name of the kernel. can be anything supported
-               by scipy.samples.get_window, plus the following functions:
+               by scipy.signal.get_window, plus the following functions:
         epanech, biweight, triweight, cosinus, exponential
 
     bandwidth: the bandwidth of the kernel, in units of dt
@@ -131,7 +131,7 @@ def kernel(name: str, bandwidth: float, dt: float) -> tuple[np.ndarray, np.ndarr
     elif name == "hanning":
         W = np.hanning(1 + 2 * N)
     else:
-        from scipy.samples import get_window
+        from scipy.signal import get_window
 
         W = get_window(name, 1 + 2 * N)
 

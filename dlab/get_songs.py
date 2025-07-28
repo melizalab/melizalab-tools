@@ -46,7 +46,7 @@ def get_interval(path: Path, dataset: str, interval_ms: Sequence[float]) -> Sign
         sampling_rate = dset.attrs["sampling_rate"]
         start, stop, *_rest = (int(t * sampling_rate / 1000) for t in interval_ms)
         data = dset[slice(start, stop)].astype("float32")
-        return Signal(signal=data, sampling_rate=sampling_rate)
+        return Signal(samples=data, sampling_rate=sampling_rate)
 
 
 def script(argv=None):
@@ -57,7 +57,7 @@ def script(argv=None):
     from dlab import __version__
     from dlab.util import setup_log
 
-    script_version = "2024.01.16"
+    script_version = "2025.07.28"
 
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -127,7 +127,7 @@ def script(argv=None):
         song_data = get_interval(path, song["dataset"], song["interval_ms"])
         song_data.name = song["name"]
         log.info(
-            f" - read from dataset {song['dataset']}: {song_data.signal.size} samples, RMS {song_data.dBFS:.2f} dBFS"
+            f" - read from dataset {song['dataset']}: {song_data.samples.size} samples, RMS {song_data.dBFS:.2f} dBFS"
         )
 
         song_data = resample(song_data, args.rate)
@@ -139,7 +139,7 @@ def script(argv=None):
             )
 
         song_data = rescale(song_data, args.dBFS)
-        absmax = np.amax(np.absolute(song_data.signal))
+        absmax = np.amax(np.absolute(song_data.samples))
         log.info(f" - adjusted RMS to {song_data.dBFS:.2f} dBFS (peak is {absmax:.3f})")
 
         out_file = Path(song_data.name + ".wav")
@@ -149,7 +149,7 @@ def script(argv=None):
             sampling_rate=song_data.sampling_rate,
             dtype=args.dtype,
         ) as fp:
-            fp.write(song_data.signal)
+            fp.write(song_data.samples)
         log.info(f" - wrote data to {out_file}")
 
         if args.deposit:
@@ -178,7 +178,6 @@ def script(argv=None):
                         **metadata,
                     )
                 )
-                log.info(f" - deposited in {args.deposit} as {res['id']}")
             except nbank.HTTPStatusError as err:
                 log.warning(f" ✗ unable to deposit {out_file} to {args.deposit}")
                 nbank.log_error(err)
