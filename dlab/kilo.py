@@ -207,15 +207,7 @@ def oeaudio_to_trials(
         stim_sample_offset = int(dset_offset * sampling_rate)
         log.info("  - recording clock offset: %d", stim_sample_offset)
 
-        if len(entry_stimuli) != stim_onsets.size:
-            logging.error(
-                "  - Number of stimuli: %s is different from number of clicks: %s",
-                len(entry_stimuli),
-                stim_onsets.size,
-            )
-            raise ValueError(
-                "  - Error: number of stimuli not equal to number of clicks. Either discard recording or change sync threshold."
-            )
+        entry_stimuli = match_clicks(entry_stimuli, stim_onsets)
 
         padding_samples = int(prepad * sampling_rate)
         for stim, onset, offset in zip_longest(
@@ -242,6 +234,38 @@ def oeaudio_to_trials(
                 )
             )
     return trials
+
+
+def match_clicks(entry_stimuli, stim_onsets):
+    if len(entry_stimuli) == stim_onsets.size:
+        logging.debug(" - Number of stimuli matches number of clicks")
+        return entry_stimuli
+    elif len(entry_stimuli) < stim_onsets.size:
+        logging.error(
+            "  - Number of stimuli (%d) is fewer than the number of clicks (%d)",
+                len(entry_stimuli),
+                stim_onsets.size,
+        )
+        raise ValueError(
+            "  - Error: unable to match clicks in the sync track with the stimulus list. Either discard recording or change sync threshold."
+        )
+    logging.info("  - Number of stimuli (%d) is greater than number of clicks (%d). Trying to repair.", len(entry_stimuli), stim_onsets.size)
+    # this algorithm assumes that the click comes before the message, which is
+    # pretty reasonable given that network delays will be longer than analog
+    # signal propagation.
+    matched_stims = []
+    click_times = set(stim_onsets)
+    for i, stim in enumerate(entry_stimuli):
+        idx = np.searchsorted(stim_onsets, stim.start)
+        closest = stim_onsets[idx - 1]
+        logging.info("   - stim %d (start=%d) matched to click at %d", i, stim.start, closest)
+        if closest in click_times:
+            matched_stims.append(stim)
+            click_times.remove(closest)
+        else:
+            logging.info("     - this click was already used, dropping the trial")
+    return matched_stims
+    
 
 
 def assign_events_flat(events: pd.DataFrame, sampling_rate: float):
