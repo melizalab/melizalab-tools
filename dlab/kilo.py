@@ -232,6 +232,14 @@ def oeaudio_to_trials(
 
 
 def match_clicks(entry_stimuli, stim_onsets):
+    """Match clicks in the sync track to the stimulus onset log.
+
+    If the number of clicks matches the number of stimuli, nothing happens. If
+    there are more clicks than stimuli, this is an error. If there are more
+    stimuli than clicks, attempts to match each click with the next onset,
+    discarding any stimuli that don't have a matching click.
+
+    """
     if len(entry_stimuli) == stim_onsets.size:
         logging.debug(" - Number of stimuli matches number of clicks")
         return entry_stimuli
@@ -311,7 +319,7 @@ def group_spikes_script(argv=None):
     from dlab import __version__
     from dlab.util import json_serializable, setup_log
 
-    version = "2024.01.29"
+    version = "2025.07.28"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"

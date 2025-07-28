@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "melizalab-tools"
-version = "2025.07.25"
+version = "2025.07.28"
 description = "Meliza lab scripts and modules for auditory neurophysiology"
 readme = "README.rst"
 requires-python = ">=3.10"
@@ -29,7 +29,7 @@ dependencies = [
     "arf>=2.7.1",
     "ewave>=1.0.10",
     "libtfr>=2.1.9",
-    "neurobank>=0.11.0",
+    "neurobank>=0.11.1",
     "pandas>=2.3.1",
     "pyyaml>=6.0.2",
     "quickspikes>=2.0.6",
