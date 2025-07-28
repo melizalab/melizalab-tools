@@ -169,11 +169,6 @@ def oeaudio_to_trials(
     """
     from itertools import zip_longest
 
-    from dlab.extracellular import (
-        find_stim_dset,
-        iter_entries,
-    )
-
     expt_start = None
     det = qs.detector(sync_thresh, 10)
     trials = []
@@ -553,7 +548,7 @@ def group_spikes_script(argv=None):
         # aggregate spikes by trial and left join to trial information table
         # - empty trials will be nan
         clust_trials = trials.join(
-            cluster.groupby("trial").apply(lambda x: x.time.to_numpy()).rename("events")
+            cluster.groupby("trial").apply(lambda x: x.time.to_numpy(), include_groups=False).rename("events")
         )
         total_spikes += n_spikes
         total_clusters += 1

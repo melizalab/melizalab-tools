@@ -18,7 +18,7 @@ kernels = [
 
 @pytest.fixture(params=kernels)
 def conv_kernel(request):
-    return signal.kernel(request.param, bandwidth, binsize)
+    return signal.smoothing_kernel(request.param, bandwidth, binsize)
 
 
 def test_kernel_scale(conv_kernel):

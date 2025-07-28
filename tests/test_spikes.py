@@ -44,12 +44,12 @@ def test_psth_multi_trial():
 
 def test_rate_scale():
     """If kernel is scaled correctly, sum of rate over interval should be equal to N"""
-    from dlab.signal import kernel
+    from dlab.signal import smoothing_kernel
 
     binwidth = 0.01
     bandwidth = 0.1
     events = (1.1, 2.1, 2.9, 4.01)
-    k, _kt = kernel("gaussian", bandwidth, binwidth)
+    k, _kt = smoothing_kernel("gaussian", bandwidth, binwidth)
     r, rt = spikes.rate(events, binwidth, k, start=0.0, stop=5.0)
     assert r.size == rt.size
     assert r.sum() * binwidth == pytest.approx(len(events))

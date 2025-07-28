@@ -30,66 +30,66 @@ def peak(samples: np.ndarray) -> float:
     return 20 * np.log10(absmax)
 
 
-def resample(samples: Signal, target: float) -> Signal:
-    """Resample the samples to target rate (in Hz)"""
+def resample(signal: Signal, target: float) -> Signal:
+    """Resample the signal to target rate (in Hz)"""
     import samplerate
 
-    if samples.sampling_rate == target:
-        return samples
-    ratio = 1.0 * target / samples.sampling_rate
+    if signal.sampling_rate == target:
+        return signal
+    ratio = 1.0 * target / signal.sampling_rate
     # NB: this silently converts data to float32
-    data = samplerate.resample(samples.samples, ratio, "sinc_best")
+    data = samplerate.resample(signal.samples, ratio, "sinc_best")
     return Signal(
-        name=samples.name,
-        samples=data,
+        name=signal.name,
+        signal=data,
         sampling_rate=target,
     )
 
 
-def hp_filter(samples: Signal, cutoff: float, order: int = 12) -> Signal:
-    """Highpass filter the samples to remove DC and low-frequency noise"""
+def hp_filter(signal: Signal, cutoff_Hz: float, order: int = 12) -> Signal:
+    """Highpass filter the signal to remove DC and low-frequency noise"""
     from scipy.signal import butter, sosfilt
 
     sos = butter(
-        order, cutoff, fs=samples.sampling_rate, btype="highpass", output="sos"
+        order, cutoff_Hz, fs=signal.sampling_rate, btype="highpass", output="sos"
     )
-    filtered = sosfilt(sos, samples.samples)
+    filtered = sosfilt(sos, signal.samples)
     return Signal(
-        name=samples.name,
-        samples=filtered,
-        sampling_rate=samples.sampling_rate,
+        name=signal.name,
+        signal=filtered,
+        sampling_rate=signal.sampling_rate,
     )
 
 
-def rescale(samples: Signal, target: float) -> Signal:
-    """Rescale the samples to a target dBFS"""
-    scale = 10 ** ((target - samples.dBFS) / 20)
+def rescale(signal: Signal, target: float) -> Signal:
+    """Rescale the signal to a target dBFS"""
+    scale = 10 ** ((target - signal.dBFS) / 20)
     return Signal(
-        name=samples.name,
-        samples=samples.samples * scale,
-        sampling_rate=samples.sampling_rate,
+        name=signal.name,
+        signal=signal.samples * scale,
+        sampling_rate=signal.sampling_rate,
     )
 
 
-def ramp_signal(samples: Signal, ramp: float = 0.002) -> Signal:
-    """Apply a squared cosine ramp to the beginning and end of samples."""
+def ramp_signal(signal: Signal, duration_s: float = 0.002) -> Signal:
+    """Apply a squared cosine ramp to the beginning and end of signal."""
     from numpy import cos, linspace, pi, sin
 
-    s = samples.samples.copy()
-    n = int(ramp * samples.sampling_rate)
+    s = signal.samples.copy()
+    n = int(duration_s * signal.sampling_rate)
     t = linspace(0, pi / 2, n)
     s[:n] *= sin(t) ** 2
     s[-n:] *= cos(t) ** 2
     return Signal(
-        name=samples.name,
-        samples=s,
-        sampling_rate=samples.sampling_rate,
+        name=signal.name,
+        signal=s,
+        sampling_rate=signal.sampling_rate,
     )
 
 
-def kernel(name: str, bandwidth: float, dt: float) -> tuple[np.ndarray, np.ndarray]:
+def smoothing_kernel(name: str, bandwidth: float, dt: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    Generate a smoothing kernel function with bandwidth.
+    Generate a (normalized) smoothing kernel function with specified bandwidth.
 
     name:      the name of the kernel. can be anything supported
                by scipy.signal.get_window, plus the following functions:
@@ -141,7 +141,7 @@ def kernel(name: str, bandwidth: float, dt: float) -> tuple[np.ndarray, np.ndarr
 
 def ABC_weighting(curve="A"):
     """
-    Design of an analog weighting filter with A, B, or C curve.
+    Design an analog weighting filter with A, B, or C curve.
 
     Returns zeros, poles, gain of the filter.
     """
