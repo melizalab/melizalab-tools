@@ -22,6 +22,7 @@ you're happy with the output, use the `--deposit` flag can be used to deposit
 the WAVE files in neurobank along with metadata.
 
 """
+
 import logging
 import os
 from collections.abc import Sequence
@@ -167,7 +168,7 @@ def script(argv=None):
                     highpass_filter="butterworth",
                 )
             try:
-                res = next(
+                _res = next(
                     nbank.deposit(
                         args.deposit,
                         (out_file,),

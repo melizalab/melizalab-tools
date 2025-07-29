@@ -1,5 +1,6 @@
 # -*- mode: python -*-
-""" Functions for processing spike trains (point processes) """
+"""Functions for processing spike trains (point processes)"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any

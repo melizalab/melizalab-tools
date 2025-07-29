@@ -1,3 +1,2 @@
 # -*- mode: python -*-
-""" Shared code for all scripts and modules """
-
+"""Shared code for all scripts and modules"""

@@ -1,5 +1,6 @@
 # -*- mode: python -*-
-""" Signal processing functions """
+"""Signal processing functions"""
+
 import dataclasses
 
 import numpy as np
@@ -19,13 +20,13 @@ class Signal:
 
 
 def dBFS(samples: np.ndarray) -> float:
-    """Returns the RMS level of samples, in dB FS"""
+    """Returns the RMS level of samples, in dB FS (relative to 1.0)"""
     rms = np.sqrt(np.mean(samples * samples))
     return 20 * np.log10(rms) + 3.0103
 
 
 def peak(samples: np.ndarray) -> float:
-    """Returns the peak level of samples, in dB FS"""
+    """Returns the peak level of samples, in dB FS (relative to 1.0)"""
     absmax = np.amax(np.absolute(samples))
     return 20 * np.log10(absmax)
 
@@ -87,7 +88,9 @@ def ramp_signal(signal: Signal, duration_s: float = 0.002) -> Signal:
     )
 
 
-def smoothing_kernel(name: str, bandwidth: float, dt: float) -> tuple[np.ndarray, np.ndarray]:
+def smoothing_kernel(
+    name: str, bandwidth: float, dt: float
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate a (normalized) smoothing kernel function with specified bandwidth.
 
@@ -137,7 +140,9 @@ def smoothing_kernel(name: str, bandwidth: float, dt: float) -> tuple[np.ndarray
 
     return W / (W.sum() * dt), G
 
+
 # lifted from https://github.com/endolith/waveform_analysis
+
 
 def ABC_weighting(curve="A"):
     """
@@ -145,7 +150,7 @@ def ABC_weighting(curve="A"):
 
     Returns zeros, poles, gain of the filter.
     """
-    from scipy.signal import zpk2tf, freqs
+    from scipy.signal import freqs, zpk2tf
 
     if curve not in "ABC":
         raise ValueError(f"Curve type {curve} not supported")
@@ -215,7 +220,7 @@ def A_weighting(fs: float, output="ba"):
         second-order sections ('sos'). Default is 'ba'.
 
     """
-    from scipy.signal import bilinear_zpk, zpk2tf, zpk2sos
+    from scipy.signal import bilinear_zpk, zpk2sos, zpk2tf
 
     z, p, k = ABC_weighting("A")
 

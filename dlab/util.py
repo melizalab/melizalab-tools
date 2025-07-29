@@ -1,5 +1,6 @@
 # -*- mode: python -*-
-""" Utility functions for scripts and modules """
+"""Utility functions for scripts and modules"""
+
 import argparse
 import logging
 from functools import singledispatch

@@ -1,5 +1,6 @@
 # -*- mode: python -*-
-""" Functions for using kilosort/phy data """
+"""Functions for using kilosort/phy data"""
+
 import json
 import logging
 import re
@@ -175,7 +176,9 @@ def oeaudio_to_trials(
     for entry_num, entry in iter_entries(data_file):
         log.info(" - entry: '%s'", entry.name)
         entry_start = arf.timestamp_to_float(entry.attrs["timestamp"])
-        log.info("  - start time: %s", arf.timestamp_to_datetime(entry.attrs["timestamp"]))
+        log.info(
+            "  - start time: %s", arf.timestamp_to_datetime(entry.attrs["timestamp"])
+        )
         if expt_start is None:
             expt_start = entry_start
 
@@ -246,13 +249,17 @@ def match_clicks(entry_stimuli, stim_onsets):
     elif len(entry_stimuli) < stim_onsets.size:
         logging.error(
             "  - Number of stimuli (%d) is fewer than the number of clicks (%d)",
-                len(entry_stimuli),
-                stim_onsets.size,
+            len(entry_stimuli),
+            stim_onsets.size,
         )
         raise ValueError(
             "  - Error: unable to match clicks in the sync track with the stimulus list. Either discard recording or change sync threshold."
         )
-    logging.info("  - Number of stimuli (%d) is greater than number of clicks (%d). Trying to repair.", len(entry_stimuli), stim_onsets.size)
+    logging.info(
+        "  - Number of stimuli (%d) is greater than number of clicks (%d). Trying to repair.",
+        len(entry_stimuli),
+        stim_onsets.size,
+    )
     # this algorithm assumes that the click comes before the message, which is
     # pretty reasonable given that network delays will be longer than analog
     # signal propagation.
@@ -261,14 +268,15 @@ def match_clicks(entry_stimuli, stim_onsets):
     for i, stim in enumerate(entry_stimuli):
         idx = np.searchsorted(stim_onsets, stim.start)
         closest = stim_onsets[idx - 1]
-        logging.info("   - stim %d (start=%d) matched to click at %d", i, stim.start, closest)
+        logging.info(
+            "   - stim %d (start=%d) matched to click at %d", i, stim.start, closest
+        )
         if closest in click_times:
             matched_stims.append(stim)
             click_times.remove(closest)
         else:
             logging.info("     - this click was already used, dropping the trial")
     return matched_stims
-    
 
 
 def assign_events_flat(events: pd.DataFrame, sampling_rate: float):
@@ -556,7 +564,9 @@ def group_spikes_script(argv=None):
         # aggregate spikes by trial and left join to trial information table
         # - empty trials will be nan
         clust_trials = trials.join(
-            cluster.groupby("trial").apply(lambda x: x.time.to_numpy(), include_groups=False).rename("events")
+            cluster.groupby("trial")
+            .apply(lambda x: x.time.to_numpy(), include_groups=False)
+            .rename("events")
         )
         total_spikes += n_spikes
         total_clusters += 1

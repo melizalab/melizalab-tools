@@ -1,5 +1,6 @@
 # -*- mode: python -*-
-""" Local cache, primarily for storing neurobank resources """
+"""Local cache, primarily for storing neurobank resources"""
+
 import logging
 from pathlib import Path
 from shutil import rmtree

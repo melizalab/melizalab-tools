@@ -1,9 +1,10 @@
 # -*- mode: python -*-
-"""Functions for interfacing with the neurobank repository """
+"""Functions for interfacing with the neurobank repository"""
+
 import concurrent.futures
 import json
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -121,7 +122,9 @@ def fetch_resource(
             log.debug("- found in local repository: %s", location)
             return loc.path
         elif hasattr(loc, "url"):
-            target = cache.locate(filename, Path(urlparse(loc.url).netloc) / "resources")
+            target = cache.locate(
+                filename, Path(urlparse(loc.url).netloc) / "resources"
+            )
             if target.exists():
                 log.debug("- found in local cache: %s", target)
                 return target
@@ -174,7 +177,10 @@ def describe_resources(
             yield (result["name"], result)
     except Exception:
         for name in to_locate:
-            yield (name, FileNotFoundError("not found in local dir, unable to access registry"))
+            yield (
+                name,
+                FileNotFoundError("not found in local dir, unable to access registry"),
+            )
 
 
 def add_registry_argument(parser, dest="registry_url"):

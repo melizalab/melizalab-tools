@@ -9,6 +9,7 @@ pprox objects are just python dictionaries.
 Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 
 """
+
 import itertools
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
