@@ -41,7 +41,7 @@ def resample(signal: Signal, target: float) -> Signal:
     data = samplerate.resample(signal.samples, ratio, "sinc_best")
     return Signal(
         name=signal.name,
-        signal=data,
+        samples=data,
         sampling_rate=target,
     )
 
@@ -56,7 +56,7 @@ def hp_filter(signal: Signal, cutoff_Hz: float, order: int = 12) -> Signal:
     filtered = sosfilt(sos, signal.samples)
     return Signal(
         name=signal.name,
-        signal=filtered,
+        samples=filtered,
         sampling_rate=signal.sampling_rate,
     )
 
@@ -66,7 +66,7 @@ def rescale(signal: Signal, target: float) -> Signal:
     scale = 10 ** ((target - signal.dBFS) / 20)
     return Signal(
         name=signal.name,
-        signal=signal.samples * scale,
+        samples=signal.samples * scale,
         sampling_rate=signal.sampling_rate,
     )
 
@@ -82,7 +82,7 @@ def ramp_signal(signal: Signal, duration_s: float = 0.002) -> Signal:
     s[-n:] *= cos(t) ** 2
     return Signal(
         name=signal.name,
-        signal=s,
+        samples=s,
         sampling_rate=signal.sampling_rate,
     )
 
