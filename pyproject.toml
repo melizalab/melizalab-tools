@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "melizalab-tools"
-version = "2025.07.29"
+version = "2025.08.20"
 description = "Meliza lab scripts and modules for auditory neurophysiology"
 readme = "README.rst"
 requires-python = ">=3.10"
