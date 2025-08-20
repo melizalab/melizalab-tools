@@ -2,7 +2,9 @@
 """Signal processing functions"""
 
 import dataclasses
+from pathlib import Path
 
+import ewave
 import numpy as np
 
 
@@ -17,6 +19,10 @@ class Signal:
     def __post_init__(self):
         self.duration = 1.0 * self.samples.size / self.sampling_rate
         self.dBFS = dBFS(self.samples)
+
+    def write_wav(self, fname: str | Path, dtype: str = "h"):
+        with ewave.open(fname, mode="w", dtype=dtype, sampling_rate=self.sampling_rate) as fp:
+            fp.write(self.samples)
 
 
 def dBFS(samples: np.ndarray) -> float:
