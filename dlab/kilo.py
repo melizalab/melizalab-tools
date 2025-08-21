@@ -57,7 +57,7 @@ def read_kilo_params(fname: Path) -> dict:
     )
 
 
-def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
+def oeaudio_stims(dset: h5.Dataset, stimulus_lookup) -> Iterator[Stimulus]:
     """Parse the messages in the 'stim' dataset to get a table of stimuli with
     start samples. Note that these will need to be corrected for offset of the
     recording and network lag.
@@ -70,6 +70,8 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
         m = re_start.match(message)
         if m is not None:
             stim_name = Path(m.group(1)).stem
+            if stim_name in stimulus_lookup:
+                stim_name = stimulus_lookup[stim_name]
             yield Stimulus(stim_name, time)
 
 
@@ -150,6 +152,8 @@ def oeaudio_to_trials(
     sync_dset: str,
     sync_thresh: float = 1.0,
     prepad: float = 1.0,
+    stimulus_lookup: dict = {},
+    rec_idx: list = [],
 ) -> Iterator[Trial]:
     """Extracts trial information from an oeaudio-present experiment ARF file
 
@@ -183,7 +187,7 @@ def oeaudio_to_trials(
             expt_start = entry_start
 
         log.info("  - parsing stimulus log")
-        entry_stimuli = list(oeaudio_stims(find_stim_dset(entry)))
+        entry_stimuli = list(oeaudio_stims(find_stim_dset(entry), stimulus_lookup))
         try:
             stim_durations = stim_finder.get_durations(
                 stim.name for stim in entry_stimuli
@@ -191,6 +195,10 @@ def oeaudio_to_trials(
         except FileNotFoundError as err:
             raise RuntimeError(
                 "unable to find a stimulus to look up duration. Was it deposited in neurobank?"
+            ) from err
+        except KeyError as err:
+            raise RuntimeError(
+                "a stimulus was not found in stimulus lookup table"
             ) from err
         log.info("    - detected %d stimuli", len(entry_stimuli))
         log.info("  - sync track: '%s'", sync_dset)
@@ -221,6 +229,11 @@ def oeaudio_to_trials(
                     "  - WARNING: stimulus %s is longer than the duration of the trial",
                     stim,
                 )
+            if onset>rec_idx[0] or offset<rec_idx[1]:
+                log.warning(
+                    f"  - WARNING: skipping trial of {stim} between {onset} and {offset}"
+                )
+                continue
             trials.append(
                 Trial(
                     entry_num,
@@ -363,6 +376,12 @@ def group_spikes_script(argv=None):
         help="sets trial start time relative to stimulus onset (default %(default)0.1f s)",
     )
     p.add_argument(
+        "--recording-interval",
+        type=list,
+        default=[0, None],
+        help="duration [start:end] of recording on which spike sorting was performed. Use None for end slice"
+    )
+    p.add_argument(
         "--toelis",
         action="store_true",
         help="output toelis instead of pprox. one file will be generated for "
@@ -416,6 +435,17 @@ def group_spikes_script(argv=None):
         type=Path,
         help="DEBUG/TESTING ONLY. Search this directory for stimulus files.",
     )
+    p.add_argument(
+        "--alt-stim-names",
+        type=Path,
+        help="yaml file with keys to alternative stimulus names for neurobank lookup.",
+    )
+    p.add_argument(
+        "--temp-wh",
+        type=str,
+        default='temp_wh.dat',
+        help="Alternative name for temp_wh.dat file (whitened & filtered recording) in phy folder",
+    )
     p.add_argument("recording", type=Path, help="path of ARF recording file")
     p.add_argument(
         "sortdir",
@@ -449,6 +479,13 @@ def group_spikes_script(argv=None):
 
     if args.local_stim_dir is not None:
         log.info("  - using %s as fallback for looking up stimuli", args.local_stim_dir)
+    if args.alt_stim_names is not None:
+        log.info("  - using %s as lookup table for stimulus nbank resource names", args.alt_stim_names)
+        with open(args.alt_stim_names) as lookupfile:
+            stimulus_lookup = yaml.safe_load(lookupfile)
+    else:
+        stimulus_lookup = {}
+            
     stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
 
     log.info("- kilosort output directory: %s", args.sortdir)
@@ -462,12 +499,23 @@ def group_spikes_script(argv=None):
     )
     log.info("  - cluster info: %s", infofile)
     info = pd.read_csv(infofile, sep="\t", index_col=0)
-    recfile = args.sortdir / "temp_wh.dat"
+    recfile = args.sortdir / args.temp_wh
     params = read_kilo_params(args.sortdir / "params.py")
     recording = np.memmap(recfile, mode="c", dtype=params["dtype"])
     recording = np.reshape(
         recording, (recording.size // params["nchannels"], params["nchannels"])
     )
+    if args.recording_interval != [0, None]:
+        start = args.recording_interval[0]
+        end = args.recording_interval[1]
+        start_idx = int(start*params['sampling_rate'])
+        end_idx = int(end*params['sampling_rate']) if end is not None else None
+        log.info("  - recording interval between %d seconds", [start, end])
+        recording = recording[start_idx:end_idx, :]
+        rec_idx = [start_idx, end_idx]
+    else:
+        rec_idx = [0, recording.shape[0]]
+        
     nsamples, nchannels = recording.shape
     log.info("  - filtered recording: %s", recfile)
     log.info("    - %d samples, %d channels", nsamples, nchannels)
@@ -504,9 +552,9 @@ def group_spikes_script(argv=None):
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
         trials = pd.DataFrame(
-            oeaudio_to_trials(
-                afp, stim_finder, args.sync, args.sync_thresh, args.prepad
-            )
+            oeaudio_to_trials(afp, stim_finder, args.sync,
+                              args.sync_thresh, args.prepad,
+                              stimulus_lookup, rec_idx)
         )
         entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
 
@@ -522,6 +570,14 @@ def group_spikes_script(argv=None):
     for clust_id, cluster in events.groupby("clust"):
         clust_info = info.loc[clust_id]
         clust_type = clust_info["group"]
+        if 'Amplitude' not in clust_info: # spike-interface sorted data
+            amp_tag = 'amp'
+        else:
+            amp_tag = 'Amplitude'
+        if "ContamPct" not in clust_info:  # spike-interface sorted data
+            contam_tag = 'rp_contamination'
+        else:
+            contam_tag = 'ContamPct'
         n_spikes = len(cluster)
         if clust_type not in good_clust_types:
             log.info(
@@ -581,8 +637,8 @@ def group_spikes_script(argv=None):
             schema=pprox._stimtrial_schema,
             recording=resource_url,
             processed_by=[f"{p.prog} {version}"],
-            kilosort_amplitude=clust_info["Amplitude"],
-            kilosort_contam_pct=clust_info["ContamPct"],
+            kilosort_amplitude=clust_info[amp_tag],
+            kilosort_contam_pct=clust_info[contam_tag],
             kilosort_source_channel=clust_info["ch"],
             kilosort_probe_depth=clust_info["depth"],
             kilosort_n_spikes=clust_info["n_spikes"],
@@ -609,8 +665,8 @@ def group_spikes_script(argv=None):
                     ),
                     recording=resource_url,
                     processed_by=f"{p.prog} {version}",
-                    kilosort_amplitude=clust_info["Amplitude"],
-                    kilosort_contam_pct=clust_info["ContamPct"],
+                    kilosort_amplitude=clust_info[amp_tag],
+                    kilosort_contam_pct=clust_info[contam_tag],
                     kilosort_source_channel=clust_info["ch"],
                     kilosort_probe_depth=clust_info["depth"],
                     kilosort_n_spikes=clust_info["n_spikes"],
@@ -625,3 +681,4 @@ def group_spikes_script(argv=None):
 
 if __name__ == "__main__":
     group_spikes_script()
+
