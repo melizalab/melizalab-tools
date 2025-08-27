@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "melizalab-tools"
-version = "2025.08.20"
+version = "2025.08.27"
 description = "Meliza lab scripts and modules for auditory neurophysiology"
 readme = "README.rst"
 requires-python = ">=3.10"
@@ -33,7 +33,6 @@ dependencies = [
     "pandas>=2.3.1",
     "pyyaml>=6.0.2",
     "quickspikes>=2.0.6",
-    "samplerate>=0.2.1",
     "scipy>=1.15.3",
     "toelis>=2.1.4",
 ]
@@ -44,6 +43,9 @@ Homepage = "https://github.com/melizalab/melizalab-tools"
 [project.scripts]
 group-kilo-spikes = "dlab.kilo:group_spikes_script"
 get-songs = "dlab.get_songs:script"
+
+[project.optional-dependencies]
+audio = ["samplerate>=0.2.1"]
 
 [dependency-groups]
 dev = [

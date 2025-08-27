@@ -40,7 +40,6 @@ def peak(samples: np.ndarray) -> float:
 def resample(signal: Signal, target: float) -> Signal:
     """Resample the signal to target rate (in Hz)"""
     import samplerate
-
     if signal.sampling_rate == target:
         return signal
     ratio = 1.0 * target / signal.sampling_rate
