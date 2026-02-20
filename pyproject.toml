@@ -45,7 +45,7 @@ group-kilo-spikes = "dlab.kilo:group_spikes_script"
 get-songs = "dlab.get_songs:script"
 
 [project.optional-dependencies]
-audio = ["samplerate>=0.2.1"]
+audio = ["samplerate>=0.2.3"]
 
 [dependency-groups]
 dev = [
