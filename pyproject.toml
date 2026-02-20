@@ -7,7 +7,7 @@ name = "melizalab-tools"
 version = "2025.08.27"
 description = "Meliza lab scripts and modules for auditory neurophysiology"
 readme = "README.rst"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "BSD 3-Clause License"}
 authors = [
     {name = "C Daniel Meliza", email = "dan@meliza.org"},
@@ -20,9 +20,9 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
     "appdirs>=1.4.4",
@@ -54,7 +54,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 extend-exclude = ["attic", "venv"]
 
 [tool.ruff.lint]
