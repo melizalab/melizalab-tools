@@ -21,7 +21,9 @@ class Signal:
         self.dBFS = dBFS(self.samples)
 
     def write_wav(self, fname: str | Path, dtype: str = "h"):
-        with ewave.open(fname, mode="w", dtype=dtype, sampling_rate=self.sampling_rate) as fp:
+        with ewave.open(
+            fname, mode="w", dtype=dtype, sampling_rate=self.sampling_rate
+        ) as fp:
             fp.write(self.samples)
 
 
@@ -40,6 +42,7 @@ def peak(samples: np.ndarray) -> float:
 def resample(signal: Signal, target: float) -> Signal:
     """Resample the signal to target rate (in Hz)"""
     import samplerate
+
     if signal.sampling_rate == target:
         return signal
     ratio = 1.0 * target / signal.sampling_rate
