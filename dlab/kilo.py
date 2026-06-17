@@ -1,6 +1,8 @@
 # -*- mode: python -*-
 """Functions for using kilosort/phy data"""
 
+import io
+import datetime
 import json
 import logging
 import re
@@ -71,6 +73,35 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
         if m is not None:
             stim_name = Path(m.group(1)).stem
             yield Stimulus(stim_name, time)
+
+
+def oeaudio_log_stims(oeaudio_log: io.TextIOBase, sampling_rate: int) -> Iterator[Stimulus]:
+    """Parse an open-ephys-audio log to get a table of stimuli with start
+    samples. This function can be used when the 'stim' dataset is missing from
+    the recording (e.g., during the time period when we were falsely assuming
+    that the new version of the NetworkEvents plugin was storing these
+    messages)"""
+    re_start = re.compile(r'"start (.*)"')
+    start_acq_time = None
+    for i, line in enumerate(oeaudio_log):
+        stripped = line.strip()
+        if stripped.startswith("#") or len(stripped) == 0:
+            continue
+        timestamp, message = stripped.split(",", maxsplit=1)
+        try:
+            ts = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")
+        except ValueError as err:
+            log.warning("      - line %d: error parsing timestampe: %s", i, err)
+            continue
+        if message == '"StartAcquisition"':
+            start_acq_time = ts
+            log.debug("      - acquisition started at %s", ts)
+            continue
+        m = re_start.match(message)
+        if m is not None:
+            offset = (ts - start_acq_time).total_seconds() * sampling_rate
+            stim_name = Path(m.group(1)).stem
+            yield Stimulus(stim_name, int(offset))
 
 
 def entry_time(entry):
