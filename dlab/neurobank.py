@@ -18,7 +18,10 @@ from dlab import cache
 
 log = logging.getLogger(__name__)
 default_registry = registry.default_registry()
-default_auth = NetRCAuth(None)
+try:
+    default_auth = NetRCAuth(None)
+except FileNotFoundError:
+    default_auth = None
 
 MaybeResourcePath = tuple[str, Path | FileNotFoundError]
 MaybeResourceMetadata = tuple[str, dict | FileNotFoundError]
