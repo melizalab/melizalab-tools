@@ -32,6 +32,7 @@ test_oeaudio_log = """
 2026-06-17 13:06:32.701546,"stop arc608_ScCB.wav"
 """
 
+
 def test_oeaudio_log_parsing():
     logfile = io.StringIO(test_oeaudio_log)
     stimuli = list(kilo.oeaudio_log_stims(logfile, 30000))

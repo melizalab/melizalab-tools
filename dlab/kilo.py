@@ -75,7 +75,9 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
             yield Stimulus(stim_name, time)
 
 
-def oeaudio_log_stims(oeaudio_log: io.TextIOBase, sampling_rate: int) -> Iterator[Stimulus]:
+def oeaudio_log_stims(
+    oeaudio_log: io.TextIOBase, sampling_rate: int
+) -> Iterator[Stimulus]:
     """Parse an open-ephys-audio log to get a table of stimuli with start
     samples. This function can be used when the 'stim' dataset is missing from
     the recording (e.g., during the time period when we were falsely assuming
@@ -134,8 +136,21 @@ def entry_metadata(entry):
 
     """
     re_metadata = re.compile(r"metadata: (\{.*\})")
-    stims = find_stim_dset(entry)
-    for row in stims:
+    stim_dset = find_stim_dset(entry)
+    if stim_dset is None:
+        log.warning(
+            "  - no stimulus log dataset in %s; not saving entry metadata", entry.name
+        )
+        # use sampling rate in the first sampled dataset
+        for dset_name in entry:
+            try:
+                sampling_rate = entry[dset_name].attrs["sampling_rate"]
+                return {"sampling_rate": sampling_rate}
+            except KeyError:
+                pass
+        log.warning("  - unable to infer sampling rate for the entry")
+        return {"sampling_rate": "unknown"}
+    for row in stim_dset:
         message = row["message"].decode("utf-8")
         m = re_metadata.match(message)
         try:
@@ -143,7 +158,9 @@ def entry_metadata(entry):
         except (AttributeError, json.JSONDecodeError):
             pass
         else:
-            metadata.update(name=entry.name, sampling_rate=stims.attrs["sampling_rate"])
+            metadata.update(
+                name=entry.name, sampling_rate=stim_dset.attrs["sampling_rate"]
+            )
             return metadata
 
 
@@ -219,7 +236,14 @@ def oeaudio_to_trials(
             expt_start = entry_start
 
         log.info("  - sync track: '%s'", sync_dset)
-        sync = entry[sync_dset]
+        try:
+            sync = entry[sync_dset]
+        except KeyError as err:
+            available_tracks = ", ".join(entry.keys())
+            raise RuntimeError(
+                f"unable to find sync track. Use --sync to configure. Options are: {available_tracks}"
+            ) from err
+
         sync_data = sync[:].astype("d")
         det.scale_thresh(sync_data.mean(), sync_data.std())
         stim_onsets = np.asarray(det(sync_data))
@@ -235,6 +259,10 @@ def oeaudio_to_trials(
             entry_stimuli = list(oeaudio_log_stims(open(oeaudio_log), sampling_rate))
         else:
             stim_dset = find_stim_dset(entry)
+            if stim_dset is None:
+                raise RuntimeError(
+                    "unable to find stimulus list in ARF file. You may need to provide the oeaudio logfile"
+                )
             log.info("  - parsing stimulus log from %s", stim_dset)
             entry_stimuli = list(oeaudio_stims(stim_dset))
         try:
@@ -401,7 +429,7 @@ def group_spikes_script(argv=None):
     p.add_argument(
         "--oeaudio-log",
         type=Path,
-        help="use an open-ephys-audio logfile to determine list of stimuli instead of using network messages"
+        help="use an open-ephys-audio logfile to determine list of stimuli instead of using network messages",
     )
     p.add_argument(
         "--prepad",
@@ -496,7 +524,7 @@ def group_spikes_script(argv=None):
 
     if args.local_stim_dir is not None:
         log.info("  - using %s as fallback for looking up stimuli", args.local_stim_dir)
-        stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
+    stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
 
     log.info("- kilosort output directory: %s", args.sortdir)
     timefile = args.sortdir / "spike_times.npy"
@@ -553,7 +581,12 @@ def group_spikes_script(argv=None):
     with h5.File(datafile, "r") as afp:
         trials = pd.DataFrame(
             oeaudio_to_trials(
-                afp, stim_finder, args.sync, args.sync_thresh, args.prepad, oeaudio_log=args.oeaudio_log,
+                afp,
+                stim_finder,
+                args.sync,
+                args.sync_thresh,
+                args.prepad,
+                oeaudio_log=args.oeaudio_log,
             )
         )
         entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
