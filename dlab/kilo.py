@@ -181,6 +181,8 @@ def oeaudio_to_trials(
     sync_dset: str,
     sync_thresh: float = 1.0,
     prepad: float = 1.0,
+    *,
+    oeaudio_log: Path | None,
 ) -> Iterator[Trial]:
     """Extracts trial information from an oeaudio-present experiment ARF file
 
@@ -198,12 +200,15 @@ def oeaudio_to_trials(
     The `prepad` parameter specifies, in seconds, when trials begin relative to
     stimulus onset. The default is 1.0 s.
 
+    If oeaudio_log is set, it's used instead of the network event datasets.
+
     """
     from itertools import zip_longest
 
     expt_start = None
     det = qs.detector(sync_thresh, 10)
     trials = []
+
     for entry_num, entry in iter_entries(data_file):
         log.info(" - entry: '%s'", entry.name)
         entry_start = arf.timestamp_to_float(entry.attrs["timestamp"])
@@ -213,17 +218,6 @@ def oeaudio_to_trials(
         if expt_start is None:
             expt_start = entry_start
 
-        log.info("  - parsing stimulus log")
-        entry_stimuli = list(oeaudio_stims(find_stim_dset(entry)))
-        try:
-            stim_durations = stim_finder.get_durations(
-                stim.name for stim in entry_stimuli
-            )
-        except FileNotFoundError as err:
-            raise RuntimeError(
-                "unable to find a stimulus to look up duration. Was it deposited in neurobank?"
-            ) from err
-        log.info("    - detected %d stimuli", len(entry_stimuli))
         log.info("  - sync track: '%s'", sync_dset)
         sync = entry[sync_dset]
         sync_data = sync[:].astype("d")
@@ -235,6 +229,23 @@ def oeaudio_to_trials(
         sampling_rate = sync.attrs["sampling_rate"]
         stim_sample_offset = int(dset_offset * sampling_rate)
         log.info("  - recording clock offset: %d", stim_sample_offset)
+
+        if oeaudio_log is not None:
+            log.info("  - parsing stimulus log from %s", oeaudio_log)
+            entry_stimuli = list(oeaudio_log_stims(open(oeaudio_log), sampling_rate))
+        else:
+            stim_dset = find_stim_dset(entry)
+            log.info("  - parsing stimulus log from %s", stim_dset)
+            entry_stimuli = list(oeaudio_stims(stim_dset))
+        try:
+            stim_durations = stim_finder.get_durations(
+                stim.name for stim in entry_stimuli
+            )
+        except FileNotFoundError as err:
+            raise RuntimeError(
+                "unable to find a stimulus to look up duration. Was it deposited in neurobank?"
+            ) from err
+        log.info("    - detected %d stimuli", len(entry_stimuli))
 
         entry_stimuli = match_clicks(entry_stimuli, stim_onsets)
 
@@ -388,6 +399,11 @@ def group_spikes_script(argv=None):
         help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
     )
     p.add_argument(
+        "--oeaudio-log",
+        type=Path,
+        help="use an open-ephys-audio logfile to determine list of stimuli instead of using network messages"
+    )
+    p.add_argument(
         "--prepad",
         type=float,
         default=1.0,
@@ -480,7 +496,7 @@ def group_spikes_script(argv=None):
 
     if args.local_stim_dir is not None:
         log.info("  - using %s as fallback for looking up stimuli", args.local_stim_dir)
-    stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
+        stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
 
     log.info("- kilosort output directory: %s", args.sortdir)
     timefile = args.sortdir / "spike_times.npy"
@@ -523,7 +539,7 @@ def group_spikes_script(argv=None):
         if not args.dry_run:
             with open(outfile, "w") as ofp:
                 toelis.write(ofp, clusters)
-            log.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
+                log.info("- saved %d spikes to '%s'", toelis.count(clusters), outfile)
         return
 
     if args.recording.is_file():
@@ -532,11 +548,12 @@ def group_spikes_script(argv=None):
         datafile = nbank.find_resource(
             str(args.recording), registry_url=nbank.default_registry
         )
+
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
         trials = pd.DataFrame(
             oeaudio_to_trials(
-                afp, stim_finder, args.sync, args.sync_thresh, args.prepad
+                afp, stim_finder, args.sync, args.sync_thresh, args.prepad, oeaudio_log=args.oeaudio_log,
             )
         )
         entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
@@ -592,8 +609,8 @@ def group_spikes_script(argv=None):
             cluster = cluster[included]
             waveforms = waveforms[included]
             log.info("    - %d artifact spike(s) excluded", n_spikes - n_included)
-        # aggregate spikes by trial and left join to trial information table
-        # - empty trials will be nan
+            # aggregate spikes by trial and left join to trial information table
+            # - empty trials will be nan
         clust_trials = trials.join(
             cluster.groupby("trial")
             .apply(lambda x: x.time.to_numpy(), include_groups=False)
