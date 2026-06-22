@@ -397,7 +397,7 @@ def group_spikes_script(argv=None):
     from dlab import __version__
     from dlab.util import json_serializable, setup_log
 
-    version = "2025.07.28"
+    version = "2026.06.22"
 
     p = argparse.ArgumentParser(
         description="group kilosorted spikes into pprox files based on cluster and trial"
