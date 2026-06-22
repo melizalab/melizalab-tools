@@ -1,9 +1,26 @@
-dlab
-----
+melizalab-tools
+====
+
+|ProjectStatus|_ |Version|_ |BuildStatus|_ |License|_ |PythonVersions|_
+
+.. |ProjectStatus| image:: https://www.repostatus.org/badges/latest/active.svg
+.. _ProjectStatus: https://www.repostatus.org/#active
+
+.. |Version| image:: https://img.shields.io/pypi/v/melizalab-tools.svg
+.. _Version: https://pypi.python.org/pypi/melizalab-tools/
+
+.. |BuildStatus| image:: https://github.com/melizalab/melizalab-tools/actions/workflows/python_tests.yml/badge.svg
+.. _BuildStatus: https://github.com/melizalab/melizalab-tools/actions/workflows/python_tests.yml
+
+.. |License| image:: https://img.shields.io/pypi/l/melizalab-tools.svg
+.. _License: https://opensource.org/license/bsd-3-clause/
+
+.. |PythonVersions| image:: https://img.shields.io/pypi/pyversions/melizalab-tools.svg
+.. _PythonVersions: https://pypi.python.org/pypi/melizalab-tools/
 
 A collection of python code and scripts used by the Meliza Lab.
 
-To install: ``pip install melizalab-tools``
+To install: ``pipx install melizalab-tools``
 
 modules
 ~~~~~~~
