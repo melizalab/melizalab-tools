@@ -119,8 +119,8 @@ def iter_entries(data_file):
 
 
 def find_stim_dset(entry):
-    """Returns the first dataset that matches 'Network_Events.*_TEXT'"""
-    rex = re.compile(r"Network_Events-.*?TEXT")
+    """Returns the first dataset that matches 'MessageCenter'"""
+    rex = re.compile(r"MessageCenter")
     for name in entry:
         if rex.match(name) is not None:
             log.debug("  - stim log dataset: %s", name)
