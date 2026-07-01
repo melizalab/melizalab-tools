@@ -417,7 +417,7 @@ def group_spikes_script(argv=None):
     )
     p.add_argument(
         "--sync",
-        default="sync",
+        default="ADC3",
         help="name of channel with synchronization signal (default '%(default)s')",
     )
     p.add_argument(
