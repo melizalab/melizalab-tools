@@ -177,13 +177,18 @@ def describe_resources(
         return
     try:
         for result in describe_many(registry_url, *to_locate):
+            to_locate.discard(result["name"])
             yield (result["name"], result)
     except Exception:
+        log.debug("unable to access registry", exc_info=True)
         for name in to_locate:
             yield (
                 name,
                 FileNotFoundError("not found in local dir, unable to access registry"),
             )
+        return
+    for name in to_locate:
+        yield (name, FileNotFoundError(f"no such resource {name}"))
 
 
 def add_registry_argument(parser, dest="registry_url"):
@@ -222,7 +227,9 @@ def main(argv=None):
     setup_log(args.debug)
 
     if args.clear_cache:
-        cache.clear(urlparse(args.registry_url).netloc)
+        # the cache is organized by the host of each resource's archive, which
+        # may differ from the registry host, so clear all of it
+        cache.clear("")
 
     if len(args.id) > 0:
         for name, location in find_resources(
