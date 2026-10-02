@@ -1,8 +1,17 @@
 # -*- mode: python -*-
+"""Tests for dlab.pprox.
+
+The first group (make_pprox through split_trial_empty) uses the shared fixture
+data below. Later tests use small hand-built trials so that every expected
+value can be checked by hand. Tests marked PINNED record current behavior that
+looks like a bug; see TODO.md.
+"""
+
 import logging
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from dlab import pprox
 
@@ -266,3 +275,303 @@ def test_split_trial_empty():
     split_spikes = split.apply(lambda x: x.events + x.offset, axis=1).dropna().explode()
     assert split.shape[0] == len(stims[stim]["stim_end"])
     assert len(split_spikes) == 0
+
+
+# --- constructors and helpers
+
+
+def test_empty():
+    """empty() is a pprox collection with the base schema and no trials."""
+    pp = pprox.empty()
+    assert pp == {"$schema": pprox._base_schema, "pprox": ()}
+
+
+def test_from_trials_consumes_iterators_and_returns_tuple():
+    """from_trials accepts any iterable (e.g. a generator) and stores the trials as
+    a tuple.
+    """
+    pp = pprox.from_trials(iter(trials))
+    assert isinstance(pp["pprox"], tuple), "trials should be stored as a tuple"
+    assert pp["pprox"] == trials
+
+
+def test_from_trials_custom_schema():
+    """The $schema can be overridden."""
+    pp = pprox.from_trials(trials, schema=pprox._stimtrial_schema)
+    assert pp["$schema"] == pprox._stimtrial_schema
+
+
+def test_wrap_uuid_str_and_bytes():
+    """Both str and bytes UUIDs become a urn:uuid: string."""
+    raw = "123e4567-e89b-12d3-a456-426614174000"
+    assert pprox.wrap_uuid(raw) == f"urn:uuid:{raw}"
+    assert pprox.wrap_uuid(raw.encode("ascii")) == f"urn:uuid:{raw}"
+
+
+def test_wrap_uuid_rejects_garbage():
+    """A string that is not a UUID raises ValueError."""
+    with pytest.raises(ValueError):
+        pprox.wrap_uuid("not a uuid")
+
+
+def test_groupby_orders_groups_by_key():
+    """groupby sorts trials by the key first, so groups come out in key order."""
+    pp = pprox.from_trials(trials)
+    keys = [k for k, _ in pprox.groupby(pp, lambda t: t["stimulus"]["name"])]
+    assert keys == ["stim1", "stim2"], "groups should come out in key order"
+
+
+def test_trial_iterator_annotates_sampling_rate_from_entry_metadata():
+    """A trial whose recording block has no sampling_rate gets one from the
+    collection's entry_metadata, looked up by the trial's entry. The trial dict is
+    modified in place.
+    """
+    trial = {"events": [], "recording": {"entry": 1}}
+    pp = {
+        "pprox": [trial],
+        "entry_metadata": [{"sampling_rate": 20000}, {"sampling_rate": 30000}],
+    }
+    ((i, out),) = list(pprox.trial_iterator(pp))
+    assert i == 0
+    assert out["recording"]["sampling_rate"] == 30000, (
+        "rate should come from entry_metadata[entry]"
+    )
+    # NB: the annotation is made in place on the input trial
+    assert trial["recording"]["sampling_rate"] == 30000, "annotation is made in place"
+
+
+def test_trial_iterator_keeps_existing_sampling_rate():
+    """A sampling_rate already on the trial is not overwritten."""
+    trial = {"recording": {"entry": 0, "sampling_rate": 1000}}
+    pp = {"pprox": [trial], "entry_metadata": [{"sampling_rate": 30000}]}
+    ((_, out),) = list(pprox.trial_iterator(pp))
+    assert out["recording"]["sampling_rate"] == 1000, (
+        "existing sampling_rate should not be overwritten"
+    )
+
+
+def test_trial_iterator_without_metadata_raises():
+    """Without entry_metadata and without a rate on the trial, KeyError is raised."""
+    pp = {"pprox": [{"recording": {"entry": 0}}]}
+    with pytest.raises(KeyError):
+        list(pprox.trial_iterator(pp))
+
+
+def test_aggregate_events_applies_offsets_in_trial_order():
+    """Events from all trials are concatenated in trial order, each shifted by its
+    trial's offset. Trials with no events contribute nothing.
+    """
+    pp = pprox.from_trials(
+        [
+            {"events": [1.0, 2.0], "offset": 0.0},
+            {"events": [], "offset": 5.0},
+            {"events": [0.5], "offset": 10.0},
+        ]
+    )
+    assert pprox.aggregate_events(pp).tolist() == [1.0, 2.0, 10.5], (
+        "events should be shifted by offset, in trial order"
+    )
+
+
+def test_aggregate_events_empty_collection_raises():
+    """PINNED BEHAVIOR (see TODO.md): aggregating a collection with no trials raises
+    ValueError from np.concatenate rather than returning an empty array.
+    """
+    with pytest.raises(ValueError):
+        pprox.aggregate_events(pprox.empty())
+
+
+def test_unimplemented_stubs_return_none():
+    """validate and combine_recordings are placeholders that do nothing. This test
+    only documents that; replace it when they are implemented or removed.
+    """
+    assert pprox.validate(pprox.empty()) is None
+    assert pprox.combine_recordings() is None
+
+
+# --- split_trial, with hand-computed expectations
+
+
+def make_trial(events, name="s", interval=(1.0, 3.0), offset=10.0, index=7):
+    """A minimal trial dict with the fields split_trial reads."""
+    return {
+        "events": events,
+        "interval": [0.0, 4.0],
+        "offset": offset,
+        "index": index,
+        "stimulus": {"name": name, "interval": list(interval)},
+    }
+
+
+def fixed_splits(begin, end):
+    """A split_fun that ignores the stimulus name and returns the given split table."""
+    names = [f"split{i}" for i in range(len(begin))]
+    frame = pd.DataFrame({"stim_begin": begin, "stim_end": end, "name": names})
+    return lambda _name: frame.copy()
+
+
+two_splits = fixed_splits([0.0, 1.0], [0.5, 1.5])
+
+
+def split_events(df):
+    """events per split as plain lists (nan -> None)"""
+    return [None if isinstance(e, float) else list(e) for e in df.events]
+
+
+def test_split_trial_values():
+    """Hand-computed example. The stimulus starts at 1.0 s and is split at 0 and 1.0
+    s (stimulus time); events are 1.2, 1.4, 2.5 and 3.5 s in the trial.
+
+    Expected: events are re-referenced to the start of each split (0.2 and 0.4 in
+    the first; 0.5 in the second), the 3.5 s event falls after the last split and
+    is dropped, offsets are trial offset + split start + stimulus onset (11 and
+    12), and each split's end and interval end are relative to its own start.
+    """
+    df = pprox.split_trial(make_trial([1.2, 1.4, 2.5, 3.5]), two_splits)
+    assert list(df.columns) == [
+        "interval",
+        "stim_end",
+        "name",
+        "interval_end",
+        "events",
+        "offset",
+        "source_trial",
+    ]
+    assert df.interval.tolist() == [0, 1]
+    assert df.name.tolist() == ["split0", "split1"]
+    # times are relative to the start of each split; 3.5 is past the end of the
+    # last split (stim-relative 2.5 >= 2.0) and is dropped
+    assert split_events(df)[0] == pytest.approx([0.2, 0.4], abs=1e-6), (
+        "events should be relative to split start"
+    )
+    assert split_events(df)[1] == pytest.approx([0.5], abs=1e-6), (
+        "events should be relative to split start; 3.5 dropped"
+    )
+    # trial offset + split start + stimulus onset
+    assert df.offset.tolist() == [11.0, 12.0], (
+        "offset = trial offset + split start + stimulus onset"
+    )
+    assert df.stim_end.tolist() == [0.5, 0.5], (
+        "stim_end should be relative to split start"
+    )
+    assert df.interval_end.tolist() == [1.0, 1.0], (
+        "interval_end should be relative to split start"
+    )
+    assert df.source_trial.tolist() == [7, 7], (
+        "source_trial should come from trial['index']"
+    )
+
+
+def test_split_trial_split_without_events_is_nan():
+    """A split that contains no events has NaN (a float, not an array) in its events
+    column.
+    """
+    df = pprox.split_trial(make_trial([1.2]), two_splits)
+    assert split_events(df)[0] == pytest.approx([0.2], abs=1e-6)
+    assert split_events(df)[1] is None, "split without events should be NaN"
+
+
+def test_split_trial_events_are_float32():
+    """PINNED: events come back as float32. Precision is about 1e-7 s for times near
+    the stimulus, which is fine, but this documents it.
+    """
+    # NB: pinned. Precision is ~1e-7 s for times within a few s of stimulus onset
+    df = pprox.split_trial(make_trial([1.2]), two_splits)
+    assert df.events.iloc[0].dtype == np.float32, "PINNED: events are float32"
+
+
+def test_split_trial_pads_last_interval_by_mean_gap():
+    """The last split has no following stimulus, so its interval is extended by the
+    mean of the gaps between the other splits (0.5 and 1.0 here, so 0.75).
+    """
+    splits = fixed_splits([0.0, 1.0, 2.5], [0.5, 1.5, 3.0])
+    df = pprox.split_trial(make_trial([1.2]), splits)
+    # gaps after splits 0 and 1 are 0.5 and 1.0, so the last is padded by 0.75
+    assert df.interval_end.tolist() == [1.0, 1.5, 1.25], (
+        "last interval should be padded by the mean gap (0.75)"
+    )
+    assert df.offset.tolist() == [11.0, 12.0, 13.5], (
+        "offset = trial offset + split start + stimulus onset"
+    )
+
+
+def test_split_trial_single_split_has_no_padding():
+    """With only one split there are no gaps to average, so the interval ends where
+    the stimulus ends and later events are dropped.
+    """
+    df = pprox.split_trial(make_trial([1.2, 2.4, 2.6]), fixed_splits([0.0], [1.5]))
+    assert df.interval_end.tolist() == [1.5], "a single split should not be padded"
+    # 2.6 - 1.0 = 1.6 is after the end of the interval
+    assert split_events(df)[0] == pytest.approx([0.2, 1.4], abs=1e-6), (
+        "events past the interval end should be dropped"
+    )
+
+
+def test_split_trial_passes_stimulus_name_to_split_fun():
+    """split_fun is called with the name of the trial's stimulus."""
+    seen = []
+
+    def split_fun(name):
+        seen.append(name)
+        return two_splits(name)
+
+    pprox.split_trial(make_trial([], name="song7"), split_fun)
+    assert seen == ["song7"], "split_fun should get the stimulus name"
+
+
+def test_split_trial_extra_split_columns_are_kept():
+    """Extra columns in the split table (metadata about each split) pass through to
+    the output.
+    """
+    frame = pd.DataFrame(
+        {
+            "stim_begin": [0.0, 1.0],
+            "stim_end": [0.5, 1.5],
+            "name": ["a", "b"],
+            "syllable_type": ["x", "y"],
+        }
+    )
+    df = pprox.split_trial(make_trial([1.2]), lambda _name: frame.copy())
+    assert df.syllable_type.tolist() == ["x", "y"], (
+        "extra split columns should pass through"
+    )
+
+
+def test_split_trial_requires_trial_index():
+    """split_trial reads trial["index"] for the source_trial column, so a trial
+    without one raises KeyError. kilo.trials_to_pprox always provides it.
+    """
+    trial = make_trial([1.2])
+    del trial["index"]
+    with pytest.raises(KeyError):
+        pprox.split_trial(trial, two_splits)
+
+
+def test_split_trial_drops_events_before_stimulus_onset():
+    """Events before the stimulus starts (prepad) are not assigned to any split."""
+    # prepad events are not assigned to any split
+    df = pprox.split_trial(make_trial([0.5, 1.2]), two_splits)
+    assert sum(len(e) for e in split_events(df) if e is not None) == 1, (
+        "prepad event should be dropped"
+    )
+
+
+def test_split_trial_event_exactly_at_first_split_start_is_dropped():
+    """PINNED BUG? (see TODO.md): an event exactly at the start of the first split
+    is dropped, which is inconsistent with the next test.
+    """
+    df = pprox.split_trial(make_trial([1.0, 1.2]), two_splits)
+    assert split_events(df)[0] == pytest.approx([0.2], abs=1e-6), (
+        "PINNED: event at the first split start is dropped"
+    )
+
+
+def test_split_trial_event_exactly_at_later_split_start_goes_to_previous_split():
+    """PINNED BUG? (see TODO.md): an event exactly at a later split's start is
+    assigned to the previous split, at that split's end time.
+    """
+    df = pprox.split_trial(make_trial([1.2, 2.0]), two_splits)
+    assert split_events(df)[0] == pytest.approx([0.2, 1.0], abs=1e-6), (
+        "PINNED: event at a later split start goes to the previous split"
+    )
+    assert split_events(df)[1] is None, "PINNED: so the later split is empty"
