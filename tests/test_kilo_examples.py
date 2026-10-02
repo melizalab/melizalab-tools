@@ -3,7 +3,7 @@
 
 These are large (8-18 GB), so they are not in the repository and each test
 class is skipped if its file is missing. Each class loads the sync track once
-(about 0.4-0.8 GB as float64). They also record the measurements behind the
+(about 0.1-0.2 GB as int16). They also record the measurements behind the
 synthetic recordings in conftest.py.
 
 - E69_1_1.arf: GUI 0.5.3, old-style 2 ms clicks on a channel named "sync";
@@ -18,7 +18,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-import quickspikes as qs
+from conftest import StubFinder, oeaudio_log_text
 
 from dlab import kilo
 
@@ -37,20 +37,17 @@ def only_entry(fp):
     return fp[name]
 
 
-def rising_edges(x, min_gap=1000):
-    """First sample at or above the midpoint between baseline and peak, for each
-    event (crossings closer than min_gap are the same event). The baseline is a
-    low percentile, not the median, because P352's track is mostly high."""
-    mid = (np.percentile(x, 5) + x.max()) / 2
-    up = np.flatnonzero((x[:-1] < mid) & (x[1:] >= mid)) + 1
+def rising_edges(x, above=1000, min_gap=1000):
+    """First sample more than `above` counts over the baseline (5th percentile),
+    for each event. Independent of kilo.detect_sync_onsets, which uses the
+    midpoint; for these tracks 1000 counts is 50-200x the baseline noise."""
+    level = np.percentile(x, 5) + above
+    up = np.flatnonzero((x[:-1] <= level) & (x[1:] > level)) + 1
     return up[np.r_[True, np.diff(up) > min_gap]]
 
 
-def detect(x, thresh):
-    """The detection step of kilo.oeaudio_to_trials"""
-    det = qs.detector(thresh, 10)
-    det.scale_thresh(x.mean(), x.std())
-    return np.asarray(det(x))
+def message_rows(dset):
+    return [(int(r["start"]), r["message"].decode()) for r in dset[:]]
 
 
 def start_messages(dset, first_sample):
@@ -68,7 +65,7 @@ class Recording:
             self.first_sample = round(
                 dset.attrs["offset"] * dset.attrs["sampling_rate"]
             )
-            self.sync = dset[:].astype("d")
+            self.sync = dset[:]
             self.starts = start_messages(entry[messages], self.first_sample)
         self.edges = rising_edges(self.sync)
 
@@ -98,13 +95,16 @@ class TestOldStyleClicks:
             "starts fall inside the recording only after subtracting first sample"
         )
 
-    def test_clicks_detected_at_default_threshold(self, rec):
-        """Each 2 ms click is detected at the default threshold (30), within 2
-        samples of its rising edge, one per start message.
+    def test_clicks_detected_at_rising_edge(self, rec):
+        """At the default threshold, each click is detected once, at its rising
+        edge, and there is one per start message.
         """
-        onsets = detect(rec.sync, 30.0)
+        onsets = kilo.detect_sync_onsets(rec.sync)
         assert onsets.size == rec.edges.size == rec.starts.size == 20
-        assert ((onsets - rec.edges) >= 0).all() and ((onsets - rec.edges) <= 2).all()
+        lag = onsets - rec.edges
+        # the midpoint can be one sample later than the reference level on a
+        # rise with an intermediate sample
+        assert ((lag >= 0) & (lag <= 1)).all(), "detected at the rising edge"
 
     def test_clicks_follow_start_messages(self, rec):
         """Each click comes 0.39-0.40 s after its start message. NB: match_clicks
@@ -112,6 +112,23 @@ class TestOldStyleClicks:
         """
         lag = (rec.edges - rec.starts) / RATE
         assert ((lag > 0.35) & (lag < 0.45)).all(), "click lags message by ~0.4 s"
+
+    def test_trials_from_log(self, rec, tmp_path):
+        """End to end, through the --oeaudio-log route this recording needs: one
+        trial per start message, in order, each at its click. The log is made
+        from the recording's own messages.
+        """
+        with h5py.File(self.PATH, "r") as fp:
+            entry = only_entry(fp)
+            rows = message_rows(entry["Network_Events-104.0_TEXT_group_1"])
+            names = [Path(m[6:]).stem for _, m in rows if m.startswith("start ")]
+            log = tmp_path / "oeaudio.log"
+            log.write_text(oeaudio_log_text(rows))
+            finder = StubFinder(dict.fromkeys(names, 1.0))
+            result = kilo.oeaudio_to_trials(fp, finder, "sync", oeaudio_log=log)
+        assert [t.stimulus_name for t in result] == names
+        lag = np.array([t.stimulus_start for t in result]) - rec.edges
+        assert ((lag >= 0) & (lag <= 1)).all(), "each trial starts at its sync edge"
 
 
 @requires("P352_1_1.arf")
@@ -148,40 +165,28 @@ class TestSustainedPulses:
         lag = (rec.edges - rec.starts) / RATE
         assert ((lag > 0.2) & (lag < 0.35)).all(), "pulse lags message by ~0.25 s"
 
-    def test_pulses_only_detected_below_one_sd(self, rec):
-        """PINNED BUG (see TODO.md): the pulse top is only 0.85 SD above the
-        track mean, so nothing is detected at the default threshold or at 1.
+    def test_pulses_detected_at_rising_edge(self, rec):
+        """At the default threshold, each pulse is detected once, at its rising
+        edge (the old z-scored detector found none, and at threshold 0.5 found
+        them 40-222 samples late).
         """
-        z = (rec.sync.max() - rec.sync.mean()) / rec.sync.std()
-        assert z == pytest.approx(0.85, abs=0.02)
-        assert detect(rec.sync, 30.0).size == 0, "PINNED: none at default threshold"
-        assert detect(rec.sync, 1.0).size == 0, "PINNED: none at threshold 1"
-
-    def test_pulse_onsets_reported_late(self, rec):
-        """PINNED BUG (see TODO.md): at threshold 0.5 every pulse is found, but
-        each onset is reported 40-222 samples (1.3-7.4 ms) after the rising edge,
-        where the flat top first dips.
-        """
-        onsets = detect(rec.sync, 0.5)
-        assert onsets.size == rec.edges.size, "one detection per pulse"
+        onsets = kilo.detect_sync_onsets(rec.sync)
+        assert onsets.size == rec.edges.size == 1300
         lag = onsets - rec.edges
-        assert lag.min() == 40 and lag.max() == 222, "PINNED: late by 40-222 samples"
+        # the midpoint can be one sample later than the reference level on a
+        # rise with an intermediate sample
+        assert ((lag >= 0) & (lag <= 1)).all(), "detected at the rising edge"
 
-    def test_trials(self):
-        """End to end: at threshold 0.5, oeaudio_to_trials makes one trial per
-        start message, with stimulus names in message order.
+    def test_trials(self, rec):
+        """End to end at the default threshold: one trial per start message, in
+        order, each at its pulse's rising edge.
         """
-
-        class Finder:
-            def get_durations(self, names):
-                return {name: 1.0 for name in names}
-
         with h5py.File(self.PATH, "r") as fp:
             entry = only_entry(fp)
-            names = [
-                r["message"][6:].decode()
-                for r in entry["MessageCenter"][:]
-                if r["message"].startswith(b"start ")
-            ]
-            result = kilo.oeaudio_to_trials(fp, Finder(), "ADC3", 0.5, oeaudio_log=None)
+            rows = message_rows(entry["MessageCenter"])
+            names = [m[6:] for _, m in rows if m.startswith("start ")]
+            finder = StubFinder(dict.fromkeys(names, 1.0))
+            result = kilo.oeaudio_to_trials(fp, finder, "ADC3", oeaudio_log=None)
         assert [t.stimulus_name for t in result] == names
+        lag = np.array([t.stimulus_start for t in result]) - rec.edges
+        assert ((lag >= 0) & (lag <= 1)).all(), "each trial starts at its sync edge"

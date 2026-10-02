@@ -36,22 +36,14 @@ when a fix makes one pass.
   `zip_longest` pads the stimulus list with an int, and the loop crashes with
   `AttributeError: 'int' object has no attribute 'name'` instead of a clear
   error. (same test)
-- [ ] Sync detection does not work for sustained pulses (new style, e.g.
-  examples/P352_1_1.arf), only for brief clicks (old style, E69_1_1.arf).
-  Two separate problems:
-  - The threshold is in SDs of the whole track (`det.scale_thresh(mean, std)`).
-    Long pulses inflate the SD: in P352 the pulse top is 0.85 SD above the
-    mean, so the default `--sync-thresh 30` (and even 1) detects nothing; 0.5
-    finds all 1300 pulses.
-  - quickspikes reports an event at the last sample before the signal first
-    drops below its peak. P352's pulses are flat at the ADC ceiling (30083),
-    so onsets are reported where the plateau first dips: 40-222 samples
-    (1.3-7.4 ms) after the rising edge. A plateau with no dip is reported at
-    the end of the pulse.
-  Detecting rising edges against a threshold relative to the track's range
-  would fix both. (`test_pulse_*`, `TestSustainedPulses`)
-- [ ] When no clicks are detected, `match_clicks` fails with `IndexError`
-  (indexing an empty array) instead of a clear error. (same tests)
+- [x] Sync detection did not work for sustained pulses (the z-scored
+  quickspikes detector found none in P352 at the default threshold, and found
+  them 1.3-7.4 ms late at 0.5). Replaced by `detect_sync_onsets`: rising
+  edges through a threshold set as a fraction (default 0.5) of the way from
+  baseline to peak, rejecting tracks whose peak is < 20x the baseline noise.
+  `--sync-thresh` now takes that fraction; old z-score values are rejected.
+  Old-style click onsets move by 0-2 samples (now the first sample over the
+  midpoint, rather than the peak). No sync events is now a clear error.
 - [ ] `match_clicks` assumes each click comes *before* its start message. In
   both example recordings it comes after: ~0.4 s in E69, ~0.25 s in P352
   (audio buffering). So when a sync event is missed, the wrong stimulus is
@@ -59,9 +51,6 @@ when a fix makes one pass.
   number subtracted (`test_trials_missing_click_mislabels_trials`). Matching
   each sync event to the last message before it would fit the data.
   (`test_clicks_follow_start_messages`, `test_pulses_follow_start_messages`)
-- [ ] `oeaudio_to_trials` defaults to `sync_thresh=1.0`, but the script's
-  `--sync-thresh` defaults to 30. All sync data should be high enough
-  amplitude to be unambiguous, so the default should just work.
 - [ ] Later (pprox generation pass): process jpresent's `condition_start` /
   `condition_stop` messages (half of P352's stimuli), which trials ignore now.
 - Note: both presenters now require MessageCenter logging, so

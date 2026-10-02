@@ -1,10 +1,10 @@
-/build
-/dlab.egg-info/
 .DS_Store
 *.egg-info/
 *.so
 *.pyc
 .ipynb_checkpoints/
+build/
 attic/
 venv/
 dist/
+examples/

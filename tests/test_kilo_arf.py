@@ -11,6 +11,7 @@ a bug; see TODO.md.
 import logging
 
 import arf
+import numpy as np
 import pytest
 from conftest import (
     FIRST_SAMPLE,
@@ -297,26 +298,16 @@ def test_trials_missing_click_with_real_sample_numbering_crashes(make_arf):
 #
 # conftest.py models the two styles seen in the example recordings: old-style
 # 2 ms clicks, and new-style pulses that stay high, flat at the ADC ceiling,
-# for the whole stimulus. Two things about detection matter for the new style:
-#
-# - The threshold is in SDs of the whole track (det.scale_thresh with the
-#   track's mean and SD). Long pulses inflate the SD, so the pulse's height in
-#   SDs falls as the fraction of time spent high rises: ~1.9 for 0.5 s pulses
-#   every 2 s, ~0.7 for ~2 s pulses with ~0.9 s gaps (0.85 in P352).
-# - quickspikes reports a pulse at the last sample before its first dip below
-#   the peak value, so on a flat top the reported onset depends on where the
-#   plateau first dips, not on the rising edge.
+# for the whole stimulus. detect_sync_onsets finds rising edges through a
+# threshold set between the track's baseline and peak, so neither the length
+# of the pulses nor the shape of their tops should matter.
 
-# ~2 s stimuli with ~0.9 s gaps, as in the sample oeaudio log in test_kilo.py
+# ~2 s stimuli with ~0.9 s gaps, as in the example recordings
 LONG_STIMULI = [("a", 30000, 90000), ("b", 117000, 177000), ("c", 204000, 264000)]
 
 
-def pulse_entry(stimuli=STIMULI, nsamples=NSAMPLES, dips=(1,)):
-    """add_entry arguments for an entry whose sync track has sustained pulses.
-
-    By default each plateau dips on its second sample, so the pulse is reported
-    at its first sample, the rising edge.
-    """
+def pulse_entry(stimuli=STIMULI, nsamples=NSAMPLES, dips=()):
+    """add_entry arguments for an entry whose sync track has sustained pulses"""
     return one_entry(
         nsamples=nsamples,
         clicks=(),
@@ -326,73 +317,96 @@ def pulse_entry(stimuli=STIMULI, nsamples=NSAMPLES, dips=(1,)):
     )
 
 
-def test_old_style_clicks_detected_at_default_threshold(make_arf):
-    """Old-style 2 ms clicks are tens of SDs above the track, so the script
-    default sync_thresh of 30 finds each one within a couple of samples of
-    its onset.
-    """
-    path = make_arf(one_entry(click_samples=60))
-    result = trials(path, sync_thresh=30.0)
-    for t, onset in zip(result, ONSETS, strict=True):
-        assert 0 <= t.stimulus_start - onset <= 2, "detected at the click onset"
+def test_old_style_clicks_detected_at_onset(make_arf):
+    """2 ms clicks are detected at their first sample."""
+    result = trials(make_arf(one_entry(click_samples=60)))
+    assert [t.stimulus_start for t in result] == ONSETS
 
 
-def test_pulse_detected_at_rising_edge_with_low_threshold(make_arf):
-    """With 0.5 s pulses every 2 s and sync_thresh=1, each pulse is detected
-    once, here at its rising edge. The falling edge is not used: stimulus_end
-    comes from the stimulus duration.
+@pytest.mark.parametrize(
+    "stimuli,nsamples",
+    [(STIMULI, NSAMPLES), (LONG_STIMULI, 300000)],
+    ids=["short-pulses", "long-pulses"],
+)
+@pytest.mark.parametrize("dips", [(), (1,), (200,)], ids=["flat", "dip1", "dip200"])
+def test_pulses_detected_at_rising_edge(make_arf, stimuli, nsamples, dips):
+    """Each pulse is detected once, at its first sample, whether the pulses
+    fill a little or most of the track (21% or 67% here; ~58% in P352) and
+    wherever (or whether) the flat top dips. The old z-scored peak detector
+    failed on both counts.
     """
+    path = make_arf(pulse_entry(stimuli, nsamples, dips))
+    result = trials(path, StubFinder({"a": 0.4, "b": 0.4, "c": 0.4}))
+    assert [t.stimulus_start for t in result] == [on for _, on, _ in stimuli]
+
+
+def test_pulse_falling_edge_not_used(make_arf):
+    """stimulus_end comes from the stimulus duration, not the end of the pulse."""
     finder = StubFinder({"a": 0.4, "b": 0.4, "c": 0.4})  # shorter than the pulses
-    result = trials(make_arf(pulse_entry()), finder, sync_thresh=1.0)
-    assert [t.stimulus_start for t in result] == ONSETS, "one detection per pulse"
-    for t in result:
-        assert t.stimulus_end - t.stimulus_start == 12000, (
-            "end from duration, not pulse"
-        )
+    for t in trials(make_arf(pulse_entry()), finder):
+        assert t.stimulus_end - t.stimulus_start == 12000, "end from duration"
 
 
-@pytest.mark.parametrize("first_dip", [50, 200])
-def test_pulse_onset_reported_at_first_dip(make_arf, first_dip):
-    """PINNED BUG (see TODO.md): on a flat-topped pulse, the onset is reported
-    at the last sample before the plateau first dips, not at the rising edge.
-    In P352 this makes onsets 40 to 222 samples (1.3 to 7.4 ms) late.
+def test_flat_sync_track_is_an_error(make_arf):
+    """A sync track with no events (e.g. the wrong channel) is a RuntimeError
+    that names the channel, not an IndexError from match_clicks."""
+    with pytest.raises(RuntimeError, match=f"no sync events detected in '{SYNC}'"):
+        trials(make_arf(one_entry(clicks=())))
+
+
+@pytest.mark.parametrize("thresh", [0.0, 1.0, 30.0])
+def test_sync_threshold_must_be_a_fraction(make_arf, thresh):
+    """The threshold is a fraction of the baseline-to-peak range; values from
+    the old z-score scale (like the former default of 30) are rejected."""
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        trials(make_arf(one_entry()), sync_thresh=thresh)
+
+
+# --- detect_sync_onsets on bare arrays
+
+
+def test_detect_sync_onsets_threshold_fraction():
+    """The threshold sits `thresh` of the way from baseline to peak: a step to
+    100 crosses 0.5 at the step, and a later step to 100 from 40 crosses 0.25
+    but not 0.75.
     """
-    path = make_arf(pulse_entry(dips=(first_dip,)))
-    result = trials(path, sync_thresh=1.0)
-    lags = [t.stimulus_start - onset for t, onset in zip(result, ONSETS, strict=True)]
-    assert lags == [first_dip - 1] * 3, "PINNED: reported just before the first dip"
+    x = np.zeros(1000)
+    x[100:200] = 100  # full-height pulse
+    x[500:600] = 40  # partial pulse
+    assert detect(x, 0.5).tolist() == [100]
+    assert detect(x, 0.25).tolist() == [100, 500]
+    assert detect(x, 0.75).tolist() == [100]
 
 
-def test_pulse_without_dips_reported_at_its_end(make_arf):
-    """PINNED BUG (see TODO.md): if the plateau never dips, the pulse is
-    reported at its last sample, so the stimulus onset is off by the whole
-    pulse length (0.5 s here).
+def test_detect_sync_onsets_ignores_pulse_in_progress_at_start():
+    """A pulse that is already high when the data begin has no onset."""
+    x = np.zeros(1000)
+    x[:50] = 100
+    x[300:400] = 100
+    assert detect(x).tolist() == [300]
+
+
+def test_detect_sync_onsets_accepts_int16():
+    """The sync track is read as int16; no conversion is needed."""
+    x = np.zeros(1000, dtype="int16")
+    x[100:110] = 30000
+    assert detect(x).tolist() == [100]
+
+
+def test_detect_sync_onsets_rejects_events_close_to_noise():
+    """Events less than 20x the baseline noise above the baseline are treated as
+    no events, so a noise-only track (or the wrong channel) is not split at
+    random noise peaks. Real sync tracks clear this by >1000x.
     """
-    path = make_arf(pulse_entry(dips=()))
-    result = trials(path, sync_thresh=1.0)
-    assert [t.stimulus_start for t in result] == [
-        offset - 1 for _, _, offset in STIMULI
-    ], "PINNED: reported at the end of each pulse"
+    rng = np.random.default_rng(0)
+    x = rng.normal(0, 5, 100000)
+    assert detect(x).size == 0, "noise alone has no events"
+    # the baseline is the 5th percentile, ~1.6 SD below the mean
+    x[50000:50010] += 50  # ~12 SD above baseline: too close to call
+    assert detect(x).size == 0, "an event below 20x noise is rejected"
+    x[50000:50010] += 150  # ~42 SD above baseline
+    assert detect(x).tolist() == [50000], "an event above 20x noise is kept"
 
 
-@pytest.mark.parametrize("sync_thresh", [3.0, 30.0])
-def test_pulses_not_detected_at_higher_thresholds(make_arf, sync_thresh):
-    """PINNED BUG (see TODO.md): 0.5 s pulses every 2 s are about 1.9 SD high,
-    so at sync_thresh 3 or the script default of 30 nothing is detected. With
-    no clicks, match_clicks indexes an empty array.
-    """
-    with pytest.raises(IndexError):
-        trials(make_arf(pulse_entry()), sync_thresh=sync_thresh)
-
-
-def test_long_pulses_need_threshold_below_one(make_arf):
-    """PINNED BUG (see TODO.md): pulses that fill most of the track are only
-    about 0.7 SD high. sync_thresh=1 detects nothing; 0.5 works.
-    """
-    path = make_arf(pulse_entry(LONG_STIMULI, 300000))
-    with pytest.raises(IndexError):
-        trials(path, sync_thresh=1.0)
-    result = trials(path, sync_thresh=0.5)
-    assert [t.stimulus_start for t in result] == [30000, 117000, 204000], (
-        "detected at each rising edge at sync_thresh=0.5"
-    )
+def detect(x, thresh=0.5):
+    return kilo.detect_sync_onsets(x, thresh)

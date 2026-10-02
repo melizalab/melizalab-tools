@@ -30,8 +30,6 @@ from conftest import (
 
 from dlab import kilo
 
-# the default of group-kilo-spikes --sync-thresh, which is what users run
-DEFAULT_SYNC_THRESH = 30.0
 STIMULI = [
     (name, 30000 + i * 87000, 30000 + i * 87000 + 60000)
     for i, name in enumerate("abcd")
@@ -41,11 +39,6 @@ DURATIONS = {name: 2.0 for name, _, _ in STIMULI}
 # where a real pulse's flat top first dips (P352: 40-222 samples after onset)
 PULSE_FIRST_DIP = 100
 
-PULSES_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="pulses aren't detected at the default threshold, and are "
-    "reported late where they are",
-)
 METADATA_XFAIL = pytest.mark.xfail(
     strict=True,
     reason="jpresent sends no metadata message (by design), and entry_metadata "
@@ -94,25 +87,21 @@ def build(make_arf, tmp_path, combo, source, missing=()):
 
 def split(path, log):
     with arf.open_file(path, "r") as fp:
-        return kilo.oeaudio_to_trials(
-            fp, StubFinder(DURATIONS), SYNC, DEFAULT_SYNC_THRESH, oeaudio_log=log
-        )
+        return kilo.oeaudio_to_trials(fp, StubFinder(DURATIONS), SYNC, oeaudio_log=log)
 
 
 CASES = [
     pytest.param("oeaudio-clicks", "messages", id="oeaudio-clicks"),
     pytest.param("oeaudio-clicks", "log", id="oeaudio-clicks-log"),
-    pytest.param("oeaudio-pulses", "messages", id="oeaudio-pulses", marks=PULSES_XFAIL),
-    pytest.param("oeaudio-pulses", "log", id="oeaudio-pulses-log", marks=PULSES_XFAIL),
-    pytest.param(
-        "jpresent-pulses", "messages", id="jpresent-pulses", marks=PULSES_XFAIL
-    ),
+    pytest.param("oeaudio-pulses", "messages", id="oeaudio-pulses"),
+    pytest.param("oeaudio-pulses", "log", id="oeaudio-pulses-log"),
+    pytest.param("jpresent-pulses", "messages", id="jpresent-pulses"),
 ]
 
 
 @pytest.mark.parametrize("combo,source", CASES)
 def test_one_trial_per_stimulus_at_sync_onset(make_arf, tmp_path, combo, source):
-    """At the script's default settings, there is one trial per stimulus, in
+    """At the default threshold, there is one trial per stimulus, in
     presentation order, starting within 2 samples of the sync onset and lasting
     the stimulus duration.
     """

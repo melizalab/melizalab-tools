@@ -164,6 +164,38 @@ def entry_metadata(entry):
             return metadata
 
 
+def detect_sync_onsets(
+    data: np.ndarray, thresh: float = 0.5, min_snr: float = 20.0
+) -> np.ndarray:
+    """Returns the sample indices where a sync signal rises through a threshold.
+
+    The threshold is set `thresh` of the way from the baseline (5th percentile)
+    to the peak (maximum) of the signal. This works for brief clicks and for
+    pulses that stay high for the duration of the stimulus, however long they
+    are, as long as the signal is high less than 95% of the time. The onset is
+    the first sample at or above the threshold. A pulse already high at the
+    start of the data has no onset.
+
+    Sync events should be unambiguous, so if the peak is less than
+    `min_snr` times the baseline noise (a robust SD of the samples below the
+    threshold) above the baseline, the signal is treated as having no events
+    and an empty array is returned.
+
+    """
+    if not 0 < thresh < 1:
+        raise ValueError(f"sync threshold must be between 0 and 1 (got {thresh})")
+    baseline = np.percentile(data, 5)
+    peak = data.max()
+    level = baseline + thresh * (peak - baseline)
+    below = data[data < level].astype("d")
+    noise = 1.4826 * np.median(np.abs(below - np.median(below)))
+    if peak - baseline < min_snr * noise:
+        log.debug("    - sync peak is only %.1f x the noise", (peak - baseline) / noise)
+        return np.array([], dtype=int)
+    above = data >= level
+    return np.flatnonzero(~above[:-1] & above[1:]) + 1
+
+
 class StimulusFinder:
     """Looks up stimuli using neurobank and/or files in a local directory"""
 
@@ -196,7 +228,7 @@ def oeaudio_to_trials(
     data_file: h5.File,
     stim_finder: StimulusFinder,
     sync_dset: str,
-    sync_thresh: float = 1.0,
+    sync_thresh: float = 0.5,
     prepad: float = 1.0,
     *,
     oeaudio_log: Path | None,
@@ -207,10 +239,13 @@ def oeaudio_to_trials(
     the stimuli. The stimulus presentation script sends network events to
     open-ephys to mark the start and stop of each stimulus. There is typically a
     significant lag between the 'start' event and the onset of the stimulus, due
-    to buffering of the audio playback. However, the oeaudio-present script will
-    play a synchronization click on a second channel by default. As long as the
-    user remembers to record this channel, it can be used to correct the onset
-    and offset values.
+    to buffering of the audio playback. However, the presentation script will
+    play a synchronization signal on a second channel: a brief click at each
+    stimulus onset (old style), or a pulse that stays high for the duration of
+    the stimulus (new style). As long as the user remembers to record this
+    channel, it can be used to correct the onset values. `sync_thresh` sets the
+    detection threshold as a fraction of the way from the sync channel's
+    baseline to its peak (see detect_sync_onsets).
 
     The continuous recording is broken up into trials based on the stimulus
     presentation, such that each trial encompasses one and only one stimulus.
@@ -223,7 +258,6 @@ def oeaudio_to_trials(
     from itertools import zip_longest
 
     expt_start = None
-    det = qs.detector(sync_thresh, 10)
     trials = []
 
     for entry_num, entry in iter_entries(data_file):
@@ -244,10 +278,12 @@ def oeaudio_to_trials(
                 f"unable to find sync track. Use --sync to configure. Options are: {available_tracks}"
             ) from err
 
-        sync_data = sync[:].astype("d")
-        det.scale_thresh(sync_data.mean(), sync_data.std())
-        stim_onsets = np.asarray(det(sync_data))
-        log.info("    - detected %d clicks", stim_onsets.size)
+        stim_onsets = detect_sync_onsets(sync[:], sync_thresh)
+        log.info("    - detected %d sync events", stim_onsets.size)
+        if stim_onsets.size == 0:
+            raise RuntimeError(
+                f"no sync events detected in '{sync_dset}'. Check --sync and --sync-thresh."
+            )
         dset_offset = sync.attrs["offset"]
         dset_end = sync.size
         sampling_rate = sync.attrs["sampling_rate"]
@@ -422,9 +458,10 @@ def group_spikes_script(argv=None):
     )
     p.add_argument(
         "--sync-thresh",
-        default=30.0,
+        default=0.5,
         type=float,
-        help="threshold (z-score) for detecting sync clicks (default %(default)0.1f)",
+        help="threshold for detecting sync events, as a fraction of the way from the "
+        "sync channel's baseline to its peak (default %(default)0.2f)",
     )
     p.add_argument(
         "--oeaudio-log",
