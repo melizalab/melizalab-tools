@@ -3,6 +3,11 @@
 Suspected bugs found while writing tests. Current behavior is pinned by tests
 whose docstrings start with `PINNED`; when fixing one, update that test.
 
+`tests/test_kilo_pipeline.py` states what should work for each supported
+presenter/sync combination (oeaudio-present with clicks or pulses, jpresent
+with pulses). Cells that don't work yet are strict xfails; remove the marker
+when a fix makes one pass.
+
 ## kilo.py
 
 - [ ] `match_clicks`: a stimulus logged before the first click gets
@@ -14,7 +19,63 @@ whose docstrings start with `PINNED`; when fixing one, update that test.
   (`test_oeaudio_log_start_before_acquisition_raises_typeerror`)
 - [ ] `entry_metadata` returns `None` if the stim dataset has no `metadata:`
   message; `pprox.trial_iterator` would later fail on `None["sampling_rate"]`.
-  (not yet tested; tier 2)
+  jpresent never sends one (by design: its relay converts jack MIDI to zmq
+  messages), so this happens for every jpresent recording, e.g. P352. It
+  should fall back to the name and sampling rate.
+  (`test_entry_metadata_without_metadata_message_returns_none`,
+  `TestSustainedPulses::test_no_metadata_message`)
+- [ ] `oeaudio_to_trials` computes `stim_sample_offset` (the recording's first
+  sample number) but never uses it. Message `start` values are open-ephys
+  sample numbers; click times are sync-track indices. When the counts match
+  this doesn't matter, but when `match_clicks` has to repair a missed click,
+  every stimulus is compared with the wrong click.
+  (`test_trials_missing_click_with_real_sample_numbering_crashes`)
+  Confirmed in both example recordings: message times include the first
+  sample number (48114176 in E69, 2048 in P352).
+- [ ] Related: when `match_clicks` returns fewer stimuli than clicks,
+  `zip_longest` pads the stimulus list with an int, and the loop crashes with
+  `AttributeError: 'int' object has no attribute 'name'` instead of a clear
+  error. (same test)
+- [ ] Sync detection does not work for sustained pulses (new style, e.g.
+  examples/P352_1_1.arf), only for brief clicks (old style, E69_1_1.arf).
+  Two separate problems:
+  - The threshold is in SDs of the whole track (`det.scale_thresh(mean, std)`).
+    Long pulses inflate the SD: in P352 the pulse top is 0.85 SD above the
+    mean, so the default `--sync-thresh 30` (and even 1) detects nothing; 0.5
+    finds all 1300 pulses.
+  - quickspikes reports an event at the last sample before the signal first
+    drops below its peak. P352's pulses are flat at the ADC ceiling (30083),
+    so onsets are reported where the plateau first dips: 40-222 samples
+    (1.3-7.4 ms) after the rising edge. A plateau with no dip is reported at
+    the end of the pulse.
+  Detecting rising edges against a threshold relative to the track's range
+  would fix both. (`test_pulse_*`, `TestSustainedPulses`)
+- [ ] When no clicks are detected, `match_clicks` fails with `IndexError`
+  (indexing an empty array) instead of a clear error. (same tests)
+- [ ] `match_clicks` assumes each click comes *before* its start message. In
+  both example recordings it comes after: ~0.4 s in E69, ~0.25 s in P352
+  (audio buffering). So when a sync event is missed, the wrong stimulus is
+  dropped and later trials are silently mislabeled, even with the first sample
+  number subtracted (`test_trials_missing_click_mislabels_trials`). Matching
+  each sync event to the last message before it would fit the data.
+  (`test_clicks_follow_start_messages`, `test_pulses_follow_start_messages`)
+- [ ] `oeaudio_to_trials` defaults to `sync_thresh=1.0`, but the script's
+  `--sync-thresh` defaults to 30. All sync data should be high enough
+  amplitude to be unambiguous, so the default should just work.
+- [ ] Later (pprox generation pass): process jpresent's `condition_start` /
+  `condition_stop` messages (half of P352's stimuli), which trials ignore now.
+- Note: both presenters now require MessageCenter logging, so
+  `--oeaudio-log` is only needed for pre-0.6 recordings and a few early 0.6+
+  ones recorded without it. The log route assumes open-ephys sample numbers
+  count from StartAcquisition (only matters for missed-sync repair).
+- [ ] Question: `oeaudio_log_stims` offsets are relative to StartAcquisition,
+  which is a third time origin. Does the repair path work with `--oeaudio-log`?
+- [ ] Question: `find_stim_dset` only matches `MessageCenter*`, the dataset
+  name arfx-oephys uses for GUI >= 0.6. Pre-0.6 recordings
+  (`Network_Events-..._TEXT_group_1`) need `--oeaudio-log`. Intended? E69
+  also has an empty `Message_Center-904.0_TEXT_group_1`, which doesn't match
+  either.
+  (`test_find_stim_dset_ignores_pre_0_6_dataset_name`)
 - [ ] `oeaudio_to_trials` is annotated `-> Iterator[Trial]` but returns a list,
   and `open(oeaudio_log)` is never closed.
 
