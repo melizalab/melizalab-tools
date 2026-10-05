@@ -470,12 +470,14 @@ def test_split_trial_split_without_events_is_nan():
 
 
 def test_split_trial_events_are_float32():
-    """PINNED: events come back as float32. Precision is about 1e-7 s for times near
-    the stimulus, which is fine, but this documents it.
+    """Events come back as float32. This is deliberate: trial events are relative
+    to the trial (kilo writes them relative to stimulus onset), so they are a few
+    seconds at most and float32 resolves them to ~1e-7 s, far below one sample
+    at 30 kHz. It would not be enough for times referenced to the start of an
+    hours-long recording (~0.5 ms at 2 h).
     """
-    # NB: pinned. Precision is ~1e-7 s for times within a few s of stimulus onset
     df = pprox.split_trial(make_trial([1.2]), two_splits)
-    assert df.events.iloc[0].dtype == np.float32, "PINNED: events are float32"
+    assert df.events.iloc[0].dtype == np.float32
 
 
 def test_split_trial_pads_last_interval_by_mean_gap():

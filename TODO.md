@@ -76,8 +76,10 @@ when a fix makes one pass.
   first split's start was dropped; one at a later split's start went to the
   previous split). Splits are now half-open: an event at a split's start
   belongs to that split.
-- [ ] `split_trial` casts events to float32 (`dtype="f"`). Fine within a few
-  seconds of stimulus onset (~1e-7 s), but worth a decision.
+- [x] `split_trial` casts events to float32 (`dtype="f"`). Decided to keep:
+  trial events are relative to the trial (seconds), where float32 resolves
+  ~1e-7 s, far below one 30 kHz sample. Not suitable for times referenced to
+  the start of a long recording (~0.5 ms at 2 h).
 - [x] `split_trial` emitted a pandas `ChainedAssignmentError` FutureWarning
   under some pandas 2.x versions. A false positive: results are the same under
   pandas 3.0.6. Rewritten without augmented assignment anyway.
