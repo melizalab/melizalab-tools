@@ -24,14 +24,25 @@ def psth(
     start: the start of the observation interval. If None, the time of the first spike is used.
     stop: the end of the observation interval. If None, the time of the last spike plus one bin is used.
 
-    Returns (spike counts, bin times)
+    The interval is divided into as many whole bins as fit between start and
+    stop (a partial bin at the end is dropped). Bins are half-open, [t, t +
+    binwidth), including the last, so a spike at `stop` is not counted. Spike
+    times that fall on a bin edge to within floating-point error (common when
+    times are multiples of the sampling interval) are counted in the bin that
+    starts there.
+
+    Returns (spike counts, bin start times)
     """
-    spikes = np.asarray(spikes)
+    spikes = np.asarray(spikes, dtype=float).ravel()
     t1 = start if start is not None else spikes.min()
     t2 = stop if stop is not None else (spikes.max() + binwidth)
-    bins = np.arange(t1, t2, binwidth)
-    counts, bins = np.histogram(spikes, bins)
-    return counts, bins[:-1]
+    # tolerance for floating-point error in bin positions, as a fraction of a bin
+    eps = 1e-9
+    nbins = max(0, int(np.floor((t2 - t1) / binwidth + eps)))
+    idx = np.floor((spikes - t1) / binwidth + eps).astype(int)
+    idx = idx[(idx >= 0) & (idx < nbins)]
+    counts = np.bincount(idx, minlength=nbins)
+    return counts, t1 + binwidth * np.arange(nbins)
 
 
 def rate(
@@ -53,7 +64,7 @@ def rate(
     Returns (rate estimate, bin times)
     """
     counts, bins = psth(spikes, binwidth, start=start, stop=stop)
-    return np.convolve(counts, kernel, mode="same"), bins
+    return np.convolve(counts, np.asarray(kernel, dtype=float), mode="same"), bins
 
 
 @dataclass

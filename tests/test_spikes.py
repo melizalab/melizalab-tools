@@ -83,20 +83,44 @@ def test_save_waveforms_checks_spike_count(tmp_path):
 
 
 def test_psth_values():
-    """Bins are left-closed: a spike on a bin edge counts in the bin it starts.
-    Bin times are the left edges."""
+    """Bins are half-open: a spike on a bin edge counts in the bin it starts.
+    Bin times are the left edges, and the bins cover start to stop."""
     counts, bins = spikes.psth([0.0, 0.1, 0.15, 0.25], 0.1, start=0.0, stop=0.4)
-    assert bins == pytest.approx([0.0, 0.1, 0.2])
-    assert counts.tolist() == [1, 2, 1]
+    assert bins == pytest.approx([0.0, 0.1, 0.2, 0.3])
+    assert counts.tolist() == [1, 2, 1, 0]
 
 
-def test_psth_drops_last_bin_of_interval():
-    """PINNED BUG (see TODO.md): the bins stop one short of `stop`. With
-    start=0, stop=1 and 0.1 s bins there are only 9 bins, covering 0-0.9 s, so a
-    spike at 0.95 s is not counted."""
+def test_psth_covers_last_bin():
+    """The last bin of the interval is included (it used to be dropped, losing
+    spikes between 0.9 and 1.0 s here)."""
     counts, bins = spikes.psth([0.95], 0.1, start=0.0, stop=1.0)
-    assert bins.size == 9, "PINNED: should be 10 bins"
-    assert counts.sum() == 0, "PINNED: spike in the last bin is lost"
+    assert bins.size == 10
+    assert counts.tolist() == [0] * 9 + [1]
+
+
+def test_psth_spike_at_stop_not_counted():
+    """The last bin is half-open too, so a spike at `stop` is outside the
+    interval."""
+    counts, _ = spikes.psth([0.5, 1.0], 0.1, start=0.0, stop=1.0)
+    assert counts.sum() == 1
+
+
+def test_psth_partial_bin_dropped():
+    """Only whole bins are used: a partial bin at the end is dropped."""
+    counts, bins = spikes.psth([0.92], 0.1, start=0.0, stop=0.95)
+    assert bins.size == 9
+    assert counts.sum() == 0
+
+
+def test_psth_sample_quantized_spike_times():
+    """Spike times are multiples of the sampling interval, so many fall exactly
+    on bin edges. With a spike at every sample of a 30 kHz recording, every
+    1 ms bin must hold exactly 30, whatever floating-point error there is in
+    the times or the bin edges."""
+    times = np.arange(30000) / 30000
+    counts, bins = spikes.psth(times, 0.001, start=0.0, stop=1.0)
+    assert bins.size == 1000
+    assert (counts == 30).all()
 
 
 def test_rate_is_smoothed_psth():

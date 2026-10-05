@@ -44,7 +44,7 @@ def spectrogram(
 
 
 def simple_axes(*axes):
-    """Simple axes: only bottom and right lines shown"""
+    """Simple axes: only bottom and left lines shown"""
     for ax in axes:
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)

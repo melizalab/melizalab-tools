@@ -31,15 +31,15 @@ class ParseKeyVal(argparse.Action):
         except (ValueError, SyntaxError):
             return value
 
-    def __call__(self, parser, namespace, arg, option_string=None):
-        kv = getattr(namespace, self.dest)
-        if kv is None:
-            kv = dict()
-        if not arg.count("=") == 1:
-            raise ValueError(f"{arg} argument badly formed; needs key=value")
-        else:
-            key, val = arg.split("=")
-            kv[key] = self.parse_value(val)
+    def __call__(self, parser, namespace, values, option_string=None):
+        # copy, so a default dict is not modified
+        kv = dict(getattr(namespace, self.dest) or {})
+        if not values.count("=") == 1:
+            raise argparse.ArgumentError(
+                self, f"{values} argument badly formed; needs key=value"
+            )
+        key, val = values.split("=")
+        kv[key] = self.parse_value(val)
         setattr(namespace, self.dest, kv)
 
 

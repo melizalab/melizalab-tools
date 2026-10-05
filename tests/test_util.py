@@ -32,23 +32,24 @@ def test_parse_key_val_without_arguments():
     assert make_parser().parse_args([]).meta is None
 
 
-def test_parse_key_val_badly_formed():
-    """An argument without exactly one '=' raises ValueError (not an argparse
-    usage error)."""
+def test_parse_key_val_badly_formed(capsys):
+    """An argument without exactly one '=' is an argparse usage error."""
     import pytest
 
     for arg in ("noequals", "a=b=c"):
-        with pytest.raises(ValueError, match="badly formed"):
+        with pytest.raises(SystemExit):
             make_parser().parse_args(["-k", arg])
+        assert "badly formed" in capsys.readouterr().err
 
 
-def test_parse_key_val_shares_mutable_default():
-    """PINNED BUG (see TODO.md): with default=dict(), as the docstring suggests,
-    the action updates the default in place, so values leak into later parses
-    with the same parser."""
-    p = make_parser(default=dict())
-    p.parse_args(["-k", "a=1"])
-    assert p.parse_args([]).meta == {"a": 1}, "PINNED: should be {}"
+def test_parse_key_val_does_not_modify_default():
+    """With default=dict(), as the docstring suggests, values from one parse
+    don't leak into the default (they used to)."""
+    default = {"x": 0}
+    p = make_parser(default=default)
+    assert p.parse_args(["-k", "a=1"]).meta == {"x": 0, "a": 1}
+    assert p.parse_args([]).meta == {"x": 0}
+    assert default == {"x": 0}
 
 
 def test_json_serializable():

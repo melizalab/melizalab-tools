@@ -40,13 +40,26 @@ log = logging.getLogger("dlab")
 
 
 def get_interval(path: Path, dataset: str, interval_ms: Sequence[float]) -> Signal:
+    """Read the samples in interval_ms (start, stop) from dataset in an ARF file.
+
+    Integer samples are scaled to +/-1 (floating-point samples are assumed to
+    be scaled already). Raises ValueError if the interval is empty or extends
+    outside the dataset.
+
+    """
     import h5py as h5
 
     with h5.File(path, "r") as fp:
         dset = fp[dataset]
         sampling_rate = dset.attrs["sampling_rate"]
         start, stop, *_rest = (int(t * sampling_rate / 1000) for t in interval_ms)
-        data = dset[slice(start, stop)].astype("float32")
+        nsamples = dset.shape[0]
+        if not 0 <= start < stop <= nsamples:
+            raise ValueError(
+                f"interval {interval_ms} ms is outside {dataset} in {path} "
+                f"(0-{nsamples / sampling_rate * 1000:.1f} ms)"
+            )
+        data = ewave.rescale(dset[start:stop], "float32")
         return Signal(samples=data, sampling_rate=sampling_rate)
 
 

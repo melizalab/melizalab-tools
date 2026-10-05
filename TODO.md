@@ -86,12 +86,13 @@ when a fix makes one pass.
 
 ## spikes.py
 
-- [ ] `psth` drops the last bin of the interval: `np.arange(start, stop,
-  binwidth)` gives the *left* edges, but they are used as `np.histogram` bin
-  edges, so with start=0, stop=1 and 0.1 s bins there are 9 bins covering
-  0-0.9 s and spikes in 0.9-1.0 s are lost (and a spike exactly at the last
-  edge is counted, since numpy closes the final bin). `rate` inherits this.
-  (`test_psth_drops_last_bin_of_interval`)
+- [x] `psth` dropped the last bin of the interval, and spikes on bin edges
+  (common, since spike times are multiples of the sampling interval) could
+  land in the wrong bin through floating-point error in `np.arange` edges:
+  for a spike at every 30 kHz sample over 1 s in 1 ms bins, it returned 999
+  bins with counts of 29-31 and lost 29 spikes. Bins are now assigned by
+  index with a 1e-9 bin tolerance, all half-open, as many whole bins as fit
+  in [start, stop).
 - [ ] Question: with the `exponential` kernel (nonzero only for t < 0), `rate`
   puts each spike's contribution *before* the spike: for a spike at 1.0 s the
   rate is nonzero from 0.53 to 0.99 s and peaks at 0.9 s. A causal smoother
@@ -104,14 +105,16 @@ when a fix makes one pass.
 
 ## get_songs.py
 
-- [ ] `get_interval` converts int16 samples to float32 without scaling to
-  +/-1, so the script logs meaningless dBFS values ("RMS 78 dBFS") until it
-  rescales. The output level is right. An interval past the end of the data
-  is silently truncated.
+- [x] `get_interval` converted int16 samples to float32 without scaling to
+  +/-1, so the script logged meaningless dBFS values before rescaling (output
+  levels were right); now scaled with `ewave.rescale` (float samples, what our
+  software stores, are unchanged). An interval past the end of the data was
+  silently truncated; now an interval that is empty or not entirely inside
+  the dataset raises ValueError.
 
 ## plotting.py
 
-- [ ] `simple_axes` docstring says "only bottom and right lines shown"; it
+- [x] `simple_axes` docstring said "only bottom and right lines shown"; it
   shows bottom and left.
 
 ## signal.py
@@ -123,9 +126,7 @@ when a fix makes one pass.
 
 ## util.py
 
-- [ ] `ParseKeyVal` updates the parser's default dict in place, so with
-  `default=dict()` (as its docstring suggests) values leak into later parses.
-  It should copy. Badly formed arguments also raise `ValueError` instead of an
-  argparse usage error. (`test_parse_key_val_shares_mutable_default`)
-
-- [x] `all_same([])` raised `StopIteration`; now returns None.
+- [x] `ParseKeyVal` updated the parser's default dict in place, so values
+  leaked between parses; now copies it. Badly formed arguments are an
+  argparse usage error, and `__call__` matches `argparse.Action` (ty
+  invalid-method-override).
