@@ -93,10 +93,10 @@ when a fix makes one pass.
   bins with counts of 29-31 and lost 29 spikes. Bins are now assigned by
   index with a 1e-9 bin tolerance, all half-open, as many whole bins as fit
   in [start, stop).
-- [ ] Question: with the `exponential` kernel (nonzero only for t < 0), `rate`
-  puts each spike's contribution *before* the spike: for a spike at 1.0 s the
-  rate is nonzero from 0.53 to 0.99 s and peaks at 0.9 s. A causal smoother
-  would spread it after. Flipped kernel? (`test_rate_with_exponential_kernel_precedes_spike`)
+- [x] The `exponential` kernel (in `signal.smoothing_kernel`) was nonzero
+  only for t < 0, so with `rate` each spike raised the rate *before* it
+  (anti-causal). It is now causal by default: zero for t <= 0, peaking at
+  +bandwidth.
 
 - [x] `SpikeWaveforms` docstring said `waveforms` is `(npoints, nspikes)`, but
   `save_waveforms` requires `(nspikes, npoints)` (and the script produces that).

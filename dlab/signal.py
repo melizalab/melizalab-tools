@@ -110,6 +110,10 @@ def smoothing_kernel(
     bandwidth: the bandwidth of the kernel, in units of dt
     dt:        the time resolution of the kernel
 
+    The exponential kernel is causal: it is zero for t <= 0 and peaks at
+    t = bandwidth, so with spikes.rate each spike only raises the rate after it.
+    The other kernels are symmetric.
+
     Returns:
     window:    the window function, normalized such that sum(w)*dt = 1.0
     grid:      the time support of the window, centered around 0.0
@@ -130,8 +134,9 @@ def smoothing_kernel(
     if name in ("gaussian", "normal"):
         W = np.exp(-xv * xv / 2)
     elif name == "exponential":
-        xv = np.minimum(xv, 0)
-        W = np.absolute(xv) * np.exp(xv)
+        # causal: nonzero only for t > 0, so a spike only affects later times
+        xv = np.maximum(xv, 0)
+        W = xv * np.exp(-xv)
     elif name in ("biweight", "quartic"):
         W = np.maximum(0, 1 - xv * xv) ** 2
     elif name == "triweight":

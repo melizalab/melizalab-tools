@@ -135,13 +135,12 @@ def test_rate_is_smoothed_psth():
     assert r == pytest.approx(np.convolve(counts, k, mode="same"))
 
 
-def test_rate_with_exponential_kernel_precedes_spike():
-    """PINNED (see TODO.md): with the one-sided exponential kernel, the rate for
-    a single spike at 1.0 s is nonzero only before the spike (0.53-0.99 s) and
-    peaks 0.1 s before it. A causal smoother would spread it after the spike."""
+def test_rate_with_exponential_kernel_follows_spike():
+    """With the causal exponential kernel, the rate for a single spike at 1.0 s
+    is zero up to the spike and peaks one bandwidth (0.1 s) after it."""
     from dlab.signal import smoothing_kernel
 
     k, _ = smoothing_kernel("exponential", 0.1, 0.01)
     r, t = spikes.rate([1.0], 0.01, k, start=0.0, stop=2.0)
-    assert np.allclose(r[t > 1.0], 0), "PINNED: nothing after the spike"
-    assert t[r.argmax()] == pytest.approx(0.9), "PINNED: peaks before the spike"
+    assert np.allclose(r[t <= 1.0], 0), "nothing before the spike"
+    assert t[r.argmax()] == pytest.approx(1.1), "peaks after the spike"

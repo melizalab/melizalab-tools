@@ -149,12 +149,12 @@ def test_gaussian_kernel_extent():
     assert kt[-1] == pytest.approx(3.75 * bandwidth, abs=binsize)
 
 
-def test_exponential_kernel_is_one_sided():
-    """The exponential kernel is nonzero only for t < 0 and peaks at
-    -bandwidth."""
+def test_exponential_kernel_is_causal():
+    """The exponential kernel is nonzero only for t > 0 and peaks at
+    +bandwidth."""
     k, kt = signal.smoothing_kernel("exponential", bandwidth, binsize)
-    assert (k[kt >= 0] == 0).all()
-    assert kt[k.argmax()] == pytest.approx(-bandwidth)
+    assert (k[kt <= 0] == 0).all()
+    assert kt[k.argmax()] == pytest.approx(bandwidth)
 
 
 def test_kernel_falls_back_to_scipy_windows():
