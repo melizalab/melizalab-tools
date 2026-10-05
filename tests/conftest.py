@@ -225,3 +225,62 @@ def add_entry(
             sampling_rate=sampling_rate,
         )
     return entry
+
+
+# --- kilosort output
+
+SPIKE = -1000 * np.exp(-0.5 * ((np.arange(60) - 20) / 4) ** 2)  # 2 ms, peak at 20
+
+
+def make_kilosort_dir(
+    path, clusters, *, nsamples, nchannels=4, sampling_rate=SAMPLING_RATE, seed=0
+):
+    """Write the kilosort/phy output group-kilo-spikes reads, and return path.
+
+    clusters: {cluster_id: dict(times=spike samples, group="good"|"mua"|"noise",
+    ch=channel, amplitude=scale of the spike shape, default 1)}. Each spike is
+    added to the whitened data (temp_wh.dat) on its cluster's channel, with
+    its trough SPIKE.argmin() samples after the spike time. Columns of
+    cluster_info.tsv that the script reads are filled in.
+    """
+    import pandas as pd
+
+    path.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed)
+    data = rng.normal(0, 20, (nsamples, nchannels))
+    times, ids, rows = [], [], []
+    for cid, spec in clusters.items():
+        t = np.asarray(spec["times"], dtype="int64")
+        for s in t:
+            data[s - SPIKE.argmin() : s - SPIKE.argmin() + SPIKE.size, spec["ch"]] += (
+                spec.get("amplitude", 1) * SPIKE
+            )
+        times.append(t)
+        ids.append(np.full(t.size, cid))
+        rows.append(
+            dict(
+                cluster_id=cid,
+                Amplitude=50.0 + cid,
+                ContamPct=1.0 * cid,
+                ch=spec["ch"],
+                depth=100.0 * spec["ch"],
+                group=spec["group"],
+                n_spikes=t.size,
+            )
+        )
+    order = np.argsort(np.concatenate(times), kind="stable")
+    np.save(path / "spike_times.npy", np.concatenate(times)[order][:, None])
+    np.save(path / "spike_clusters.npy", np.concatenate(ids)[order])
+    pd.DataFrame(rows).set_index("cluster_id").to_csv(
+        path / "cluster_info.tsv", sep="\t"
+    )
+    np.round(data).astype("int16").tofile(path / "temp_wh.dat")
+    (path / "params.py").write_text(
+        f"dat_path = 'temp_wh.dat'\n"
+        f"n_channels_dat = {nchannels}\n"
+        f"dtype = 'int16'\n"
+        f"offset = 0\n"
+        f"sample_rate = {sampling_rate:.1f}\n"
+        f"hp_filtered = True\n"
+    )
+    return path

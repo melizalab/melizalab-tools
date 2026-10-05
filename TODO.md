@@ -65,6 +65,25 @@ when a fix makes one pass.
 - [ ] Compare the end-to-end output of `group-kilo-spikes` (pprox and waveform
   files) against known-good results for some example recordings, to be copied
   to examples/.
+- [ ] The artifact check calls `input()` ("Press any key to continue") when
+  more than half a cluster's spikes look like artifacts, which blocks
+  unattended runs. Make it a warning (or an option)?
+  (`test_too_many_artifacts_prompts_and_skips`)
+- [ ] When the recording isn't a local file, it is looked up with
+  `nbank.default_registry`, ignoring `--registry`.
+- [ ] `processed_by` uses argparse's `prog`, which depends on how the script is
+  invoked (`group-kilo-spikes` as a console script, `kilo.py` with
+  `python -m`). Set `prog` explicitly?
+- [ ] Question: spikes within 2 ms of the start or 5 ms of the end of the
+  recording are dropped from the pprox as well as the waveforms, and spikes
+  before the first trial are dropped from the pprox but kept in the waveforms.
+  Intended? (`test_spikes_too_close_to_edges_are_dropped`,
+  `test_spikes_before_first_trial_are_dropped`)
+- [ ] Question: spikes are assigned to trials with
+  `trials.recording_start.searchsorted(events.time)`, which assumes trial
+  starts increase through the file and share the kilosort sample frame. With
+  more than one entry, trial positions restart at 0 for each entry. Are
+  multi-entry ARF files ever sorted together?
 
 ## pprox.py
 
