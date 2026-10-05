@@ -38,14 +38,17 @@ when a fix makes one pass.
   `--sync-thresh` now takes that fraction; old z-score values are rejected.
   Old-style click onsets move by 0-2 samples (now the first sample over the
   midpoint, rather than the peak). No sync events is now a clear error.
+  Baseline and noise are estimated from ~1e6 samples: estimating them from
+  the whole track needed several GB for C180's 1.5 h recording.
 - Note: `--oeaudio-log` is only needed for the few GUI 0.6+ recordings made
   without MessageCenter logging (both presenters now require it). Earlier GUI
   versions kept the messages in the Network Events dataset.
-- [ ] The `--oeaudio-log` route assumes open-ephys sample numbers count from
-  StartAcquisition, so log times can be converted the same way as message
-  times. E69's first sample number (48114176, ~1604 s) fits that, but it
-  hasn't been checked against a real log file; a wrong origin would now give
-  a matching error rather than mislabeled trials.
+- [x] The `--oeaudio-log` route assumes open-ephys sample numbers count from
+  StartAcquisition, so log times can be converted like message times.
+  Confirmed with E79_1_1b.arf and its log (`TestPairedLog`): the log's
+  messages match the recording's MessageCenter exactly, log times are 40-70 ms
+  after the corresponding sample numbers, clicks follow logged starts by
+  ~0.36 s, and both routes give identical trials.
 - [x] `find_stim_dset` only matched `MessageCenter`, the dataset name for GUI
   >= 0.6, so earlier recordings (messages in `Network_Events-..._TEXT_...`)
   needed `--oeaudio-log`. Now matches both, skipping empty datasets (E69 has

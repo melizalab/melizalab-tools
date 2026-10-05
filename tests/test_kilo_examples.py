@@ -9,6 +9,11 @@ synthetic recordings in conftest.py.
 - E69_1_1.arf: GUI 0.5.3, old-style 2 ms clicks on a channel named "sync";
   messages in "Network_Events-104.0_TEXT_group_1"
 - P352_1_1.arf: GUI 1.0.2, sustained pulses on ADC3; messages in "MessageCenter"
+- E79_1_1b.arf with oeaudio_20260623-122822.log: GUI 1.0.2, oeaudio-present,
+  old-style clicks on ADC3; messages in "MessageCenter" and in the
+  open-ephys-audio log from the same session
+- C180_1_1.arf: GUI 1.0.2, oeaudio-present, 1.5 h and 1920 stimuli. Only the
+  old-style clicks were recorded (ADC5); ADC3, the default --sync, is flat
 
 Tests marked PINNED record current behavior that looks like a bug; see TODO.md.
 """
@@ -223,3 +228,119 @@ class TestSustainedPulses:
         assert [t.stimulus_name for t in result] == names
         lag = np.array([t.stimulus_start for t in result]) - rec.edges
         assert ((lag >= 0) & (lag <= 1)).all(), "each trial starts at its sync edge"
+
+
+E79_LOG = "oeaudio_20260623-122822.log"
+
+
+@requires("E79_1_1b.arf")
+@requires(E79_LOG)
+class TestPairedLog:
+    """A recording with both a MessageCenter dataset and the oeaudio log, so the
+    --oeaudio-log route can be checked against the messages."""
+
+    PATH = EXAMPLES / "E79_1_1b.arf"
+    LOG = EXAMPLES / E79_LOG
+
+    @pytest.fixture(scope="class")
+    def rec(self):
+        return Recording(self.PATH, "ADC3", "MessageCenter")
+
+    @pytest.fixture(scope="class")
+    def log_rows(self):
+        """(samples since StartAcquisition, message) for each line after it"""
+        import datetime
+
+        rows = []
+        with open(self.LOG) as fp:
+            for line in fp:
+                ts, message = line.strip().split(",", maxsplit=1)
+                t = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S.%f")
+                rows.append((t, message.strip('"')))
+        t0, first = rows[0]
+        assert first == "StartAcquisition"
+        return [((t - t0).total_seconds() * RATE, m) for t, m in rows[1:]]
+
+    def test_log_matches_recording(self, log_rows):
+        """The log has the same messages, in the same order, as the recording's
+        MessageCenter dataset (apart from StopRecord/StopAcquisition)."""
+        with h5py.File(self.PATH, "r") as fp:
+            recorded = [m for _, m in message_rows(only_entry(fp)["MessageCenter"])]
+        logged = [m for _, m in log_rows if m not in ("StopRecord", "StopAcquisition")]
+        assert logged == recorded
+
+    def test_log_times_share_open_ephys_origin(self, rec, log_rows):
+        """Log times, counted from StartAcquisition, are within 40-70 ms of the
+        open-ephys sample numbers of the same messages, so both count from the
+        start of acquisition and log times can be converted the same way."""
+        with h5py.File(self.PATH, "r") as fp:
+            recorded = message_rows(only_entry(fp)["MessageCenter"])
+        diff_ms = [
+            (logged - sample) / RATE * 1000
+            for (logged, _), (sample, _) in zip(
+                [r for r in log_rows if r[1].startswith("start ")],
+                [r for r in recorded if r[1].startswith("start ")],
+                strict=True,
+            )
+        ]
+        assert 30 < min(diff_ms) and max(diff_ms) < 80, "same origin, ~60 ms apart"
+
+    def test_clicks_follow_log_starts(self, rec, log_rows):
+        """Each click comes ~0.36 s after its logged start, so the log times can
+        be matched like message times."""
+        starts = np.array([s for s, m in log_rows if m.startswith("start ")])
+        lag = (rec.edges - (starts - rec.first_sample)) / RATE
+        assert ((lag > 0.3) & (lag < 0.45)).all(), "click lags log start by ~0.36 s"
+
+    def test_trials_same_from_log_and_messages(self):
+        """End to end, the log route gives exactly the trials the messages do."""
+        with h5py.File(self.PATH, "r") as fp:
+            names = [
+                Path(m[6:]).stem
+                for _, m in message_rows(only_entry(fp)["MessageCenter"])
+                if m.startswith("start ")
+            ]
+            finder = StubFinder(dict.fromkeys(names, 1.0))
+            from_messages = kilo.oeaudio_to_trials(fp, finder, "ADC3", oeaudio_log=None)
+            from_log = kilo.oeaudio_to_trials(fp, finder, "ADC3", oeaudio_log=self.LOG)
+        assert len(from_messages) == 110
+        assert from_log == from_messages
+
+    @pytest.mark.parametrize("missing", [0, 55, 109])
+    def test_missed_click_on_log_route(self, rec, missing):
+        """With log times, removing one click drops exactly that stimulus."""
+        with open(self.LOG) as fp:
+            stimuli = [
+                stim._replace(start=stim.start - rec.first_sample)
+                for stim in kilo.oeaudio_log_stims(fp, RATE)
+            ]
+        onsets = kilo.detect_sync_onsets(rec.sync)
+        out = kilo.match_clicks(stimuli, np.delete(onsets, missing))
+        assert out == stimuli[:missing] + stimuli[missing + 1 :]
+
+
+@requires("C180_1_1.arf")
+class TestLongRecording:
+    PATH = EXAMPLES / "C180_1_1.arf"
+
+    def test_default_sync_channel_has_no_events(self):
+        """ADC3 (the default --sync) was not recorded with a sync signal, so
+        splitting on it is a clear error naming the channel."""
+        with h5py.File(self.PATH, "r") as fp:
+            with pytest.raises(RuntimeError, match="no sync events detected in 'ADC3'"):
+                kilo.oeaudio_to_trials(fp, StubFinder({}), "ADC3", oeaudio_log=None)
+
+    def test_trials(self):
+        """End to end on the click channel: one trial per start message, in
+        order. This 160-million-sample track also checks that sync detection
+        doesn't need several float64 copies of it."""
+        with h5py.File(self.PATH, "r") as fp:
+            names = [
+                Path(m[6:]).stem
+                for _, m in message_rows(only_entry(fp)["MessageCenter"])
+                if m.startswith("start ")
+            ]
+            finder = StubFinder(dict.fromkeys(names, 1.0))
+            result = kilo.oeaudio_to_trials(fp, finder, "ADC5", oeaudio_log=None)
+        assert len(result) == 1920
+        assert [t.stimulus_name for t in result] == names

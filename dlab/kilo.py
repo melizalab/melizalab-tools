@@ -193,7 +193,8 @@ def detect_sync_onsets(
     the first sample at or above the threshold. A pulse already high at the
     start of the data has no onset.
 
-    Sync events should be unambiguous, so if the peak is less than
+    The baseline and noise are estimated from about a million evenly spaced
+    samples. Sync events should be unambiguous, so if the peak is less than
     `min_snr` times the baseline noise (a robust SD of the samples below the
     threshold) above the baseline, the signal is treated as having no events
     and an empty array is returned.
@@ -201,10 +202,13 @@ def detect_sync_onsets(
     """
     if not 0 < thresh < 1:
         raise ValueError(f"sync threshold must be between 0 and 1 (got {thresh})")
-    baseline = np.percentile(data, 5)
+    # baseline and noise are estimated from a subsample, which bounds memory use
+    # for long recordings; the peak and the crossings use every sample
+    sample = data[:: max(1, data.size // 1_000_000)]
+    baseline = np.percentile(sample, 5)
     peak = data.max()
     level = baseline + thresh * (peak - baseline)
-    below = data[data < level].astype("d")
+    below = sample[sample < level].astype("d")
     noise = 1.4826 * np.median(np.abs(below - np.median(below)))
     if peak - baseline < min_snr * noise:
         log.debug("    - sync peak is only %.1f x the noise", (peak - baseline) / noise)
