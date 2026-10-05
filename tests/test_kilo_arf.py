@@ -19,6 +19,7 @@ from conftest import (
     SAMPLING_RATE,
     SYNC,
     StubFinder,
+    oeaudio_log_text,
     oeaudio_messages,
 )
 
@@ -92,16 +93,21 @@ def test_find_stim_dset_absent(make_arf):
         assert kilo.find_stim_dset(fp["entry_0"]) is None
 
 
-def test_find_stim_dset_ignores_pre_0_6_dataset_name(make_arf):
-    """PINNED (see TODO.md): for GUI < 0.6, arfx-oephys names the message
-    dataset after the Network Events folder, which this does not match, so
-    those recordings need --oeaudio-log.
-    """
-    path = make_arf(one_entry(message_dset="Network_Events-104.0_TEXT_group_1"))
+def test_find_stim_dset_pre_0_6_dataset_name(make_arf):
+    """For GUI < 0.6, arfx-oephys names the message dataset after the Network
+    Events plugin's text channel; that is found too."""
+    name = "Network_Events-104.0_TEXT_group_1"
+    path = make_arf(one_entry(message_dset=name))
     with arf.open_file(path, "r") as fp:
-        assert kilo.find_stim_dset(fp["entry_0"]) is None, (
-            "PINNED: pre-0.6 message dataset is not recognised"
-        )
+        assert kilo.find_stim_dset(fp["entry_0"]).name.endswith(name)
+
+
+def test_find_stim_dset_skips_empty_datasets(make_arf):
+    """An empty message dataset (logging to it wasn't enabled) is skipped, so
+    the caller asks for the oeaudio log instead of finding no stimuli."""
+    path = make_arf(one_entry(messages=[]))
+    with arf.open_file(path, "r") as fp:
+        assert kilo.find_stim_dset(fp["entry_0"]) is None
 
 
 # --- entry_metadata
@@ -241,14 +247,11 @@ def test_trials_unknown_stimulus(make_arf):
 
 def test_trials_from_oeaudio_log(make_arf, tmp_path):
     """With oeaudio_log, stimulus names come from the log file instead of the
-    message dataset, which need not exist."""
+    message dataset, which need not exist. Log times count from
+    StartAcquisition, like open-ephys sample numbers."""
+    renamed = [(new, on, off) for new, (_, on, off) in zip("xyz", STIMULI, strict=True)]
     log = tmp_path / "oeaudio.log"
-    log.write_text(
-        '2026-06-17 13:00:00.000000,"StartAcquisition"\n'
-        '2026-06-17 13:00:01.020000,"start x.wav"\n'
-        '2026-06-17 13:00:03.020000,"start y.wav"\n'
-        '2026-06-17 13:00:05.020000,"start z.wav"\n'
-    )
+    log.write_text(oeaudio_log_text(oeaudio_messages(renamed)))
     finder = StubFinder({"x": 0.5, "y": 0.5, "z": 0.5})
     result = trials(make_arf(one_entry(messages=None)), finder, oeaudio_log=log)
     assert [t.stimulus_name for t in result] == ["x", "y", "z"]
@@ -262,37 +265,34 @@ def test_trials_more_clicks_than_stimuli(make_arf):
         trials(path)
 
 
-def test_trials_missing_click_mislabels_trials(make_arf):
-    """PINNED BUG (see TODO.md): when a sync event is missed, match_clicks pairs
-    each message with the nearest *preceding* sync event, but sync events
-    follow their messages. Even with the sample numbering problem removed
-    (first_sample=0), the wrong stimulus is dropped: c's sync event is labeled
-    b, silently.
+@pytest.mark.parametrize("first_sample", [0, FIRST_SAMPLE])
+def test_trials_missing_click_drops_that_stimulus(make_arf, first_sample):
+    """If a click is missed, that stimulus is dropped and the others keep their
+    own clicks. Message times are open-ephys sample numbers, which include the
+    recording's first sample number, so they are converted to sync-track
+    samples before matching.
     """
     path = make_arf(
         one_entry(
-            clicks=[30000, 150000],  # b's sync event is missing
-            first_sample=0,
-            messages=oeaudio_messages(STIMULI, first_sample=0),
+            clicks=[30000, 150000],  # b's click is missing
+            first_sample=first_sample,
+            messages=oeaudio_messages(STIMULI, first_sample=first_sample),
         )
     )
     result = trials(path)
     assert [(t.stimulus_name, t.stimulus_start) for t in result] == [
         ("a", 30000),
-        ("b", 150000),
-    ], "PINNED: should be a and c"
+        ("c", 150000),
+    ], "b should be dropped"
 
 
-def test_trials_missing_click_with_real_sample_numbering_is_an_error(make_arf):
-    """PINNED BUG (see TODO.md): message times are open-ephys sample numbers,
-    which start at the recording's first sample, but are compared to sync-track
-    indices without subtracting it. Every stimulus then matches the wrong click
-    and too few survive. That is now reported as an error (it used to crash
-    with an AttributeError), but the matching itself is still wrong.
-    """
-    path = make_arf(one_entry(clicks=[30000, 150000]))  # first_sample=FIRST_SAMPLE
-    with pytest.raises(RuntimeError, match="unable to match 2 sync events to 1"):
-        trials(path)
+def test_trials_messages_after_recording_are_an_error(make_arf):
+    """If message times don't line up with the sync track (here, all logged
+    after the last click), matching fails with a clear error rather than
+    mislabeling trials."""
+    late = oeaudio_messages(STIMULI, lead=-200000)  # messages 6.7 s after clicks
+    with pytest.raises(ValueError, match="comes before any stimulus"):
+        trials(make_arf(one_entry(messages=late)))
 
 
 # --- sync track styles

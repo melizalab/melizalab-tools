@@ -10,26 +10,26 @@ when a fix makes one pass.
 
 ## kilo.py
 
-- [ ] `match_clicks`: a stimulus logged before the first click gets
-  `stim_onsets[-1]` (the last click), because `searchsorted` returns 0 and
-  `idx - 1` wraps. The wrong stimulus is then dropped.
-  (`test_match_clicks_stimulus_before_first_click_matches_last_click`)
 - [x] `oeaudio_log_stims`: a `start` line before `StartAcquisition` raised
   `TypeError`; now a `ValueError` naming the line.
 - [x] `entry_metadata` returned `None` when the message dataset has no
   `metadata:` message, as in every jpresent recording (its relay converts jack
   MIDI to zmq messages and sends none). Now returns the entry name and
   sampling rate.
-- [ ] `oeaudio_to_trials` computes `stim_sample_offset` (the recording's first
-  sample number) but never uses it. Message `start` values are open-ephys
-  sample numbers; click times are sync-track indices. When the counts match
-  this doesn't matter, but when `match_clicks` has to repair a missed click,
-  every stimulus is compared with the wrong click.
-  (`test_trials_missing_click_with_real_sample_numbering_is_an_error`)
-  Confirmed in both example recordings: message times include the first
-  sample number (48114176 in E69, 2048 in P352).
+- [x] Missed-sync repair in `match_clicks` was wrong three ways: message
+  times (open-ephys sample numbers, which include the recording's first
+  sample number: 48114176 in E69, 2048 in P352) were compared with sync-track
+  indices; each sync event was assumed to precede its message, but it follows
+  it (~0.4 s in E69, ~0.25 s in P352, from audio buffering), so trials after
+  a missed sync event were silently mislabeled; and a message before the
+  first sync event wrapped to the last one. Now message times are converted
+  to sync-track samples, and each sync event is matched to the last message
+  at or before it; this runs even when the counts agree. A stimulus with no
+  sync event is dropped with a warning; a sync event before any message, or
+  two after the same message, is a ValueError.
 - [x] Related: when `match_clicks` returned fewer stimuli than clicks, the
-  loop crashed with `AttributeError`; now a `RuntimeError`.
+  loop crashed with `AttributeError`. `match_clicks` now returns one stimulus
+  per sync event or raises.
 - [x] Sync detection did not work for sustained pulses (the z-scored
   quickspikes detector found none in P352 at the default threshold, and found
   them 1.3-7.4 ms late at 0.5). Replaced by `detect_sync_onsets`: rising
@@ -38,25 +38,18 @@ when a fix makes one pass.
   `--sync-thresh` now takes that fraction; old z-score values are rejected.
   Old-style click onsets move by 0-2 samples (now the first sample over the
   midpoint, rather than the peak). No sync events is now a clear error.
-- [ ] `match_clicks` assumes each click comes *before* its start message. In
-  both example recordings it comes after: ~0.4 s in E69, ~0.25 s in P352
-  (audio buffering). So when a sync event is missed, the wrong stimulus is
-  dropped and later trials are silently mislabeled, even with the first sample
-  number subtracted (`test_trials_missing_click_mislabels_trials`). Matching
-  each sync event to the last message before it would fit the data.
-  (`test_clicks_follow_start_messages`, `test_pulses_follow_start_messages`)
-- Note: both presenters now require MessageCenter logging, so
-  `--oeaudio-log` is only needed for pre-0.6 recordings and a few early 0.6+
-  ones recorded without it. The log route assumes open-ephys sample numbers
-  count from StartAcquisition (only matters for missed-sync repair).
-- [ ] Question: `oeaudio_log_stims` offsets are relative to StartAcquisition,
-  which is a third time origin. Does the repair path work with `--oeaudio-log`?
-- [ ] Question: `find_stim_dset` only matches `MessageCenter*`, the dataset
-  name arfx-oephys uses for GUI >= 0.6. Pre-0.6 recordings
-  (`Network_Events-..._TEXT_group_1`) need `--oeaudio-log`. Intended? E69
-  also has an empty `Message_Center-904.0_TEXT_group_1`, which doesn't match
-  either.
-  (`test_find_stim_dset_ignores_pre_0_6_dataset_name`)
+- Note: `--oeaudio-log` is only needed for the few GUI 0.6+ recordings made
+  without MessageCenter logging (both presenters now require it). Earlier GUI
+  versions kept the messages in the Network Events dataset.
+- [ ] The `--oeaudio-log` route assumes open-ephys sample numbers count from
+  StartAcquisition, so log times can be converted the same way as message
+  times. E69's first sample number (48114176, ~1604 s) fits that, but it
+  hasn't been checked against a real log file; a wrong origin would now give
+  a matching error rather than mislabeled trials.
+- [x] `find_stim_dset` only matched `MessageCenter`, the dataset name for GUI
+  >= 0.6, so earlier recordings (messages in `Network_Events-..._TEXT_...`)
+  needed `--oeaudio-log`. Now matches both, skipping empty datasets (E69 has
+  an empty `Message_Center-904.0_TEXT_group_1`).
 - [x] `oeaudio_to_trials` was annotated `-> Iterator[Trial]` but returns a
   list, and never closed the oeaudio log file.
 

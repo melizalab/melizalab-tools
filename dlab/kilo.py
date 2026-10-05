@@ -123,10 +123,19 @@ def iter_entries(data_file):
 
 
 def find_stim_dset(entry):
-    """Returns the first dataset that matches 'MessageCenter'"""
-    rex = re.compile(r"MessageCenter")
+    """Returns the dataset with the network messages from the stimulus
+    presentation script, or None if there isn't one.
+
+    arfx-oephys names this dataset 'MessageCenter' for open-ephys GUI >= 0.6
+    and after the Network Events plugin's text channel (e.g.
+    'Network_Events-104.0_TEXT_group_1') for earlier versions. Empty datasets
+    are skipped: some recordings have an empty message dataset because logging
+    to it was not enabled.
+
+    """
+    rex = re.compile(r"MessageCenter|Network_Events-.*_TEXT_")
     for name in entry:
-        if rex.match(name) is not None:
+        if rex.match(name) is not None and entry[name].size > 0:
             log.debug("  - stim log dataset: %s", name)
             return entry[name]
 
@@ -295,7 +304,7 @@ def oeaudio_to_trials(
         dset_offset = sync.attrs["offset"]
         dset_end = sync.size
         sampling_rate = sync.attrs["sampling_rate"]
-        stim_sample_offset = int(dset_offset * sampling_rate)
+        stim_sample_offset = round(dset_offset * sampling_rate)
         log.info("  - recording clock offset: %d", stim_sample_offset)
 
         if oeaudio_log is not None:
@@ -320,12 +329,14 @@ def oeaudio_to_trials(
             ) from err
         log.info("    - detected %d stimuli", len(entry_stimuli))
 
+        # message times are open-ephys sample numbers, which count from the
+        # start of acquisition; convert to samples from the start of the sync
+        # track. Log times are assumed to have the same origin (StartAcquisition).
+        entry_stimuli = [
+            stim._replace(start=stim.start - stim_sample_offset)
+            for stim in entry_stimuli
+        ]
         entry_stimuli = match_clicks(entry_stimuli, stim_onsets)
-        if len(entry_stimuli) != stim_onsets.size:
-            raise RuntimeError(
-                f"unable to match {stim_onsets.size} sync events to "
-                f"{len(entry_stimuli)} stimuli"
-            )
 
         padding_samples = int(prepad * sampling_rate)
         for stim, onset, offset in zip_longest(
@@ -354,49 +365,44 @@ def oeaudio_to_trials(
     return trials
 
 
-def match_clicks(entry_stimuli, stim_onsets):
-    """Match clicks in the sync track to the stimulus onset log.
+def match_clicks(
+    entry_stimuli: list[Stimulus], stim_onsets: np.ndarray
+) -> list[Stimulus]:
+    """Match sync events to stimuli, returning the stimulus for each sync event.
 
-    If the number of clicks matches the number of stimuli, nothing happens. If
-    there are more clicks than stimuli, this is an error. If there are more
-    stimuli than clicks, attempts to match each click with the next onset,
-    discarding any stimuli that don't have a matching click.
+    Stimulus start times and sync onsets must be in the same units (samples
+    from the start of the sync track). The presentation script sends each
+    stimulus's start message before the sound, and its sync event, comes out
+    of the audio buffer, so each sync event is matched to the last stimulus
+    that started at or before it. Stimuli with no sync event (e.g. a sync
+    event that was not detected) are dropped with a warning. A sync event
+    before any stimulus, or two sync events after the same stimulus, can't be
+    resolved and raise ValueError.
 
     """
-    if len(entry_stimuli) == stim_onsets.size:
-        logging.debug(" - Number of stimuli matches number of clicks")
-        return entry_stimuli
-    elif len(entry_stimuli) < stim_onsets.size:
-        logging.error(
-            "  - Number of stimuli (%d) is fewer than the number of clicks (%d)",
-            len(entry_stimuli),
-            stim_onsets.size,
-        )
+    starts = np.array([stim.start for stim in entry_stimuli])
+    if np.any(np.diff(starts) < 0):
+        raise ValueError("stimulus start times are not in order")
+    idx = np.searchsorted(starts, stim_onsets, side="right") - 1
+    if np.any(idx < 0):
         raise ValueError(
-            "  - Error: unable to match clicks in the sync track with the stimulus list. Either discard recording or change sync threshold."
+            f"sync event at sample {stim_onsets[idx < 0][0]} comes before any "
+            "stimulus. Check --sync-thresh, or discard the recording."
         )
-    logging.info(
-        "  - Number of stimuli (%d) is greater than number of clicks (%d). Trying to repair.",
-        len(entry_stimuli),
-        stim_onsets.size,
-    )
-    # this algorithm assumes that the click comes before the message, which is
-    # pretty reasonable given that network delays will be longer than analog
-    # signal propagation.
-    matched_stims = []
-    click_times = set(stim_onsets)
-    for i, stim in enumerate(entry_stimuli):
-        idx = np.searchsorted(stim_onsets, stim.start)
-        closest = stim_onsets[idx - 1]
-        logging.info(
-            "   - stim %d (start=%d) matched to click at %d", i, stim.start, closest
+    repeated = np.flatnonzero(np.diff(idx) == 0)
+    if repeated.size > 0:
+        i = idx[repeated[0]]
+        raise ValueError(
+            f"more than one sync event after stimulus {i} ({entry_stimuli[i].name}). "
+            "Check --sync-thresh, or discard the recording."
         )
-        if closest in click_times:
-            matched_stims.append(stim)
-            click_times.remove(closest)
-        else:
-            logging.info("     - this click was already used, dropping the trial")
-    return matched_stims
+    for i in sorted(set(range(len(entry_stimuli))) - set(idx.tolist())):
+        log.warning(
+            "  - no sync event for stimulus %d (%s); dropping the trial",
+            i,
+            entry_stimuli[i].name,
+        )
+    return [entry_stimuli[i] for i in idx]
 
 
 def assign_events_flat(events: pd.DataFrame, sampling_rate: float):

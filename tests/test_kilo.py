@@ -213,48 +213,59 @@ def names(stimuli):
     return [s.name for s in stimuli]
 
 
-def test_match_clicks_equal_counts_returns_input_unchanged():
-    """When there is one click per stimulus the list is returned as is (same object)."""
-    entry_stimuli = stims(100, 200)
-    out = kilo.match_clicks(entry_stimuli, np.array([90, 190]))
-    assert out is entry_stimuli, "equal counts should return the input as is"
+# Stimulus messages are sent before the sound (and its sync event) comes out of
+# the audio buffer, so in these tests each click follows its message.
 
 
-def test_match_clicks_fewer_stimuli_than_clicks_is_an_error():
-    """More clicks than logged stimuli cannot be repaired and raises ValueError."""
-    with pytest.raises(ValueError):
-        kilo.match_clicks(stims(100), np.array([90, 190]))
+def test_match_clicks_one_click_per_stimulus():
+    """Each click is matched to the stimulus whose message precedes it."""
+    out = kilo.match_clicks(stims(100, 200, 300), np.array([110, 210, 310]))
+    assert names(out) == ["a", "b", "c"]
 
 
-def test_match_clicks_drops_stimulus_whose_click_was_already_used():
-    """With more stimuli than clicks, each stimulus claims the nearest click before
-    its logged start. A later stimulus finding that click already taken is
-    dropped.
-    """
-    # c has no click of its own; the closest preceding click (190) is taken by b
-    out = kilo.match_clicks(stims(100, 200, 300), np.array([90, 190]))
-    assert names(out) == ["a", "b"], "c's click was already claimed by b"
+def test_match_clicks_message_at_click_sample_counts_as_preceding():
+    """A message logged at the same sample as the click matches it."""
+    out = kilo.match_clicks(stims(100, 200), np.array([100, 200]))
+    assert names(out) == ["a", "b"]
 
 
-def test_match_clicks_drops_the_stimulus_without_a_click():
-    """Repair of a missed click: a, b and c are logged but only two clicks were
-    detected, so the middle stimulus is dropped.
-    """
-    # b's message was logged but its click was never detected, so the click at
-    # 90 is claimed by a first and b is dropped
-    out = kilo.match_clicks(stims(100, 200, 300), np.array([90, 290]))
-    assert names(out) == ["a", "c"], "b has no click and should be dropped"
+@pytest.mark.parametrize(
+    "clicks,expected",
+    [
+        ([110, 310], ["a", "c"]),
+        ([210, 310], ["b", "c"]),
+        ([110, 210], ["a", "b"]),
+    ],
+    ids=["middle", "first", "last"],
+)
+def test_match_clicks_drops_stimulus_without_a_click(clicks, expected, caplog):
+    """A stimulus whose click was missed is dropped with a warning naming it;
+    the others keep their own clicks."""
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        out = kilo.match_clicks(stims(100, 200, 300), np.array(clicks))
+    assert names(out) == expected, "each click keeps its own stimulus"
+    (dropped,) = set("abc") - set(expected)
+    assert f"({dropped})" in caplog.text, "warning names the dropped stimulus"
 
 
-def test_match_clicks_stimulus_before_first_click_matches_last_click():
-    """PINNED BUG (see TODO.md): a stimulus logged before every click gets the last
-    click, because idx - 1 wraps to -1. The stimulus at 50 claims the click at 290,
-    so the one at 300 is dropped instead of the one at 50. Update when fixed.
-    """
-    out = kilo.match_clicks(stims(50, 200, 300), np.array([90, 290]))
-    assert names(out) == ["a", "b"], (
-        "PINNED: a wrongly claims the last click, so c is dropped"
-    )
+def test_match_clicks_extra_click_is_an_error():
+    """Two clicks after the same message can't be resolved."""
+    with pytest.raises(
+        ValueError, match=r"more than one sync event after stimulus 1 \(b\)"
+    ):
+        kilo.match_clicks(stims(100, 200, 300), np.array([110, 210, 250, 310]))
+
+
+def test_match_clicks_click_before_any_stimulus_is_an_error():
+    """A click before the first message can't belong to any stimulus."""
+    with pytest.raises(ValueError, match="sync event at sample 50 comes before"):
+        kilo.match_clicks(stims(100, 200), np.array([50, 110, 210]))
+
+
+def test_match_clicks_stimuli_must_be_in_order():
+    """Stimulus start times out of order indicate a problem with the log."""
+    with pytest.raises(ValueError, match="not in order"):
+        kilo.match_clicks(stims(200, 100), np.array([110, 210]))
 
 
 # --- trials_to_pprox

@@ -39,12 +39,6 @@ DURATIONS = {name: 2.0 for name, _, _ in STIMULI}
 # where a real pulse's flat top first dips (P352: 40-222 samples after onset)
 PULSE_FIRST_DIP = 100
 
-REPAIR_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="match_clicks ignores the first sample number and assumes sync "
-    "events precede their messages",
-)
-
 
 def build(make_arf, tmp_path, combo, source, missing=()):
     """Write a recording for `combo` and return (arf path, oeaudio log or None).
@@ -64,6 +58,9 @@ def build(make_arf, tmp_path, combo, source, missing=()):
             pulses=[(on, off) for _, on, off in present], dips=(PULSE_FIRST_DIP,)
         )
     log = None
+    message_dset = "MessageCenter"
+    if source == "network-events":  # GUI < 0.6
+        message_dset = "Network_Events-104.0_TEXT_group_1"
     if source == "log":
         log = tmp_path / "oeaudio.log"
         log.write_text(oeaudio_log_text(messages))
@@ -74,6 +71,7 @@ def build(make_arf, tmp_path, combo, source, missing=()):
             timestamp=1000.0,
             nsamples=NSAMPLES,
             messages=messages,
+            message_dset=message_dset,
             **sync_args,
         )
     )
@@ -87,6 +85,7 @@ def split(path, log):
 
 CASES = [
     pytest.param("oeaudio-clicks", "messages", id="oeaudio-clicks"),
+    pytest.param("oeaudio-clicks", "network-events", id="oeaudio-clicks-pre0.6"),
     pytest.param("oeaudio-clicks", "log", id="oeaudio-clicks-log"),
     pytest.param("oeaudio-pulses", "messages", id="oeaudio-pulses"),
     pytest.param("oeaudio-pulses", "log", id="oeaudio-pulses-log"),
@@ -128,7 +127,7 @@ def test_entry_metadata_has_sampling_rate(make_arf, tmp_path, combo, source):
 
 @pytest.mark.parametrize(
     "combo,source",
-    [pytest.param(*c.values, id=c.id, marks=REPAIR_XFAIL) for c in CASES],
+    CASES,
 )
 def test_missed_sync_event_drops_only_that_stimulus(make_arf, tmp_path, combo, source):
     """If one sync event is missed, that stimulus is dropped and the others

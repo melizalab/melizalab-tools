@@ -78,13 +78,31 @@ class TestOldStyleClicks:
     def rec(self):
         return Recording(self.PATH, "sync", "Network_Events-104.0_TEXT_group_1")
 
-    def test_message_dataset_not_found(self):
-        """PINNED (see TODO.md): neither message dataset in a GUI 0.5 recording
-        matches find_stim_dset ('Message_Center-904...' exists but is empty), so
-        these recordings need --oeaudio-log.
-        """
+    def test_message_dataset_found(self):
+        """GUI 0.5 recordings keep the messages in the Network Events dataset;
+        the empty 'Message_Center-904...' dataset is ignored."""
         with h5py.File(self.PATH, "r") as fp:
-            assert kilo.find_stim_dset(only_entry(fp)) is None, "PINNED: not found"
+            dset = kilo.find_stim_dset(only_entry(fp))
+            assert dset.name.endswith("Network_Events-104.0_TEXT_group_1")
+
+    def test_metadata_from_message(self):
+        """oeaudio-present's metadata message is read from that dataset."""
+        with h5py.File(self.PATH, "r") as fp:
+            meta = kilo.entry_metadata(only_entry(fp))
+        assert meta["animal"] == "E69" and meta["sampling_rate"] == RATE
+
+    def test_trials(self, rec):
+        """End to end, from the recording's own messages (no log needed): one
+        trial per start message, in order, each at its click."""
+        with h5py.File(self.PATH, "r") as fp:
+            entry = only_entry(fp)
+            rows = message_rows(entry["Network_Events-104.0_TEXT_group_1"])
+            names = [Path(m[6:]).stem for _, m in rows if m.startswith("start ")]
+            finder = StubFinder(dict.fromkeys(names, 1.0))
+            result = kilo.oeaudio_to_trials(fp, finder, "sync", oeaudio_log=None)
+        assert [t.stimulus_name for t in result] == names
+        lag = np.array([t.stimulus_start for t in result]) - rec.edges
+        assert ((lag >= 0) & (lag <= 1)).all(), "each trial starts at its click"
 
     def test_messages_use_open_ephys_sample_numbers(self, rec):
         """Message times include the recording's first sample number (48114176
@@ -178,6 +196,19 @@ class TestSustainedPulses:
         # the midpoint can be one sample later than the reference level on a
         # rise with an intermediate sample
         assert ((lag >= 0) & (lag <= 1)).all(), "detected at the rising edge"
+
+    def test_missed_pulse_drops_only_that_stimulus(self, rec):
+        """With real message timing, removing one detected pulse drops exactly
+        that stimulus, and every other stimulus keeps its own pulse."""
+        onsets = kilo.detect_sync_onsets(rec.sync)
+        with h5py.File(self.PATH, "r") as fp:
+            stimuli = [
+                stim._replace(start=stim.start - rec.first_sample)
+                for stim in kilo.oeaudio_stims(only_entry(fp)["MessageCenter"])
+            ]
+        missing = 100
+        out = kilo.match_clicks(stimuli, np.delete(onsets, missing))
+        assert out == stimuli[:missing] + stimuli[missing + 1 :]
 
     def test_trials(self, rec):
         """End to end at the default threshold: one trial per start message, in
