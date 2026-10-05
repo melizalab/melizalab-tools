@@ -48,7 +48,7 @@ def rate(
     binwidth: the bin duration (same units as spikes)
     kernel: the smoothing kernel. Sampling interval needs to be same as binwidth.
     start: the start of the observation interval. If None, the time of the first spike is used.
-    stop: the end of the observation interval. If None, the time of the last spike is used.
+    stop: the end of the observation interval. If None, the time of the last spike plus one bin is used.
 
     Returns (rate estimate, bin times)
     """
@@ -59,7 +59,7 @@ def rate(
 @dataclass
 class SpikeWaveforms:
     """
-    waveform: (npoints, nspikes) array
+    waveforms: (nspikes, npoints) array
     times: nspikes array (times of spikes in units of samples)
     sampling_rate: the sampling rate of the spikes and the spike times (in Hz)
     peak_index: the index corresponding to the time of the spike in the waveform
@@ -88,8 +88,8 @@ def save_waveforms(
     """
     spikes = np.asarray(waveforms.waveforms)
     times = np.asarray(waveforms.times)
-    ntimes, _nspikes = spikes.shape
-    if ntimes != times.size:
+    nspikes, _npoints = spikes.shape
+    if nspikes != times.size:
         raise ValueError(
             "number of rows in waveform array must match number of elements in times array"
         )

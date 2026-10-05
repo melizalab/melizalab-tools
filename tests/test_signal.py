@@ -66,3 +66,29 @@ def test_hp_filter(test_signal):
     assert filtered.sampling_rate == test_signal.sampling_rate
     assert filtered.duration == test_signal.duration
     assert np.abs(filtered.samples.mean()) < 0.001
+
+
+def test_ramp_signal_shapes_ends():
+    """The ramp takes the first and last samples to zero and leaves the middle
+    of the signal alone."""
+    sig = signal.Signal(np.ones(1000), 1000)
+    ramped = signal.ramp_signal(sig, duration_s=0.01)
+    assert ramped.samples[0] == pytest.approx(0) and ramped.samples[
+        -1
+    ] == pytest.approx(0)
+    assert (ramped.samples[10:-10] == 1).all(), "middle unchanged"
+    assert (sig.samples == 1).all(), "input not modified"
+
+
+def test_ramp_signal_shorter_than_one_sample():
+    """A ramp that rounds to zero samples leaves the signal unchanged (it used
+    to raise, because s[-0:] is the whole array)."""
+    sig = signal.Signal(np.ones(100), 1000)
+    assert (signal.ramp_signal(sig, duration_s=0.0001).samples == 1).all()
+
+
+@pytest.mark.parametrize("curve", ["", "AB", "D"])
+def test_abc_weighting_rejects_unknown_curves(curve):
+    """Only "A", "B" and "C" are accepted (substrings of "ABC" used to be)."""
+    with pytest.raises(ValueError):
+        signal.ABC_weighting(curve)

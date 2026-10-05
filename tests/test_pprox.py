@@ -373,12 +373,10 @@ def test_aggregate_events_applies_offsets_in_trial_order():
     )
 
 
-def test_aggregate_events_empty_collection_raises():
-    """PINNED BEHAVIOR (see TODO.md): aggregating a collection with no trials raises
-    ValueError from np.concatenate rather than returning an empty array.
-    """
-    with pytest.raises(ValueError):
-        pprox.aggregate_events(pprox.empty())
+def test_aggregate_events_empty_collection():
+    """A collection with no trials aggregates to an empty array."""
+    out = pprox.aggregate_events(pprox.empty())
+    assert out.size == 0 and out.dtype == float
 
 
 def test_unimplemented_stubs_return_none():
@@ -556,22 +554,20 @@ def test_split_trial_drops_events_before_stimulus_onset():
     )
 
 
-def test_split_trial_event_exactly_at_first_split_start_is_dropped():
-    """PINNED BUG? (see TODO.md): an event exactly at the start of the first split
-    is dropped, which is inconsistent with the next test.
-    """
+def test_split_trial_event_exactly_at_first_split_start_is_kept():
+    """Splits are half-open: an event exactly at the start of the first split
+    belongs to it, at time 0."""
     df = pprox.split_trial(make_trial([1.0, 1.2]), two_splits)
-    assert split_events(df)[0] == pytest.approx([0.2], abs=1e-6), (
-        "PINNED: event at the first split start is dropped"
+    assert split_events(df)[0] == pytest.approx([0.0, 0.2], abs=1e-6), (
+        "event at the first split start is kept"
     )
 
 
-def test_split_trial_event_exactly_at_later_split_start_goes_to_previous_split():
-    """PINNED BUG? (see TODO.md): an event exactly at a later split's start is
-    assigned to the previous split, at that split's end time.
-    """
+def test_split_trial_event_exactly_at_later_split_start_goes_to_that_split():
+    """Splits are half-open: an event exactly at a later split's start belongs
+    to that split, at time 0, not to the end of the previous one."""
     df = pprox.split_trial(make_trial([1.2, 2.0]), two_splits)
-    assert split_events(df)[0] == pytest.approx([0.2, 1.0], abs=1e-6), (
-        "PINNED: event at a later split start goes to the previous split"
+    assert split_events(df)[0] == pytest.approx([0.2], abs=1e-6)
+    assert split_events(df)[1] == pytest.approx([0.0], abs=1e-6), (
+        "event at a later split start goes to that split"
     )
-    assert split_events(df)[1] is None, "PINNED: so the later split is empty"

@@ -62,9 +62,11 @@ def __js_numpy_arr(arr):
 
 
 def all_same(seq):
-    """If all elements of seq are equal, returns the value, otherwise None"""
+    """If all elements of seq are equal, returns the value, otherwise None.
+
+    An empty sequence returns None."""
     it = iter(seq)
-    first = next(it)
+    first = next(it, None)
     for e in it:
         if e != first:
             return None

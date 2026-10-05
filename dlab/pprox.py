@@ -93,6 +93,8 @@ def aggregate_events(pprox: Collection) -> np.ndarray:
     all_events = [
         np.asarray(trial["events"]) + trial["offset"] for trial in pprox["pprox"]
     ]
+    if len(all_events) == 0:
+        return np.array([], dtype=float)
     return np.concatenate(all_events)
 
 
@@ -114,7 +116,8 @@ def split_trial(trial: Trial, split_fun: Callable[[str], pd.DataFrame]) -> pd.Da
 
     Returns a pandas DataFrame with one row per split. Each split contains the
     events between the start of the (split) stimulus and the start of the next
-    (split) stimulus. If there are no events in the interval, the `events` field
+    (split) stimulus (an event exactly at a split's start belongs to that
+    split). Events before the first split are dropped. If there are no events in the interval, the `events` field
     will be nan. The times are referenced to the start of the stimulus in that
     split (t=0). The stim_end field indicates when the stimulus ended (relative
     to start of the stimulus), and the interval_end field indicates when the
@@ -145,14 +148,14 @@ def split_trial(trial: Trial, split_fun: Callable[[str], pd.DataFrame]) -> pd.Da
     # then groups the spikes by split and merges this with the table of splits
     df = splits.join(
         spikes.groupby(
-            splits.stim_begin.searchsorted(spikes, side="left") - 1, group_keys=False
+            splits.stim_begin.searchsorted(spikes, side="right") - 1, group_keys=False
         )
         .apply(lambda x: x.to_numpy())
         .rename("events")
     )
     df["offset"] = trial["offset"] + df.stim_begin + stim_on
-    df["events"] -= df.stim_begin
-    df["stim_end"] -= df.stim_begin
-    df["interval_end"] -= df.stim_begin
+    df["events"] = df["events"] - df.stim_begin
+    df["stim_end"] = df["stim_end"] - df.stim_begin
+    df["interval_end"] = df["interval_end"] - df.stim_begin
     df["source_trial"] = trial["index"]
     return df.drop(columns=["stim_begin"]).rename_axis(index="interval").reset_index()

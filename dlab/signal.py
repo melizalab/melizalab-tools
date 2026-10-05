@@ -86,9 +86,10 @@ def ramp_signal(signal: Signal, duration_s: float = 0.002) -> Signal:
 
     s = signal.samples.copy()
     n = int(duration_s * signal.sampling_rate)
-    t = linspace(0, pi / 2, n)
-    s[:n] *= sin(t) ** 2
-    s[-n:] *= cos(t) ** 2
+    if n > 0:
+        t = linspace(0, pi / 2, n)
+        s[:n] *= sin(t) ** 2
+        s[-n:] *= cos(t) ** 2
     return Signal(
         name=signal.name,
         samples=s,
@@ -160,7 +161,7 @@ def ABC_weighting(curve="A"):
     """
     from scipy.signal import freqs, zpk2tf
 
-    if curve not in "ABC":
+    if curve not in ("A", "B", "C"):
         raise ValueError(f"Curve type {curve} not supported")
 
     # ANSI S1.4-1983 C weighting

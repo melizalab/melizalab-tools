@@ -152,14 +152,14 @@ def test_entry_metadata_without_any_rate(make_arf, caplog):
     assert "unable to infer sampling rate" in caplog.text
 
 
-def test_entry_metadata_without_metadata_message_returns_none(make_arf):
-    """PINNED BUG (see TODO.md): a message dataset with no metadata message
-    gives None, which group_spikes_script stores in entry_metadata and
-    pprox.trial_iterator later fails on.
+def test_entry_metadata_without_metadata_message(make_arf):
+    """With a message dataset but no metadata message (jpresent never sends
+    one), the entry name and the message dataset's sampling rate are returned.
     """
     path = make_arf(one_entry(messages=oeaudio_messages(STIMULI)))
     with arf.open_file(path, "r") as fp:
-        assert kilo.entry_metadata(fp["entry_0"]) is None, "PINNED: returns None"
+        meta = kilo.entry_metadata(fp["entry_0"])
+    assert meta == {"name": "/entry_0", "sampling_rate": SAMPLING_RATE}
 
 
 # --- oeaudio_to_trials
@@ -283,14 +283,15 @@ def test_trials_missing_click_mislabels_trials(make_arf):
     ], "PINNED: should be a and c"
 
 
-def test_trials_missing_click_with_real_sample_numbering_crashes(make_arf):
+def test_trials_missing_click_with_real_sample_numbering_is_an_error(make_arf):
     """PINNED BUG (see TODO.md): message times are open-ephys sample numbers,
     which start at the recording's first sample, but are compared to sync-track
-    indices without subtracting it. Every stimulus then matches the wrong click,
-    too few survive, and zip_longest pads the stimulus list with an int.
+    indices without subtracting it. Every stimulus then matches the wrong click
+    and too few survive. That is now reported as an error (it used to crash
+    with an AttributeError), but the matching itself is still wrong.
     """
     path = make_arf(one_entry(clicks=[30000, 150000]))  # first_sample=FIRST_SAMPLE
-    with pytest.raises(AttributeError, match="'int' object has no attribute 'name'"):
+    with pytest.raises(RuntimeError, match="unable to match 2 sync events to 1"):
         trials(path)
 
 

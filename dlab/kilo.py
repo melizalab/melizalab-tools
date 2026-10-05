@@ -101,6 +101,10 @@ def oeaudio_log_stims(
             continue
         m = re_start.match(message)
         if m is not None:
+            if start_acq_time is None:
+                raise ValueError(
+                    f"line {i}: stimulus started before StartAcquisition in the log"
+                )
             offset = (ts - start_acq_time).total_seconds() * sampling_rate
             stim_name = Path(m.group(1)).stem
             yield Stimulus(stim_name, int(offset))
@@ -131,8 +135,9 @@ def entry_metadata(entry):
     """Extracts metadata from an entry in an oeaudio-present experiment ARF file.
 
     Metadata are passed to open-ephys through the network events socket as a
-    json-encoded dictionary. There should be one and only one metadata message
-    per entry, so only the first is returned.
+    json-encoded dictionary. There should be at most one metadata message
+    per entry, so only the first is returned. If there is none (jpresent does
+    not send one), only the entry name and sampling rate are returned.
 
     """
     re_metadata = re.compile(r"metadata: (\{.*\})")
@@ -162,6 +167,9 @@ def entry_metadata(entry):
                 name=entry.name, sampling_rate=stim_dset.attrs["sampling_rate"]
             )
             return metadata
+    # jpresent does not send a metadata message
+    log.debug("  - no metadata message in %s", stim_dset.name)
+    return {"name": entry.name, "sampling_rate": stim_dset.attrs["sampling_rate"]}
 
 
 def detect_sync_onsets(
@@ -232,7 +240,7 @@ def oeaudio_to_trials(
     prepad: float = 1.0,
     *,
     oeaudio_log: Path | None,
-) -> Iterator[Trial]:
+) -> list[Trial]:
     """Extracts trial information from an oeaudio-present experiment ARF file
 
     When using oeaudio-present, a single recording is made in response to all
@@ -292,7 +300,8 @@ def oeaudio_to_trials(
 
         if oeaudio_log is not None:
             log.info("  - parsing stimulus log from %s", oeaudio_log)
-            entry_stimuli = list(oeaudio_log_stims(open(oeaudio_log), sampling_rate))
+            with open(oeaudio_log) as fp:
+                entry_stimuli = list(oeaudio_log_stims(fp, sampling_rate))
         else:
             stim_dset = find_stim_dset(entry)
             if stim_dset is None:
@@ -312,6 +321,11 @@ def oeaudio_to_trials(
         log.info("    - detected %d stimuli", len(entry_stimuli))
 
         entry_stimuli = match_clicks(entry_stimuli, stim_onsets)
+        if len(entry_stimuli) != stim_onsets.size:
+            raise RuntimeError(
+                f"unable to match {stim_onsets.size} sync events to "
+                f"{len(entry_stimuli)} stimuli"
+            )
 
         padding_samples = int(prepad * sampling_rate)
         for stim, onset, offset in zip_longest(

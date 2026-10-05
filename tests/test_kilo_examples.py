@@ -144,12 +144,14 @@ class TestSustainedPulses:
         with h5py.File(self.PATH, "r") as fp:
             assert kilo.find_stim_dset(only_entry(fp)).name.endswith("MessageCenter")
 
-    def test_no_metadata_message(self):
-        """PINNED BUG (see TODO.md): this recording has no metadata message, so
-        entry_metadata returns None.
+    def test_metadata_without_metadata_message(self):
+        """jpresent sends no metadata message, so entry_metadata returns just the
+        entry name and sampling rate.
         """
         with h5py.File(self.PATH, "r") as fp:
-            assert kilo.entry_metadata(only_entry(fp)) is None, "PINNED: None"
+            entry = only_entry(fp)
+            meta = kilo.entry_metadata(entry)
+            assert meta == {"name": entry.name, "sampling_rate": RATE}
 
     def test_pulse_shape(self, rec):
         """The measurements conftest.py models: baseline ~330, a flat top at

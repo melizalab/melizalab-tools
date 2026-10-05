@@ -120,13 +120,11 @@ def test_oeaudio_log_skips_bad_timestamps_with_warning(caplog):
     assert "error parsing" in caplog.text, "bad timestamp should be logged"
 
 
-def test_oeaudio_log_start_before_acquisition_raises_typeerror():
-    """PINNED BUG (see TODO.md): a 'start' line before StartAcquisition raises a
-    TypeError because the acquisition time is still None. A clearer error, or
-    skipping the line, would be better; update this test when fixed.
-    """
+def test_oeaudio_log_start_before_acquisition_is_an_error():
+    """A 'start' line before StartAcquisition can't be placed in time, so it is
+    a ValueError naming the line."""
     log = '2026-06-17 13:00:00.000000,"start early.wav"\n'
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="line 0: stimulus started before"):
         list(kilo.oeaudio_log_stims(io.StringIO(log), 1000))
 
 

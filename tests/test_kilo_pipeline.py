@@ -39,11 +39,6 @@ DURATIONS = {name: 2.0 for name, _, _ in STIMULI}
 # where a real pulse's flat top first dips (P352: 40-222 samples after onset)
 PULSE_FIRST_DIP = 100
 
-METADATA_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="jpresent sends no metadata message (by design), and entry_metadata "
-    "returns None when there isn't one",
-)
 REPAIR_XFAIL = pytest.mark.xfail(
     strict=True,
     reason="match_clicks ignores the first sample number and assumes sync "
@@ -117,9 +112,7 @@ def test_one_trial_per_stimulus_at_sync_onset(make_arf, tmp_path, combo, source)
     [
         pytest.param("oeaudio-clicks", "messages", id="oeaudio"),
         pytest.param("oeaudio-clicks", "log", id="oeaudio-log"),
-        pytest.param(
-            "jpresent-pulses", "messages", id="jpresent", marks=METADATA_XFAIL
-        ),
+        pytest.param("jpresent-pulses", "messages", id="jpresent"),
     ],
 )
 def test_entry_metadata_has_sampling_rate(make_arf, tmp_path, combo, source):

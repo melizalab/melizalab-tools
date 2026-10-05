@@ -14,28 +14,22 @@ when a fix makes one pass.
   `stim_onsets[-1]` (the last click), because `searchsorted` returns 0 and
   `idx - 1` wraps. The wrong stimulus is then dropped.
   (`test_match_clicks_stimulus_before_first_click_matches_last_click`)
-- [ ] `oeaudio_log_stims`: a `start` line before `StartAcquisition` raises
-  `TypeError` (`start_acq_time` is None) instead of a useful error.
-  (`test_oeaudio_log_start_before_acquisition_raises_typeerror`)
-- [ ] `entry_metadata` returns `None` if the stim dataset has no `metadata:`
-  message; `pprox.trial_iterator` would later fail on `None["sampling_rate"]`.
-  jpresent never sends one (by design: its relay converts jack MIDI to zmq
-  messages), so this happens for every jpresent recording, e.g. P352. It
-  should fall back to the name and sampling rate.
-  (`test_entry_metadata_without_metadata_message_returns_none`,
-  `TestSustainedPulses::test_no_metadata_message`)
+- [x] `oeaudio_log_stims`: a `start` line before `StartAcquisition` raised
+  `TypeError`; now a `ValueError` naming the line.
+- [x] `entry_metadata` returned `None` when the message dataset has no
+  `metadata:` message, as in every jpresent recording (its relay converts jack
+  MIDI to zmq messages and sends none). Now returns the entry name and
+  sampling rate.
 - [ ] `oeaudio_to_trials` computes `stim_sample_offset` (the recording's first
   sample number) but never uses it. Message `start` values are open-ephys
   sample numbers; click times are sync-track indices. When the counts match
   this doesn't matter, but when `match_clicks` has to repair a missed click,
   every stimulus is compared with the wrong click.
-  (`test_trials_missing_click_with_real_sample_numbering_crashes`)
+  (`test_trials_missing_click_with_real_sample_numbering_is_an_error`)
   Confirmed in both example recordings: message times include the first
   sample number (48114176 in E69, 2048 in P352).
-- [ ] Related: when `match_clicks` returns fewer stimuli than clicks,
-  `zip_longest` pads the stimulus list with an int, and the loop crashes with
-  `AttributeError: 'int' object has no attribute 'name'` instead of a clear
-  error. (same test)
+- [x] Related: when `match_clicks` returned fewer stimuli than clicks, the
+  loop crashed with `AttributeError`; now a `RuntimeError`.
 - [x] Sync detection did not work for sustained pulses (the z-scored
   quickspikes detector found none in P352 at the default threshold, and found
   them 1.3-7.4 ms late at 0.5). Replaced by `detect_sync_onsets`: rising
@@ -51,8 +45,6 @@ when a fix makes one pass.
   number subtracted (`test_trials_missing_click_mislabels_trials`). Matching
   each sync event to the last message before it would fit the data.
   (`test_clicks_follow_start_messages`, `test_pulses_follow_start_messages`)
-- [ ] Later (pprox generation pass): process jpresent's `condition_start` /
-  `condition_stop` messages (half of P352's stimuli), which trials ignore now.
 - Note: both presenters now require MessageCenter logging, so
   `--oeaudio-log` is only needed for pre-0.6 recordings and a few early 0.6+
   ones recorded without it. The log route assumes open-ephys sample numbers
@@ -65,38 +57,48 @@ when a fix makes one pass.
   also has an empty `Message_Center-904.0_TEXT_group_1`, which doesn't match
   either.
   (`test_find_stim_dset_ignores_pre_0_6_dataset_name`)
-- [ ] `oeaudio_to_trials` is annotated `-> Iterator[Trial]` but returns a list,
-  and `open(oeaudio_log)` is never closed.
+- [x] `oeaudio_to_trials` was annotated `-> Iterator[Trial]` but returns a
+  list, and never closed the oeaudio log file.
+
+## group-kilo-spikes (end to end)
+
+- [ ] Handle optogenetic stimulation when checking the full pipeline:
+  jpresent's `condition_start` / `condition_stop` messages (half of P352's
+  stimuli; trials ignore them now) and the separate opto pulse track. Start
+  from the existing patch (not yet in the repo).
+- [ ] Compare the end-to-end output of `group-kilo-spikes` (pprox and waveform
+  files) against known-good results for some example recordings, to be copied
+  to examples/.
 
 ## pprox.py
 
-- [ ] `split_trial` boundary handling is inconsistent: an event exactly at the
-  start of the first split is dropped, but one exactly at a later split's start
-  is assigned to the *previous* split.
-  (`test_split_trial_event_exactly_at_*`)
+- [x] `split_trial` boundary handling was inconsistent (an event exactly at the
+  first split's start was dropped; one at a later split's start went to the
+  previous split). Splits are now half-open: an event at a split's start
+  belongs to that split.
 - [ ] `split_trial` casts events to float32 (`dtype="f"`). Fine within a few
   seconds of stimulus onset (~1e-7 s), but worth a decision.
-- [ ] `split_trial` emits a pandas `ChainedAssignmentError` FutureWarning on
-  pandas 2.3.x (`df["interval_end"] -= df.stim_begin`). Not checked whether it
-  is harmful or a false positive.
-- [ ] `aggregate_events` on an empty collection raises `ValueError` from
-  `np.concatenate`. Decide whether it should return an empty array.
+- [x] `split_trial` emitted a pandas `ChainedAssignmentError` FutureWarning
+  under some pandas 2.x versions. A false positive: results are the same under
+  pandas 3.0.6. Rewritten without augmented assignment anyway.
+- [x] `aggregate_events` on an empty collection raised `ValueError`; now
+  returns an empty array.
 - [ ] `validate` and `combine_recordings` are `pass` stubs. Implement or remove.
 
 ## spikes.py
 
-- [ ] `SpikeWaveforms` docstring says `waveforms` is `(npoints, nspikes)`, but
+- [x] `SpikeWaveforms` docstring said `waveforms` is `(npoints, nspikes)`, but
   `save_waveforms` requires `(nspikes, npoints)` (and the script produces that).
-- [ ] `rate` docstring says `stop` defaults to the last spike; it is the last
+- [x] `rate` docstring said `stop` defaults to the last spike; it is the last
   spike plus one bin (inherited from `psth`).
 
 ## signal.py
 
-- [ ] `ramp_signal` raises `ValueError` when the ramp rounds to 0 samples
+- [x] `ramp_signal` raised `ValueError` when the ramp rounds to 0 samples
   (`s[-0:]` selects the whole array).
-- [ ] `ABC_weighting` validates with `curve not in "ABC"`, a substring test, so
+- [x] `ABC_weighting` validated with `curve not in "ABC"`, a substring test, so
   `""` and `"AB"` are accepted and return a meaningless gain.
 
 ## util.py
 
-- [ ] `all_same([])` raises `StopIteration`.
+- [x] `all_same([])` raised `StopIteration`; now returns None.
