@@ -73,8 +73,7 @@ def groupby(pprox: Collection, keyfun: Callable[[Trial], Any]) -> Iterator:
 
 def validate(obj: Collection):
     """Validates object against pprox schema"""
-
-    pass
+    raise NotImplementedError("pprox.validate is not implemented")
 
 
 def trial_iterator(pprox: Collection) -> Iterator[tuple[int, Trial]]:
@@ -100,7 +99,7 @@ def aggregate_events(pprox: Collection) -> np.ndarray:
 
 def combine_recordings(*pprox):
     """Combine events from multiple pprox objects into a single object, matching based on trial number"""
-    pass
+    raise NotImplementedError("pprox.combine_recordings is not implemented")
 
 
 def split_trial(trial: Trial, split_fun: Callable[[str], pd.DataFrame]) -> pd.DataFrame:

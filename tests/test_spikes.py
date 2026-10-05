@@ -80,3 +80,44 @@ def test_save_waveforms_checks_spike_count(tmp_path):
             tmp_path / "spikes.h5",
             spikes.SpikeWaveforms(waveforms.T, np.arange(5), 30000, 10),
         )
+
+
+def test_psth_values():
+    """Bins are left-closed: a spike on a bin edge counts in the bin it starts.
+    Bin times are the left edges."""
+    counts, bins = spikes.psth([0.0, 0.1, 0.15, 0.25], 0.1, start=0.0, stop=0.4)
+    assert bins == pytest.approx([0.0, 0.1, 0.2])
+    assert counts.tolist() == [1, 2, 1]
+
+
+def test_psth_drops_last_bin_of_interval():
+    """PINNED BUG (see TODO.md): the bins stop one short of `stop`. With
+    start=0, stop=1 and 0.1 s bins there are only 9 bins, covering 0-0.9 s, so a
+    spike at 0.95 s is not counted."""
+    counts, bins = spikes.psth([0.95], 0.1, start=0.0, stop=1.0)
+    assert bins.size == 9, "PINNED: should be 10 bins"
+    assert counts.sum() == 0, "PINNED: spike in the last bin is lost"
+
+
+def test_rate_is_smoothed_psth():
+    """rate convolves the psth counts with the kernel, keeping the same bins."""
+    from dlab.signal import smoothing_kernel
+
+    events = [1.1, 2.1, 2.9]
+    k, _ = smoothing_kernel("gaussian", 0.1, 0.01)
+    counts, bins = spikes.psth(events, 0.01, start=0.0, stop=4.0)
+    r, rt = spikes.rate(events, 0.01, k, start=0.0, stop=4.0)
+    assert np.array_equal(rt, bins)
+    assert r == pytest.approx(np.convolve(counts, k, mode="same"))
+
+
+def test_rate_with_exponential_kernel_precedes_spike():
+    """PINNED (see TODO.md): with the one-sided exponential kernel, the rate for
+    a single spike at 1.0 s is nonzero only before the spike (0.53-0.99 s) and
+    peaks 0.1 s before it. A causal smoother would spread it after the spike."""
+    from dlab.signal import smoothing_kernel
+
+    k, _ = smoothing_kernel("exponential", 0.1, 0.01)
+    r, t = spikes.rate([1.0], 0.01, k, start=0.0, stop=2.0)
+    assert np.allclose(r[t > 1.0], 0), "PINNED: nothing after the spike"
+    assert t[r.argmax()] == pytest.approx(0.9), "PINNED: peaks before the spike"

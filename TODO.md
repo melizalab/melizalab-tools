@@ -78,14 +78,38 @@ when a fix makes one pass.
   pandas 3.0.6. Rewritten without augmented assignment anyway.
 - [x] `aggregate_events` on an empty collection raised `ValueError`; now
   returns an empty array.
-- [ ] `validate` and `combine_recordings` are `pass` stubs. Implement or remove.
+- [ ] `validate` and `combine_recordings` are not implemented; they now raise
+  `NotImplementedError` (they were silent `pass` stubs). Implement if needed.
 
 ## spikes.py
+
+- [ ] `psth` drops the last bin of the interval: `np.arange(start, stop,
+  binwidth)` gives the *left* edges, but they are used as `np.histogram` bin
+  edges, so with start=0, stop=1 and 0.1 s bins there are 9 bins covering
+  0-0.9 s and spikes in 0.9-1.0 s are lost (and a spike exactly at the last
+  edge is counted, since numpy closes the final bin). `rate` inherits this.
+  (`test_psth_drops_last_bin_of_interval`)
+- [ ] Question: with the `exponential` kernel (nonzero only for t < 0), `rate`
+  puts each spike's contribution *before* the spike: for a spike at 1.0 s the
+  rate is nonzero from 0.53 to 0.99 s and peaks at 0.9 s. A causal smoother
+  would spread it after. Flipped kernel? (`test_rate_with_exponential_kernel_precedes_spike`)
 
 - [x] `SpikeWaveforms` docstring said `waveforms` is `(npoints, nspikes)`, but
   `save_waveforms` requires `(nspikes, npoints)` (and the script produces that).
 - [x] `rate` docstring said `stop` defaults to the last spike; it is the last
   spike plus one bin (inherited from `psth`).
+
+## get_songs.py
+
+- [ ] `get_interval` converts int16 samples to float32 without scaling to
+  +/-1, so the script logs meaningless dBFS values ("RMS 78 dBFS") until it
+  rescales. The output level is right. An interval past the end of the data
+  is silently truncated.
+
+## plotting.py
+
+- [ ] `simple_axes` docstring says "only bottom and right lines shown"; it
+  shows bottom and left.
 
 ## signal.py
 
@@ -95,5 +119,10 @@ when a fix makes one pass.
   `""` and `"AB"` are accepted and return a meaningless gain.
 
 ## util.py
+
+- [ ] `ParseKeyVal` updates the parser's default dict in place, so with
+  `default=dict()` (as its docstring suggests) values leak into later parses.
+  It should copy. Badly formed arguments also raise `ValueError` instead of an
+  argparse usage error. (`test_parse_key_val_shares_mutable_default`)
 
 - [x] `all_same([])` raised `StopIteration`; now returns None.

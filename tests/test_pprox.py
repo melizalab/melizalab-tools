@@ -379,12 +379,13 @@ def test_aggregate_events_empty_collection():
     assert out.size == 0 and out.dtype == float
 
 
-def test_unimplemented_stubs_return_none():
-    """validate and combine_recordings are placeholders that do nothing. This test
-    only documents that; replace it when they are implemented or removed.
-    """
-    assert pprox.validate(pprox.empty()) is None
-    assert pprox.combine_recordings() is None
+def test_unimplemented_stubs_raise():
+    """validate and combine_recordings are not implemented yet, and say so
+    rather than silently doing nothing."""
+    with pytest.raises(NotImplementedError):
+        pprox.validate(pprox.empty())
+    with pytest.raises(NotImplementedError):
+        pprox.combine_recordings()
 
 
 # --- split_trial, with hand-computed expectations
