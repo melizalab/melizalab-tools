@@ -8,6 +8,13 @@ presenter/sync combination (oeaudio-present with clicks or pulses, jpresent
 with pulses). Cells that don't work yet are strict xfails; remove the marker
 when a fix makes one pass.
 
+## neurobank.py
+
+- [ ] `find_resources` downloads over https without credentials (its
+  `Client()` gets no auth, though the module defines `default_auth` from
+  ~/.netrc), so resources that need a login, like the registry's
+  `/download/` URLs, fail with 403 and are reported as not found.
+
 ## kilo.py
 
 - [x] `oeaudio_log_stims`: a `start` line before `StartAcquisition` raised
@@ -74,16 +81,32 @@ when a fix makes one pass.
 - [ ] `processed_by` uses argparse's `prog`, which depends on how the script is
   invoked (`group-kilo-spikes` as a console script, `kilo.py` with
   `python -m`). Set `prog` explicitly?
-- [ ] Question: spikes within 2 ms of the start or 5 ms of the end of the
-  recording are dropped from the pprox as well as the waveforms, and spikes
-  before the first trial are dropped from the pprox but kept in the waveforms.
-  Intended? (`test_spikes_too_close_to_edges_are_dropped`,
-  `test_spikes_before_first_trial_are_dropped`)
-- [ ] Question: spikes are assigned to trials with
+- [x] Spikes within 2 ms of the start or 5 ms of the end of the recording are
+  dropped from the pprox as well as the waveforms: intended, to keep the two
+  in sync. (`test_spikes_too_close_to_edges_are_dropped`)
+- [ ] Question: by the same reasoning, spikes before the first trial are
+  dropped from the pprox but kept in the waveforms. Drop them from the
+  waveforms too? (`test_spikes_before_first_trial_are_dropped`)
+- [ ] Spikes are assigned to trials with
   `trials.recording_start.searchsorted(events.time)`, which assumes trial
   starts increase through the file and share the kilosort sample frame. With
-  more than one entry, trial positions restart at 0 for each entry. Are
-  multi-entry ARF files ever sorted together?
+  more than one entry, trial positions restart at 0 for each entry. No such
+  files exist yet, but they may; fixing it won't change single-entry output.
+  Needs: how the kilosort input (temp_wh.dat) is assembled from several
+  entries (order, and any gaps between them).
+
+- [ ] Rescue stimulus onsets in recordings without a sync track by
+  cross-correlating the stimulus files with the ADC channel that records an
+  analog copy of the audio sent to the speaker. Example: examples/C401_1_1b
+  (no sync line connected; ADC1 or ADC2 look like audio). Its reference
+  outputs can't be used for A/B comparison: their onsets are exactly 31.765 s
+  apart, drift to 41.5 s before the start messages by the end, and don't
+  match any channel in the ARF.
+- [ ] `detect_sync_onsets` accepts low-amplitude channels: C401's ADC5/ADC6
+  (near the negative rail, ~250 counts of variation) pass the 20x-noise check
+  and give >120,000 events. Proposed: also require the peak to be at least
+  10% of the int16 range above baseline (real sync tracks are 22,000-30,000
+  counts). Needs a decision on the minimum.
 
 ## pprox.py
 

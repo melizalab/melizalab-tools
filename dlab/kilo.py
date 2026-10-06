@@ -15,7 +15,6 @@ import ewave
 import h5py as h5
 import numpy as np
 import pandas as pd
-import quickspikes as qs
 import toelis
 
 from dlab import neurobank as nbank
@@ -600,7 +599,8 @@ def group_spikes_script(argv=None):
     info = pd.read_csv(infofile, sep="\t", index_col=0)
     recfile = args.sortdir / "temp_wh.dat"
     params = read_kilo_params(args.sortdir / "params.py")
-    recording = np.memmap(recfile, mode="c", dtype=params["dtype"])
+    # read-only: a copy-on-write map of a whole sort can exceed available memory
+    recording = np.memmap(recfile, mode="r", dtype=params["dtype"])
     recording = np.reshape(
         recording, (recording.size // params["nchannels"], params["nchannels"])
     )
@@ -686,12 +686,10 @@ def group_spikes_script(argv=None):
             (cluster.time > n_before) & (cluster.time < (nsamples - n_after))
         ]
         n_clean = len(spikes)
-        waveforms = qs.peaks(
-            recording[:, clust_info["ch"]],
-            spikes.time,
-            n_before=n_before,
-            n_after=n_after,
-        )
+        # the same windows qs.peaks would extract; indexing the read-only
+        # memmap directly reads only the samples around each spike
+        windows = spikes.time.to_numpy()[:, None] + np.arange(-n_before, n_after)
+        waveforms = recording[windows, clust_info["ch"]]
         mean_spike = waveforms.mean(0)
         included = np.abs(waveforms).max(-1) < (
             np.abs(mean_spike).max(-1) * args.artifact_reject_thresh
