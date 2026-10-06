@@ -3,6 +3,11 @@
 recordings (which are too large to keep in the repository).
 
     python tests/data/make_excerpts.py examples/
+    python tests/data/make_excerpts.py --golden
+
+The first form rewrites the excerpts (their data will be the same, but ARF
+gives the files new uuids, so only do this to change them). The second only
+regenerates the golden output, from the current code.
 
 Each excerpt is the start of a recording, up to the start message of the
 sixth stimulus, so it holds five complete trials. Only the sync channels and
@@ -13,6 +18,17 @@ offset, so message sample numbers stay valid), and are gzip-compressed.
   the clicks that drive the Schmitt trigger making them (positive at stimulus
   onset, negative at offset). The pulses of trials 0 and 3 have flat tops that
   never dip, which the earlier z-scored detector reported at their end.
+- E36_excerpt_sorting/: the kilosort output for the same stretch of E36, cut
+  down to three 'good' clusters (52 on channel 79; 675 and 676, which share
+  channel 11) and one 'mua' cluster (559). temp_wh.dat keeps only channels 79
+  and 11 (as 0 and 1; cluster_info.tsv is remapped to match) and is gzipped,
+  since the script needs it raw and test_group_spikes_excerpt.py unpacks it.
+- E36_excerpt_neurobank.json: the neurobank record of the recording and the
+  durations of the five stimuli, taken from the reference output, so the
+  pipeline can run without neurobank.
+- E36_excerpt_golden/: the .pprox output of group-kilo-spikes on the excerpt
+  (--sync ADC3 --prepad 0.5), from the version verified against the full
+  recording (see TODO.md). Regenerate only deliberately (--golden).
 - P397_excerpt.arf, P397_excerpt.log: oeaudio-present, GUI 1.0.2, recorded
   without MessageCenter logging (the dataset is empty), so stimuli come from
   the open-ephys-audio log. ADC3 has clicks, ADC4 low-amplitude pulses (about
@@ -67,6 +83,66 @@ def e36(examples: Path):
             )
 
 
+E36_CLUSTERS = {52: "good", 675: "good", 676: "good", 559: "mua"}
+
+
+def e36_sort(examples: Path):
+    import gzip
+    import json
+    import sys
+
+    import numpy as np
+    import pandas as pd
+
+    src = examples / "E36_5_1" / "sorting"
+    out = HERE / "E36_excerpt_sorting"
+    out.mkdir(exist_ok=True)
+    with h5py.File(HERE / "E36_excerpt.arf", "r") as fp:
+        end = fp["entry"]["ADC3"].size
+    times = np.load(src / "spike_times.npy")
+    clusters = np.load(src / "spike_clusters.npy")
+    keep = np.isin(clusters, list(E36_CLUSTERS)) & (times < end)
+    np.save(out / "spike_times.npy", times[keep])
+    np.save(out / "spike_clusters.npy", clusters[keep])
+    info = pd.read_csv(src / "cluster_info.tsv", sep="\t", index_col=0)
+    info = info.loc[sorted(E36_CLUSTERS)]
+    assert (info.group == pd.Series(E36_CLUSTERS).loc[info.index]).all()
+    channels = sorted(set(info.loc[info.group == "good", "ch"]), reverse=True)
+    info["ch"] = [channels.index(c) if c in channels else 0 for c in info.ch]
+    info.to_csv(out / "cluster_info.tsv", sep="\t")
+    params = dict(
+        line.split(" = ", 1) for line in (src / "params.py").read_text().splitlines()
+    )
+    nchannels = int(params["n_channels_dat"])
+    data = np.memmap(src / "temp_wh.dat", mode="r", dtype=params["dtype"].strip("'"))
+    data = data.reshape(-1, nchannels)[:end, channels]
+    with gzip.open(out / "temp_wh.dat.gz", "wb") as fp:
+        fp.write(np.ascontiguousarray(data).tobytes())
+    params["n_channels_dat"] = str(len(channels))
+    params["dat_path"] = "'temp_wh.dat'"
+    (out / "params.py").write_text("".join(f"{k} = {v}\n" for k, v in params.items()))
+
+    sys.path.insert(0, str(HERE.parent))
+    from test_group_spikes_examples import neurobank_record, stimulus_durations
+
+    registry, record = neurobank_record(examples / "E36_5_1" / "output")
+    durations = stimulus_durations(examples / "E36_5_1" / "output")
+    with h5py.File(HERE / "E36_excerpt.arf", "r") as fp:
+        from dlab.kilo import oeaudio_stims
+
+        names = [s.name for s in oeaudio_stims(fp["entry"]["MessageCenter"])]
+    (HERE / "E36_excerpt_neurobank.json").write_text(
+        json.dumps(
+            {
+                "registry": registry,
+                "record": record,
+                "durations": {n: durations[n] for n in names},
+            },
+            indent=2,
+        )
+    )
+
+
 def p397(examples: Path):
     import datetime
 
@@ -87,8 +163,27 @@ def p397(examples: Path):
 
 
 if __name__ == "__main__":
-    examples = Path(sys.argv[1] if len(sys.argv) > 1 else "examples")
-    e36(examples)
-    p397(examples)
-    for path in sorted(HERE.glob("*_excerpt.*")):
-        print(f"{path.name}: {path.stat().st_size / 1e6:.2f} MB")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    examples = Path(args[0] if args else "examples")
+    if "--golden" not in sys.argv:
+        e36(examples)
+        e36_sort(examples)
+        p397(examples)
+    else:
+        sys.path.insert(0, str(HERE.parent))
+        from test_group_spikes_excerpt import run_excerpt
+
+        golden = HERE / "E36_excerpt_golden"
+        golden.mkdir(exist_ok=True)
+        for path in golden.glob("*.pprox"):
+            path.unlink()
+        import tempfile
+
+        out = run_excerpt(Path(tempfile.mkdtemp()))
+        for path in out.glob("*.pprox"):
+            (golden / path.name).write_bytes(path.read_bytes())
+    for path in sorted(HERE.glob("*_excerpt*")):
+        size = sum(
+            f.stat().st_size for f in ([path] if path.is_file() else path.iterdir())
+        )
+        print(f"{path.name}: {size / 1e6:.2f} MB")

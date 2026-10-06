@@ -1,0 +1,19 @@
+{
+  "registry": "https://gracula.psyc.virginia.edu/neurobank/",
+  "record": {
+    "name": "E36_5_1",
+    "metadata": {
+      "pen": 5,
+      "bird": "7c7c975c-0340-42ea-935f-6e9f12d132a4",
+      "site": 1,
+      "protocol": "arc6opto1",
+      "experimenter": "bple"
+    }
+  },
+  "durations": {
+    "arc607_CB": 1.52,
+    "arc603_C": 1.45,
+    "arc608_CB": 1.659,
+    "arc605_G": 1.189
+  }
+}
