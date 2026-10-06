@@ -116,6 +116,12 @@ when a fix makes one pass.
   Needs: how the kilosort input (temp_wh.dat) is assembled from several
   entries (order, and any gaps between them).
 
+- [ ] A script that checks an ARF file against the pprox files sorted from it
+  for likely errors, starting with `kilo.sync_lag_outliers` (trials whose
+  onset is out of line with its start message; see `pprox_lag_outliers` in
+  test_kilo_examples.py, which flags the earlier version's end-of-pulse trials
+  in E36 and C401's drifting reference). Pulse sync has hardly been used in
+  processed recordings, so this is for spot checks rather than a big audit.
 - [ ] Rescue stimulus onsets in recordings without a sync track by
   cross-correlating the stimulus files with the ADC channel that records an
   analog copy of the audio sent to the speaker. Example: examples/C401_1_1b

@@ -375,3 +375,37 @@ class TestClicksAndPulses:
         _, clicks, pulses = onsets
         lag = pulses - clicks
         assert ((lag >= 0) & (lag <= 1)).all()
+
+
+def pprox_lag_outliers(arf_path, pprox_path):
+    """Audit a pprox file against its recording: the trials whose onsets (pprox
+    offsets) are out of line with the start messages in the ARF file."""
+    import json
+
+    with h5py.File(arf_path, "r") as fp:
+        entry = only_entry(fp)
+        dset = entry["MessageCenter"]
+        rate = dset.attrs["sampling_rate"]
+        first = round(entry["ADC1"].attrs["offset"] * rate)
+        starts = np.array([s.start - first for s in kilo.oeaudio_stims(dset)])
+    with open(pprox_path) as fp:
+        onsets = np.array([round(t["offset"] * rate) for t in json.load(fp)["pprox"]])
+    return kilo.sync_lag_outliers(starts, onsets, rate)
+
+
+@requires("E36_5_1/output-a20b62a")
+def test_audit_flags_old_end_of_pulse_errors():
+    """The lag check, applied to the earlier version's output for E36, flags
+    exactly the three trials whose pulses it reported at their end."""
+    ex = EXAMPLES / "E36_5_1"
+    pprox = sorted((ex / "output-a20b62a").glob("*.pprox"))[0]
+    assert pprox_lag_outliers(ex / "E36_5_1.arf", pprox).tolist() == [0, 3, 12]
+
+
+@requires("C401_1_1b/output")
+def test_audit_flags_reference_without_sync():
+    """C401's reference output (no sync line connected) drifts away from the
+    stimulus messages, so the lag check flags most of its trials."""
+    ex = EXAMPLES / "C401_1_1b"
+    pprox = sorted((ex / "output").glob("*.pprox"))[0]
+    assert pprox_lag_outliers(ex / "C401_1_1b.arf", pprox).size > 100

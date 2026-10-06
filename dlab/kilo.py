@@ -340,6 +340,18 @@ def oeaudio_to_trials(
             for stim in entry_stimuli
         ]
         entry_stimuli = match_clicks(entry_stimuli, stim_onsets)
+        starts = np.array([stim.start for stim in entry_stimuli])
+        lags = (stim_onsets - starts) / sampling_rate
+        log.info("    - sync events follow start messages by %.3f s", np.median(lags))
+        for i in sync_lag_outliers(starts, stim_onsets, sampling_rate):
+            log.warning(
+                "  - WARNING: sync event for stimulus %d (%s) is %.3f s after its "
+                "start message (median %.3f s). Check the sync track.",
+                i,
+                entry_stimuli[i].name,
+                lags[i],
+                np.median(lags),
+            )
 
         padding_samples = int(prepad * sampling_rate)
         for stim, onset, offset in zip_longest(
@@ -406,6 +418,27 @@ def match_clicks(
             entry_stimuli[i].name,
         )
     return [entry_stimuli[i] for i in idx]
+
+
+def sync_lag_outliers(
+    starts: np.ndarray, onsets: np.ndarray, sampling_rate: float, tolerance: float = 0.1
+) -> np.ndarray:
+    """Returns the indices of trials whose sync lag is out of line with the rest.
+
+    starts and onsets are the start-message times of matched stimuli and their
+    sync onsets, in samples. Each sync event follows its message by a lag that
+    depends on the presentation setup (0.25-1 s in the example recordings) but
+    varies little within a recording (by less than 65 ms). A lag that differs
+    from the median by more than tolerance (in s) suggests a misdetected or
+    mismatched sync event, or stimulus times that don't belong to the recording.
+    The median is taken as the right lag, so this relies on most trials being
+    right; if half or more are wrong, it flags the wrong trials.
+
+    """
+    lags = (np.asarray(onsets) - np.asarray(starts)) / sampling_rate
+    if lags.size == 0:
+        return np.array([], dtype=int)
+    return np.flatnonzero(np.abs(lags - np.median(lags)) > tolerance)
 
 
 def assign_events_flat(events: pd.DataFrame, sampling_rate: float):
