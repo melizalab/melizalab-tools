@@ -83,10 +83,16 @@ when a fix makes one pass.
     boundary, moving to the adjacent trial as a result; waveforms identical.
     But the new run writes 20 more clusters, all 'good' in a cluster_info.tsv
     older than the reference. Were only some clusters deposited?
-  - E36_5_1 (jpresent, pulses, opto; reference from group-klopto-spikes): the
-    reference was made from a different sort (only 11 cluster ids in common,
-    and those are different units). Trial structure matches: 1299 of 1300
-    onsets identical, one 1 sample earlier. Needs the matching sort.
+  - E36_5_1 (jpresent, pulses on ADC3, clicks on ADC5): the reference in
+    output/ (from group-klopto-spikes) was made from a different sort, though
+    its trial structure matches (1299 of 1300 onsets identical). Instead, the
+    version at a20b62a (patched only to map temp_wh.dat read-only) was run on
+    the same sort with --sync-thresh 0.5, the only old threshold that finds
+    the pulses. Same 66 clusters; waveforms identical; spike assignment
+    identical except in the trials around 3 stimuli (0, 3, 12), whose pulses
+    the old detector reported at their end (1.2-1.5 s late). All other old
+    onsets were 38-300 samples late (typically ~50). A one-off check: the old
+    outputs are not kept in examples/.
 - [ ] The artifact check calls `input()` ("Press any key to continue") when
   more than half a cluster's spikes look like artifacts, which blocks
   unattended runs. Make it a warning (or an option)?

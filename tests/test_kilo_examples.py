@@ -14,6 +14,9 @@ synthetic recordings in conftest.py.
   open-ephys-audio log from the same session
 - C180_1_1.arf: GUI 1.0.2, oeaudio-present, 1.5 h and 1920 stimuli. Only the
   old-style clicks were recorded (ADC5); ADC3, the default --sync, is flat
+- E36_5_1/E36_5_1.arf: GUI 1.0.2, jpresent, both sync tracks: the clicks
+  (ADC5; positive at stimulus onset, negative at offset) are the input to the
+  Schmitt trigger that makes the pulses (ADC3)
 
 Tests marked PINNED record current behavior that looks like a bug; see TODO.md.
 """
@@ -344,3 +347,31 @@ class TestLongRecording:
             result = kilo.oeaudio_to_trials(fp, finder, "ADC5", oeaudio_log=None)
         assert len(result) == 1920
         assert [t.stimulus_name for t in result] == names
+
+
+@requires("E36_5_1/E36_5_1.arf")
+class TestClicksAndPulses:
+    PATH = EXAMPLES / "E36_5_1" / "E36_5_1.arf"
+
+    @pytest.fixture(scope="class")
+    def onsets(self):
+        with h5py.File(self.PATH, "r") as fp:
+            entry = only_entry(fp)
+            nstarts = sum(
+                1 for m in entry["MessageCenter"]["message"] if m.startswith(b"start ")
+            )
+            clicks = kilo.detect_sync_onsets(entry["ADC5"][:])
+            pulses = kilo.detect_sync_onsets(entry["ADC3"][:])
+        return nstarts, clicks, pulses
+
+    def test_both_tracks_give_one_onset_per_stimulus(self, onsets):
+        """The negative clicks at stimulus offsets don't produce detections."""
+        nstarts, clicks, pulses = onsets
+        assert clicks.size == pulses.size == nstarts == 1300
+
+    def test_pulses_follow_clicks(self, onsets):
+        """Each pulse rises 0-1 samples after its click (the Schmitt trigger's
+        delay), so either track can be used."""
+        _, clicks, pulses = onsets
+        lag = pulses - clicks
+        assert ((lag >= 0) & (lag <= 1)).all()
