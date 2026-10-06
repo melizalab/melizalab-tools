@@ -86,7 +86,7 @@ def make_recording(tmp_path, fake_neurobank):
         out = tmp_path / "out"
         out.mkdir(exist_ok=True)
 
-        def run(*extra):
+        def run(*extra, recording=None):
             kilo.group_spikes_script(
                 [
                     "-r",
@@ -96,7 +96,7 @@ def make_recording(tmp_path, fake_neurobank):
                     "-o",
                     str(out),
                     *extra,
-                    str(rec),
+                    recording or str(rec),
                     str(ks),
                 ]
             )
@@ -134,7 +134,7 @@ def test_pprox_metadata(make_recording):
         {"animal": "P1", "name": "/entry_0", "sampling_rate": SAMPLING_RATE}
     ]
     assert pp["bird"] == "P1", "neurobank metadata merged in"
-    assert pp["processed_by"][0].endswith(" 2026.07.15")
+    assert pp["processed_by"] == ["group-kilo-spikes 2026.07.15"]
 
 
 def test_pprox_trials(make_recording):
@@ -410,3 +410,27 @@ def test_outputs_conform_to_stimtrial_schema(make_recording):
     run = make_recording(aux_channels={"ADC4": [(30000, 60000)]})
     validate(load_pprox(run(), 1))
     validate(load_pprox(run("--aux", "led=ADC4"), 1))
+
+
+def test_recording_found_in_neurobank_with_registry_option(
+    make_recording, monkeypatch, tmp_path
+):
+    """A recording given by name rather than path is located in neurobank,
+    using the --registry URL (not the default registry)."""
+    calls = []
+
+    def find_resource(name, registry_url):
+        calls.append((name, registry_url))
+        return tmp_path / "rec.arf"
+
+    run = make_recording()
+    monkeypatch.setattr(kilo.nbank, "find_resource", find_resource)
+    out = run(recording="rec")
+    assert calls == [("rec", REGISTRY)]
+    assert (out / "rec_c1.pprox").exists()
+
+
+def test_waveform_file_records_program(make_recording):
+    """The waveform file records the program name, whatever the invocation."""
+    with h5py.File(make_recording()() / "rec_c1_spikes.h5") as fp:
+        assert fp.attrs["processed_by"] == "group-kilo-spikes 2026.07.15"

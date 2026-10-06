@@ -74,7 +74,9 @@ def script(argv=None):
     script_version = "2025.07.28"
 
     p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="get-songs",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     p.add_argument(

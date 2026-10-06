@@ -10,10 +10,9 @@ when a fix makes one pass.
 
 ## neurobank.py
 
-- [ ] `find_resources` downloads over https without credentials (its
-  `Client()` gets no auth, though the module defines `default_auth` from
-  ~/.netrc), so resources that need a login, like the registry's
-  `/download/` URLs, fail with 403 and are reported as not found.
+- [x] `find_resources` downloaded over https without credentials, so
+  resources that need a login failed with 403; its client now uses
+  `default_auth` (from ~/.netrc).
 
 ## kilo.py
 
@@ -116,11 +115,10 @@ when a fix makes one pass.
   more than half a cluster's spikes look like artifacts, which blocks
   unattended runs. Make it a warning (or an option)?
   (`test_too_many_artifacts_prompts_and_skips`)
-- [ ] When the recording isn't a local file, it is looked up with
-  `nbank.default_registry`, ignoring `--registry`.
-- [ ] `processed_by` uses argparse's `prog`, which depends on how the script is
-  invoked (`group-kilo-spikes` as a console script, `kilo.py` with
-  `python -m`). Set `prog` explicitly?
+- [x] When the recording isn't a local file, it was looked up with
+  `nbank.default_registry`, ignoring `--registry`; now uses `--registry`.
+- [x] `processed_by` (and get-songs' `created_by`) used argparse's `prog`,
+  which depended on how the script was invoked; `prog` is now set explicitly.
 - [x] Spikes within 2 ms of the start or 5 ms of the end of the recording are
   dropped from the pprox as well as the waveforms: intended, to keep the two
   in sync. (`test_spikes_too_close_to_edges_are_dropped`)

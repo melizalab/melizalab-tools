@@ -171,6 +171,7 @@ def test_script_deposit(tmp_path, monkeypatch, songs_yaml, no_neurobank):
     assert archive == tmp_path / "archive"
     assert [f.name for f in files] == ["O103.wav"]
     assert kwargs["dtype"] == "vocalization-wav"
+    assert kwargs["created_by"] == "get-songs 2025.07.28"
     assert kwargs["source_dataset"] == DATASET
     assert kwargs["source_interval_ms"] == [90.0, 900.0]
     assert kwargs["highpass_cutoff"] == 500.0

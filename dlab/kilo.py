@@ -658,7 +658,8 @@ def group_spikes_script(argv=None):
     version = "2026.07.15"
 
     p = argparse.ArgumentParser(
-        description="group kilosorted spikes into pprox files based on cluster and trial"
+        prog="group-kilo-spikes",
+        description="group kilosorted spikes into pprox files based on cluster and trial",
     )
     p.add_argument(
         "-v",
@@ -841,7 +842,7 @@ def group_spikes_script(argv=None):
         datafile = args.recording
     else:
         datafile = nbank.find_resource(
-            str(args.recording), registry_url=nbank.default_registry
+            str(args.recording), registry_url=args.registry_url
         )
 
     log.info("- splitting '%s' into trials:", datafile)

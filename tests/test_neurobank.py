@@ -33,6 +33,7 @@ class FakeRegistry:
         self.mirror_files: dict[str, bytes] = {}  # served from mirror.test
         self.requests: list[httpx.Request] = []
         self.registry_down = False
+        self.auth_required = False  # downloads need an Authorization header
 
     def add_http(self, name, content=b"data", *, filename=None, served=True):
         record = {"name": name, "locations": [self.http_location(name)]}
@@ -66,6 +67,8 @@ class FakeRegistry:
             ]
             return httpx.Response(200, text="\n".join(lines))
         # GET on the http archive: http://archive.test/neurobank/resources/<name>/
+        if self.auth_required and "authorization" not in request.headers:
+            return httpx.Response(403)
         name = request.url.path.rstrip("/").rsplit("/", 1)[-1]
         files = self.mirror_files if request.url.host == "mirror.test" else self.files
         if name in files:
@@ -656,3 +659,22 @@ def test_main_clear_cache_removes_downloaded_resources(registry, remote_cache):
     neurobank.main(["-r", REGISTRY, "--clear-cache"])
     assert not path.exists(), "--clear-cache should remove downloads from archive hosts"
     assert not remote_cache.exists()
+
+
+def test_download_uses_default_auth(registry, remote_cache, monkeypatch):
+    """Downloads use the credentials in default_auth (from ~/.netrc), so
+    archives that need a login can be fetched."""
+    registry.auth_required = True
+    registry.add_http("abcd1234", b"secret")
+    monkeypatch.setattr(neurobank, "default_auth", httpx.BasicAuth("user", "pass"))
+    assert find("abcd1234")["abcd1234"].read_bytes() == b"secret"
+    assert registry.downloads[0].headers["authorization"].startswith("Basic ")
+
+
+def test_download_without_credentials_fails(registry, remote_cache, monkeypatch):
+    """Without credentials, an archive that needs a login refuses the download,
+    which is reported as not found."""
+    registry.auth_required = True
+    registry.add_http("abcd1234", b"secret")
+    monkeypatch.setattr(neurobank, "default_auth", None)
+    assert isinstance(find("abcd1234")["abcd1234"], FileNotFoundError)

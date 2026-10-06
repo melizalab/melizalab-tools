@@ -60,7 +60,12 @@ def find_resources(
     if len(to_locate) == 0:
         return
     url, query = registry.get_locations_bulk(registry_url, to_locate)
-    with Client() as client, concurrent.futures.ThreadPoolExecutor() as executor:
+    # default_auth supplies credentials from ~/.netrc, by host, for archives that
+    # need them to download
+    with (
+        Client(auth=default_auth) as client,
+        concurrent.futures.ThreadPoolExecutor() as executor,
+    ):
         response = util.query_registry_bulk(client, url, query)
         future_to_name = {
             executor.submit(
