@@ -127,7 +127,10 @@ def test_pprox_match_reference(run_example):
     out, reference = run_example
     for ref_path in sorted(reference.glob("*.pprox")):
         diffs, shifts = compare_pprox(
-            load(out / ref_path.name), load(ref_path), ignore={"processed_by", *CHANGED}
+            load(out / ref_path.name),
+            load(ref_path),
+            ignore={"processed_by", *CHANGED},
+            boundary_tol=MAX_ONSET_SHIFT,
         )
         assert diffs == [], ref_path.name
         assert np.abs(shifts).max(initial=0) <= MAX_ONSET_SHIFT, ref_path.name

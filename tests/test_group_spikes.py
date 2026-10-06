@@ -362,3 +362,21 @@ def test_compare_missing_spike(make_recording, reference):
     assert "times differ" in compare_waveforms(
         out / "rec_c1_spikes.h5", reference / "rec_c1_spikes.h5"
     )
+
+
+def test_compare_spike_at_moved_boundary(make_recording, tmp_path):
+    """When onsets move, a spike right at a trial boundary moves to the
+    adjacent trial. That is reported, unless boundary_tol covers it."""
+    import shutil
+
+    from compare_outputs import compare_pprox, load
+
+    # trial b starts at 60000 (90000 minus the 1 s prepad); a spike just after
+    clusters = {1: dict(times=[33000, 60001, 96000], group="good", ch=2)}
+    reference = shutil.copytree(make_recording(clusters)(), tmp_path / "reference")
+    out = make_recording(clusters, clicks=[on + 2 for on in ONSETS])()
+    new, ref = load(out / "rec_c1.pprox"), load(reference / "rec_c1.pprox")
+    diffs, _ = compare_pprox(new, ref)
+    assert diffs == ["trial 0 spikes: 1 -> 2", "trial 1 spikes: 2 -> 1"]
+    diffs, _ = compare_pprox(new, ref, boundary_tol=3 / SAMPLING_RATE)
+    assert diffs == []

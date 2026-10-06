@@ -23,7 +23,7 @@ def load(path: Path) -> dict:
         return json.load(fp)
 
 
-def compare_pprox(new: dict, ref: dict, *, ignore=IGNORED, atol=1e-6):
+def compare_pprox(new: dict, ref: dict, *, ignore=IGNORED, atol=1e-6, boundary_tol=0.0):
     """Compares two pprox objects from group-kilo-spikes.
 
     Returns (differences, shifts). differences is a list of descriptions of
@@ -31,6 +31,11 @@ def compare_pprox(new: dict, ref: dict, *, ignore=IGNORED, atol=1e-6):
     shifts is an array with a row per trial giving the change (new - ref, in s)
     in the stimulus onset (offset) and in the absolute start and end of the
     trial interval, for the caller to check against a tolerance.
+
+    When trial boundaries move, spikes right at a boundary can move to the
+    adjacent trial. With boundary_tol > 0, a spike that is in a trial in one
+    output but not the other is not counted as a difference if it is within
+    boundary_tol (s) of that trial's start or end in either output.
     """
     diffs = []
     for key in sorted((new.keys() | ref.keys()) - ignore - {"pprox"}):
@@ -51,13 +56,44 @@ def compare_pprox(new: dict, ref: dict, *, ignore=IGNORED, atol=1e-6):
             ns["interval"], rs["interval"], atol=atol
         ):
             diffs.append(f"trial {i} stimulus: {rs!r} -> {ns!r}")
-        new_times = np.add(n["events"], n["offset"])
-        ref_times = np.add(r["events"], r["offset"])
-        if new_times.size != ref_times.size:
-            diffs.append(f"trial {i} spikes: {ref_times.size} -> {new_times.size}")
-        elif not np.allclose(new_times, ref_times, atol=atol):
-            diffs.append(f"trial {i} spike times differ")
+        new_times = np.sort(np.add(n["events"], n["offset"]))
+        ref_times = np.sort(np.add(r["events"], r["offset"]))
+        only_new = unmatched(new_times, ref_times, atol)
+        only_ref = unmatched(ref_times, new_times, atol)
+        if boundary_tol > 0:
+            bounds = np.concatenate(
+                [np.add(n["interval"], n["offset"]), np.add(r["interval"], r["offset"])]
+            )
+            only_new = far_from(only_new, bounds, boundary_tol)
+            only_ref = far_from(only_ref, bounds, boundary_tol)
+        if only_new.size or only_ref.size:
+            if new_times.size != ref_times.size:
+                diffs.append(f"trial {i} spikes: {ref_times.size} -> {new_times.size}")
+            else:
+                diffs.append(f"trial {i} spike times differ")
     return diffs, np.array(shifts)
+
+
+def unmatched(times, other, atol):
+    """The elements of sorted array times with no element of sorted array other
+    within atol (each element of other matches at most one in times)"""
+    out = []
+    j = 0
+    for t in times:
+        while j < other.size and other[j] < t - atol:
+            j += 1
+        if j < other.size and abs(other[j] - t) <= atol:
+            j += 1
+        else:
+            out.append(t)
+    return np.array(out)
+
+
+def far_from(times, bounds, tol):
+    """The elements of times more than tol from every element of bounds"""
+    if times.size == 0:
+        return times
+    return times[np.abs(times[:, None] - bounds).min(1) > tol]
 
 
 def compare_waveforms(new: Path, ref: Path, *, ignore=IGNORED) -> list[str]:

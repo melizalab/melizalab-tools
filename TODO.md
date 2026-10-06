@@ -17,6 +17,12 @@ when a fix makes one pass.
 
 ## kilo.py
 
+- [x] `group_spikes_script` memory-mapped temp_wh.dat copy-on-write, which
+  fails with ENOMEM for a 28-43 GB sort on a machine with less memory. Now
+  read-only, with waveform windows taken by indexing (same values as
+  `qs.peaks`, which needs a writable array; checked identical on P397).
+  quickspikes is no longer used by dlab but is still a dependency.
+
 - [x] `oeaudio_log_stims`: a `start` line before `StartAcquisition` raised
   `TypeError`; now a `ValueError` naming the line.
 - [x] `entry_metadata` returned `None` when the message dataset has no
@@ -70,8 +76,17 @@ when a fix makes one pass.
   stimuli; trials ignore them now) and the separate opto pulse track. Start
   from the existing patch (not yet in the repo).
 - [ ] Compare the end-to-end output of `group-kilo-spikes` (pprox and waveform
-  files) against known-good results for some example recordings, to be copied
-  to examples/.
+  files) against known-good results (`test_group_spikes_examples.py`):
+  - P397_1_1 (oeaudio-present, clicks on ADC3, `--oeaudio-log`; reference from
+    version 2026.06.22): all 99 reference pprox files match apart from onsets
+    moving 0-3 samples earlier and 14 spikes, each within 2 samples of a trial
+    boundary, moving to the adjacent trial as a result; waveforms identical.
+    But the new run writes 20 more clusters, all 'good' in a cluster_info.tsv
+    older than the reference. Were only some clusters deposited?
+  - E36_5_1 (jpresent, pulses, opto; reference from group-klopto-spikes): the
+    reference was made from a different sort (only 11 cluster ids in common,
+    and those are different units). Trial structure matches: 1299 of 1300
+    onsets identical, one 1 sample earlier. Needs the matching sort.
 - [ ] The artifact check calls `input()` ("Press any key to continue") when
   more than half a cluster's spikes look like artifacts, which blocks
   unattended runs. Make it a warning (or an option)?
