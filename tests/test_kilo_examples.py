@@ -409,3 +409,30 @@ def test_audit_flags_reference_without_sync():
     ex = EXAMPLES / "C401_1_1b"
     pprox = sorted((ex / "output").glob("*.pprox"))[0]
     assert pprox_lag_outliers(ex / "C401_1_1b.arf", pprox).size > 100
+
+
+@requires("E36_5_1/output")
+def test_aux_matches_klopto_opto():
+    """On all of E36, the aux pulses on ADC4 match the opto field written by
+    group-klopto-spikes: the same 650 trials have the LED, with the same onset
+    and offset to within one sample."""
+    import json
+
+    import pandas as pd
+    from conftest import StubFinder
+    from test_group_spikes_examples import stimulus_durations
+
+    ex = EXAMPLES / "E36_5_1"
+    ref = json.loads(next((ex / "output").glob("*.pprox")).read_text())["pprox"]
+    finder = StubFinder(stimulus_durations(ex / "output"))
+    with h5py.File(ex / "E36_5_1.arf", "r") as fp:
+        trials = kilo.oeaudio_to_trials(
+            fp, finder, "ADC3", prepad=0.5, oeaudio_log=None, aux={"led": "ADC4"}
+        )
+    pp = list(kilo.trials_to_pprox(pd.DataFrame(trials).assign(events=np.nan), RATE))
+    assert [bool(t["aux"]) for t in pp] == [t["opto"]["led"] for t in ref]
+    for t, r in zip(pp, ref, strict=True):
+        if t["aux"]:
+            ((start, end),) = [a["interval"] for a in t["aux"]]
+            assert abs(start - r["opto"]["led_start"][0]) * RATE <= 1
+            assert abs(end - r["opto"]["led_end"][0]) * RATE <= 1

@@ -380,3 +380,23 @@ def test_compare_spike_at_moved_boundary(make_recording, tmp_path):
     assert diffs == ["trial 0 spikes: 1 -> 2", "trial 1 spikes: 2 -> 1"]
     diffs, _ = compare_pprox(new, ref, boundary_tol=3 / SAMPLING_RATE)
     assert diffs == []
+
+
+def test_aux_option(make_recording):
+    """--aux NAME=CHANNEL records each trial's pulses on that channel in its
+    aux list, and the channel in aux_tracks at the top level."""
+    run = make_recording(aux_channels={"ADC4": [(30000, 60000)]})
+    pp = load_pprox(run("--aux", "led=ADC4"), 1)
+    assert pp["aux_tracks"] == {"led": {"channel": "ADC4"}}
+    assert [t["aux"] for t in pp["pprox"]] == [
+        [{"name": "led", "interval": [0.0, 1.0]}],
+        [],
+        [],
+    ]
+
+
+def test_no_aux_fields_by_default(make_recording):
+    """Without --aux, neither aux nor aux_tracks is written."""
+    pp = load_pprox(make_recording(aux_channels={"ADC4": [(30000, 60000)]})(), 1)
+    assert "aux_tracks" not in pp
+    assert all("aux" not in t for t in pp["pprox"])

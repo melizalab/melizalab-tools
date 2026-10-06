@@ -71,10 +71,24 @@ when a fix makes one pass.
 
 ## group-kilo-spikes (end to end)
 
-- [ ] Handle optogenetic stimulation when checking the full pipeline:
-  jpresent's `condition_start` / `condition_stop` messages (half of P352's
-  stimuli; trials ignore them now) and the separate opto pulse track. Start
-  from the existing patch (not yet in the repo).
+- [x] Optogenetic stimulation, in place of group-klopto-spikes
+  (github.com/bpqle/melizalab-tools, branch patch): `--aux NAME=CHANNEL`
+  records the pulses on an auxiliary channel in each trial's `aux` list
+  (`{"name", "interval"}` relative to stimulus onset, assigned to the trial
+  where they start, unclipped) and the channel in `aux_tracks`. On E36 this
+  matches klopto's `opto` field on all 1300 trials, to within one sample.
+- [ ] Publish the stimtrial specification with `aux` and `aux_tracks` (drafts
+  in examples/stimtrial.json and stimulus_trial.md; originals in *.orig).
+  While there: stimtrial.json refers to `pprox.json#/$defs/pproc`, but
+  pprox.json defines it as `definitions/trial` (`$id` `#pproc`), so the
+  reference doesn't resolve; and `"length": 2` is not a JSON Schema keyword
+  (`minItems`/`maxItems`).
+- [ ] Cross-check aux pulses against jpresent's `condition_start` /
+  `condition_stop` messages (warn about a condition without a pulse, or a
+  pulse without a condition). The messages carry only the stimulus name.
+- [ ] Existing klopto outputs (e.g. E36's) have placeholder `led_start` /
+  `led_end` values in trials without the LED (sample 0 relative to the
+  stimulus, e.g. -3.27 s); analyses must use `led` first.
 - [ ] Compare the end-to-end output of `group-kilo-spikes` (pprox and waveform
   files) against known-good results (`test_group_spikes_examples.py`):
   - P397_1_1 (oeaudio-present, clicks on ADC3, `--oeaudio-log`; reference from

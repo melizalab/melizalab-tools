@@ -29,7 +29,7 @@ GOLDEN = DATA / "E36_excerpt_golden"
 N_BEFORE, N_AFTER = 60, 150  # the script's default waveform window (2 and 5 ms)
 
 
-def run_excerpt(tmp: Path, sync: str = "ADC3") -> Path:
+def run_excerpt(tmp: Path, sync: str = "ADC3", extra=()) -> Path:
     """Run group-kilo-spikes on the excerpt in tmp; returns the output directory."""
     sorting = tmp / "sorting"
     sorting.mkdir(parents=True)
@@ -59,6 +59,7 @@ def run_excerpt(tmp: Path, sync: str = "ADC3") -> Path:
                 sync,
                 "--prepad",
                 "0.5",
+                *extra,
                 str(DATA / "E36_excerpt.arf"),
                 str(sorting),
             ]
@@ -128,3 +129,25 @@ def test_click_track_gives_same_output(tmp_path, outputs):
         )
         assert diffs == [], path.name
         assert (shifts[:, 0] * 30000 >= -1.5).all() and (shifts[:, 0] <= 0).all()
+
+
+def test_led_pulses_as_aux(tmp_path, outputs):
+    """With --aux led=ADC4, trial 4 (the one with a condition_start message)
+    has the 1 s LED pulse, starting 1 sample before the stimulus; the others
+    have none. Otherwise the output is the same as the golden output."""
+    out = run_excerpt(tmp_path, extra=("--aux", "led=ADC4"))
+    for path in sorted(GOLDEN.glob("*.pprox")):
+        pp = load(out / path.name)
+        assert pp["aux_tracks"] == {"led": {"channel": "ADC4"}}
+        assert [len(t["aux"]) for t in pp["pprox"]] == [0, 0, 0, 0, 1]
+        ((name, (start, end)),) = [
+            (a["name"], a["interval"]) for a in pp["pprox"][4]["aux"]
+        ]
+        assert name == "led"
+        assert start == pytest.approx(-1 / 30000) and end == pytest.approx(
+            1 - 1 / 30000
+        )
+        diffs, shifts = compare_pprox(
+            pp, load(path), ignore={"processed_by", "aux_tracks"}
+        )
+        assert diffs == [] and np.allclose(shifts, 0), path.name

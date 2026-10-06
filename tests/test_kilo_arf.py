@@ -175,14 +175,16 @@ def test_trials_from_clicks(make_arf):
     """Each click starts a stimulus. A trial runs from prepad (1 s) before its
     onset to prepad before the next onset; the last trial ends at the end of
     the recording. Stimulus end is onset + duration. Message times (which lag
-    the clicks) do not affect any boundary.
+    the clicks) do not affect any boundary. With no auxiliary channels
+    requested, aux is None.
     """
     result = trials(make_arf(one_entry()))
-    assert [tuple(t) for t in result] == [
+    assert [tuple(t)[:6] for t in result] == [
         (0, 0, 60000, "a", 30000, 45000),
         (0, 60000, 120000, "b", 90000, 105000),
         (0, 120000, NSAMPLES, "c", 150000, 165000),
     ]
+    assert all(t.aux is None for t in result)
 
 
 def test_trials_prepad(make_arf):
@@ -411,3 +413,92 @@ def test_detect_sync_onsets_rejects_events_close_to_noise():
 
 def detect(x, thresh=0.5):
     return kilo.detect_sync_onsets(x, thresh)
+
+
+# --- auxiliary channels
+
+LED = "ADC4"
+
+
+def test_detect_pulses_onsets_and_offsets():
+    """Each pulse's onset is its first sample above threshold and its offset the
+    first sample back below; a pulse still high at the end of the data ends
+    there, and one already high at the start is left out."""
+    x = np.zeros(1000)
+    x[:50] = 100  # already high at the start
+    x[100:200] = 100
+    x[300:310] = 100
+    x[950:] = 100  # still high at the end
+    assert kilo.detect_pulses(x).tolist() == [[100, 200], [300, 310], [950, 1000]]
+
+
+def test_detect_pulses_no_events():
+    """A signal with no clear pulses gives an empty (0, 2) array."""
+    pulses = kilo.detect_pulses(np.random.default_rng(0).normal(0, 5, 1000))
+    assert pulses.shape == (0, 2)
+
+
+def aux_entry(pulses, **kwargs):
+    return one_entry(aux_channels={LED: pulses}, **kwargs)
+
+
+def test_aux_pulses_assigned_to_trial_where_they_start(make_arf):
+    """Pulses go in the trial in which they start, unclipped, even if they run
+    into the next trial; a trial can have several, or none."""
+    pulses = [(30000, 75000), (150000, 153000), (156000, 159000)]
+    result = trials(make_arf(aux_entry(pulses)), aux={"led": LED})
+    assert [t.aux for t in result] == [
+        (("led", 30000, 75000),),  # runs past the end of trial 0 (60000)
+        (),
+        (("led", 150000, 153000), ("led", 156000, 159000)),
+    ]
+
+
+def test_aux_pulse_before_first_trial_dropped(make_arf, caplog):
+    """A pulse that starts before the first trial is dropped with a warning."""
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(
+            make_arf(aux_entry([(5000, 8000), (30000, 45000)])),
+            aux={"led": LED},
+            prepad=0.5,  # the first trial starts at 15000
+        )
+    assert result[0].aux == (("led", 30000, 45000),)
+    assert "starts before the first trial" in caplog.text
+
+
+def test_aux_several_channels(make_arf):
+    """Pulses from several channels are merged in time order, by name."""
+    spec = one_entry(aux_channels={LED: [(90000, 92000)], "ADC5": [(91000, 93000)]})
+    result = trials(make_arf(spec), aux={"led": LED, "ttl": "ADC5"})
+    assert result[1].aux == (("led", 90000, 92000), ("ttl", 91000, 93000))
+
+
+def test_aux_missing_channel(make_arf):
+    """A missing auxiliary channel is a RuntimeError naming it."""
+    with pytest.raises(RuntimeError, match="'ADC7' for 'led'"):
+        trials(make_arf(one_entry()), aux={"led": "ADC7"})
+
+
+def test_aux_in_pprox(make_arf):
+    """In the pprox, each trial has an aux list of {name, interval} objects
+    with times in seconds relative to the stimulus onset; trials without
+    pulses have an empty list."""
+    import pandas as pd
+
+    pulses = [(30000, 60000), (156000, 159000)]
+    result = trials(make_arf(aux_entry(pulses)), aux={"led": LED})
+    pp = list(kilo.trials_to_pprox(pd.DataFrame(result).assign(events=np.nan), 30000.0))
+    assert [t["aux"] for t in pp] == [
+        [{"name": "led", "interval": (0.0, 1.0)}],
+        [],
+        [{"name": "led", "interval": (0.2, 0.3)}],
+    ]
+
+
+def test_no_aux_field_unless_requested(make_arf):
+    """Without auxiliary channels, the pprox trials have no aux field."""
+    import pandas as pd
+
+    result = trials(make_arf(aux_entry([(30000, 60000)])))
+    pp = list(kilo.trials_to_pprox(pd.DataFrame(result).assign(events=np.nan), 30000.0))
+    assert all("aux" not in t for t in pp)

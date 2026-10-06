@@ -16,7 +16,9 @@ offset, so message sample numbers stay valid), and are gzip-compressed.
 
 - E36_excerpt.arf: jpresent, GUI 1.0.2. ADC3 has the sustained pulses, ADC5
   the clicks that drive the Schmitt trigger making them (positive at stimulus
-  onset, negative at offset). The pulses of trials 0 and 3 have flat tops that
+  onset, negative at offset). ADC4 has the optogenetic LED pulses (1 s, at
+  stimulus onset, in trial 4 of the excerpt; condition_start messages mark
+  those trials). The pulses of trials 0 and 3 have flat tops that
   never dip, which the earlier z-scored detector reported at their end.
 - E36_excerpt_sorting/: the kilosort output for the same stretch of E36, cut
   down to three 'good' clusters (52 on channel 79; 675 and 676, which share
@@ -79,7 +81,11 @@ def e36(examples: Path):
         end = starts[NSTIMULI] - first
         with arf.open_file(HERE / "E36_excerpt.arf", "w") as out:
             copy_entry(
-                src, out, ["ADC3", "ADC5"], end, rows[rows["start"] < starts[NSTIMULI]]
+                src,
+                out,
+                ["ADC3", "ADC4", "ADC5"],
+                end,
+                rows[rows["start"] < starts[NSTIMULI]],
             )
 
 

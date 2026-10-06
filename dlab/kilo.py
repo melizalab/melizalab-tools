@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import NamedTuple
 
@@ -25,7 +25,11 @@ log = logging.getLogger(__name__)
 
 
 class Trial(NamedTuple):
-    """Represents the structure of a trial. All time units are in samples."""
+    """Represents the structure of a trial. All time units are in samples.
+
+    aux is None if no auxiliary channels were requested; otherwise it holds a
+    (name, start, end) tuple for each auxiliary pulse that starts in the trial.
+    """
 
     recording_entry: int
     recording_start: int
@@ -33,6 +37,7 @@ class Trial(NamedTuple):
     stimulus_name: str
     stimulus_start: int
     stimulus_end: int
+    aux: tuple | None = None
 
 
 class Stimulus(NamedTuple):
@@ -180,17 +185,19 @@ def entry_metadata(entry):
     return {"name": entry.name, "sampling_rate": stim_dset.attrs["sampling_rate"]}
 
 
-def detect_sync_onsets(
+def detect_pulses(
     data: np.ndarray, thresh: float = 0.5, min_snr: float = 20.0
 ) -> np.ndarray:
-    """Returns the sample indices where a sync signal rises through a threshold.
+    """Returns the onset and offset of each pulse in a signal, as an (n, 2) array.
 
     The threshold is set `thresh` of the way from the baseline (5th percentile)
     to the peak (maximum) of the signal. This works for brief clicks and for
     pulses that stay high for the duration of the stimulus, however long they
     are, as long as the signal is high less than 95% of the time. The onset is
-    the first sample at or above the threshold. A pulse already high at the
-    start of the data has no onset.
+    the first sample at or above the threshold, and the offset the first sample
+    after it below the threshold (or the length of the data, if the pulse is
+    still high at the end). A pulse already high at the start of the data is
+    not included.
 
     The baseline and noise are estimated from about a million evenly spaced
     samples. Sync events should be unambiguous, so if the peak is less than
@@ -200,7 +207,7 @@ def detect_sync_onsets(
 
     """
     if not 0 < thresh < 1:
-        raise ValueError(f"sync threshold must be between 0 and 1 (got {thresh})")
+        raise ValueError(f"threshold must be between 0 and 1 (got {thresh})")
     # baseline and noise are estimated from a subsample, which bounds memory use
     # for long recordings; the peak and the crossings use every sample
     sample = data[:: max(1, data.size // 1_000_000)]
@@ -210,10 +217,25 @@ def detect_sync_onsets(
     below = sample[sample < level].astype("d")
     noise = 1.4826 * np.median(np.abs(below - np.median(below)))
     if peak - baseline < min_snr * noise:
-        log.debug("    - sync peak is only %.1f x the noise", (peak - baseline) / noise)
-        return np.array([], dtype=int)
+        log.debug("    - peak is only %.1f x the noise", (peak - baseline) / noise)
+        return np.empty((0, 2), dtype=int)
     above = data >= level
-    return np.flatnonzero(~above[:-1] & above[1:]) + 1
+    rises = np.flatnonzero(~above[:-1] & above[1:]) + 1
+    falls = np.flatnonzero(above[:-1] & ~above[1:]) + 1
+    offsets = np.append(falls, data.size)[np.searchsorted(falls, rises)]
+    return np.column_stack([rises, offsets])
+
+
+def detect_sync_onsets(
+    data: np.ndarray, thresh: float = 0.5, min_snr: float = 20.0
+) -> np.ndarray:
+    """Returns the sample indices where a sync signal rises through a threshold.
+
+    These are the onsets of the pulses found by detect_pulses (see there for
+    how the threshold is set).
+
+    """
+    return detect_pulses(data, thresh, min_snr)[:, 0]
 
 
 class StimulusFinder:
@@ -252,6 +274,7 @@ def oeaudio_to_trials(
     prepad: float = 1.0,
     *,
     oeaudio_log: Path | None,
+    aux: Mapping[str, str] | None = None,
 ) -> list[Trial]:
     """Extracts trial information from an oeaudio-present experiment ARF file
 
@@ -273,6 +296,12 @@ def oeaudio_to_trials(
     stimulus onset. The default is 1.0 s.
 
     If oeaudio_log is set, it's used instead of the network event datasets.
+
+    aux maps names to the datasets of auxiliary channels (e.g. {"led":
+    "ADC4"}) carrying pulses from other devices, such as an optogenetic light
+    source or a sensor's TTL output. Pulses are detected as for the sync
+    channel, and each is assigned, unclipped, to the trial in which it starts
+    (see Trial.aux).
 
     """
     from itertools import zip_longest
@@ -354,6 +383,7 @@ def oeaudio_to_trials(
             )
 
         padding_samples = int(prepad * sampling_rate)
+        entry_trials = []
         for stim, onset, offset in zip_longest(
             entry_stimuli,
             stim_onsets,
@@ -367,7 +397,7 @@ def oeaudio_to_trials(
                     "  - WARNING: stimulus %s is longer than the duration of the trial",
                     stim,
                 )
-            trials.append(
+            entry_trials.append(
                 Trial(
                     entry_num,
                     onset - padding_samples,
@@ -377,7 +407,52 @@ def oeaudio_to_trials(
                     onset + stim_samples,
                 )
             )
+        if aux:
+            entry_trials = assign_aux_pulses(
+                entry_trials, aux_pulses(entry, aux, sync_thresh)
+            )
+        trials.extend(entry_trials)
     return trials
+
+
+def aux_pulses(entry, aux: Mapping[str, str], thresh: float) -> list[tuple]:
+    """Detects the pulses on each auxiliary channel in an entry. Returns a list
+    of (name, start, end) tuples, sorted by start."""
+    pulses = []
+    for name, dset_name in aux.items():
+        try:
+            dset = entry[dset_name]
+        except KeyError as err:
+            raise RuntimeError(
+                f"unable to find auxiliary channel '{dset_name}' for '{name}'. "
+                f"Options are: {', '.join(entry.keys())}"
+            ) from err
+        detected = detect_pulses(dset[:], thresh)
+        log.info(
+            "  - aux '%s' (%s): detected %d pulses", name, dset_name, len(detected)
+        )
+        pulses.extend((name, int(on), int(off)) for on, off in detected)
+    return sorted(pulses, key=lambda pulse: pulse[1])
+
+
+def assign_aux_pulses(trials: list[Trial], pulses: list[tuple]) -> list[Trial]:
+    """Returns trials (from one entry, in order) with each pulse assigned to the
+    trial in which it starts. Pulses that start before the first trial are
+    dropped with a warning."""
+    starts = np.array([trial.recording_start for trial in trials])
+    assigned = [[] for _ in trials]
+    for pulse in pulses:
+        i = np.searchsorted(starts, pulse[1], side="right") - 1
+        if i < 0:
+            log.warning(
+                "  - aux pulse %s starts before the first trial; dropped", pulse
+            )
+        else:
+            assigned[i].append(pulse)
+    return [
+        trial._replace(aux=tuple(pulses))
+        for trial, pulses in zip(trials, assigned, strict=True)
+    ]
 
 
 def match_clicks(
@@ -479,6 +554,18 @@ def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
                 "end": trial.recording_end,
             },
         }
+        aux = getattr(trial, "aux", None)
+        if isinstance(aux, tuple):
+            pproc["aux"] = [
+                {
+                    "name": name,
+                    "interval": (
+                        (start - trial.stimulus_start) / sampling_rate,
+                        (end - trial.stimulus_start) / sampling_rate,
+                    ),
+                }
+                for name, start, end in aux
+            ]
         yield pproc
 
 
@@ -487,7 +574,7 @@ def group_spikes_script(argv=None):
     import os
 
     from dlab import __version__
-    from dlab.util import json_serializable, setup_log
+    from dlab.util import ParseKeyVal, json_serializable, setup_log
 
     version = "2026.07.15"
 
@@ -518,6 +605,13 @@ def group_spikes_script(argv=None):
         type=float,
         help="threshold for detecting sync events, as a fraction of the way from the "
         "sync channel's baseline to its peak (default %(default)0.2f)",
+    )
+    p.add_argument(
+        "--aux",
+        action=ParseKeyVal,
+        metavar="NAME=CHANNEL",
+        help="record pulses on an auxiliary channel (e.g. an optogenetic light "
+        "source or a sensor's TTL output) in each trial as NAME. May be repeated.",
     )
     p.add_argument(
         "--oeaudio-log",
@@ -681,6 +775,7 @@ def group_spikes_script(argv=None):
                 args.sync_thresh,
                 args.prepad,
                 oeaudio_log=args.oeaudio_log,
+                aux=args.aux,
             )
         )
         entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
@@ -689,6 +784,12 @@ def group_spikes_script(argv=None):
     log.info("- sorting events into trials:")
     events["trial"] = trials.recording_start.searchsorted(events.time, side="left") - 1
 
+    # describes the auxiliary channels; only written if there are any
+    aux_tracks = (
+        {"aux_tracks": {name: {"channel": dset} for name, dset in args.aux.items()}}
+        if args.aux
+        else {}
+    )
     total_spikes = 0
     total_clusters = 0
     good_clust_types = ("good",)
@@ -773,6 +874,7 @@ def group_spikes_script(argv=None):
             kilosort_probe_depth=clust_info["depth"],
             kilosort_n_spikes=clust_info["n_spikes"],
             entry_metadata=entry_attrs,
+            **aux_tracks,
             **resource_info["metadata"],
         )
         if not args.dry_run:
