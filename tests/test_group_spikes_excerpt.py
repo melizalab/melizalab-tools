@@ -96,7 +96,7 @@ def test_pprox_match_golden(outputs):
 
 def test_waveforms_are_windows_of_whitened_data(outputs):
     """Each waveform is the window of temp_wh.dat around its spike, on the
-    cluster's channel, for every spike with a full window."""
+    cluster's channel, for every spike in a trial with a full window."""
     import pandas as pd
 
     out, sorting = outputs
@@ -105,9 +105,14 @@ def test_waveforms_are_windows_of_whitened_data(outputs):
     times = np.load(sorting / "spike_times.npy")
     clusters = np.load(sorting / "spike_clusters.npy")
     for cid in (52, 675, 676):
+        first_trial = load(out / f"E36_5_1_c{cid}.pprox")["pprox"][0]["recording"][
+            "start"
+        ]
         expected = times[clusters == cid]
         expected = expected[
-            (expected > N_BEFORE) & (expected < data.shape[0] - N_AFTER)
+            (expected >= first_trial)
+            & (expected > N_BEFORE)
+            & (expected < data.shape[0] - N_AFTER)
         ]
         with h5py.File(out / f"E36_5_1_c{cid}_spikes.h5", "r") as fp:
             got = fp["times"][:]

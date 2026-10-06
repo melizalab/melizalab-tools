@@ -81,3 +81,7 @@ packages = ["dlab"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests that need the large example recordings in examples/ are marked slow and
+# deselected by default; run them with `pytest -m slow`
+addopts = "-m 'not slow'"
+markers = ["slow: needs the large example recordings in examples/"]

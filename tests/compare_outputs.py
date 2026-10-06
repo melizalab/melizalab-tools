@@ -96,12 +96,21 @@ def far_from(times, bounds, tol):
     return times[np.abs(times[:, None] - bounds).min(1) > tol]
 
 
-def compare_waveforms(new: Path, ref: Path, *, ignore=IGNORED) -> list[str]:
-    """Compares two _spikes.h5 files. Returns a list of differences."""
+def compare_waveforms(
+    new: Path, ref: Path, *, ignore=IGNORED, ref_from: int | None = None
+) -> list[str]:
+    """Compares two _spikes.h5 files. Returns a list of differences.
+
+    With ref_from, spikes before that sample are left out of the reference
+    (earlier versions kept spikes before the first trial in the waveform file).
+    """
     diffs = []
     with h5py.File(new, "r") as nfp, h5py.File(ref, "r") as rfp:
+        keep = slice(None)
+        if ref_from is not None:
+            keep = rfp["times"][:] >= ref_from
         for name in ("times", "waveforms"):
-            if not np.array_equal(nfp[name][:], rfp[name][:]):
+            if not np.array_equal(nfp[name][:], rfp[name][:][keep]):
                 diffs.append(f"{name} differ")
             if dict(nfp[name].attrs) != dict(rfp[name].attrs):
                 diffs.append(f"{name} attributes differ")

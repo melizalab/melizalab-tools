@@ -47,7 +47,7 @@ when a fix makes one pass.
   them 1.3-7.4 ms late at 0.5). Replaced by `detect_sync_onsets`: rising
   edges through a threshold set as a fraction (default 0.5) of the way from
   baseline to peak, rejecting tracks whose peak is < 20x the baseline noise.
-  `--sync-thresh` now takes that fraction; old z-score values are rejected.
+  (`--sync-thresh` was later changed to an absolute override; see below.)
   Old-style click onsets move by 0-2 samples (now the first sample over the
   midpoint, rather than the peak). No sync events is now a clear error.
   Baseline and noise are estimated from ~1e6 samples: estimating them from
@@ -111,10 +111,8 @@ when a fix makes one pass.
     the old detector reported at their end (1.2-1.5 s late). All other old
     onsets were 38-300 samples late (typically ~50). A one-off check: the old
     outputs are not kept in examples/.
-- [ ] The artifact check calls `input()` ("Press any key to continue") when
-  more than half a cluster's spikes look like artifacts, which blocks
-  unattended runs. Make it a warning (or an option)?
-  (`test_too_many_artifacts_prompts_and_skips`)
+- [x] The artifact check calls `input()` ("Press any key to continue") when
+  more than half a cluster's spikes look like artifacts. Kept deliberately.
 - [x] When the recording isn't a local file, it was looked up with
   `nbank.default_registry`, ignoring `--registry`; now uses `--registry`.
 - [x] `processed_by` (and get-songs' `created_by`) used argparse's `prog`,
@@ -122,9 +120,8 @@ when a fix makes one pass.
 - [x] Spikes within 2 ms of the start or 5 ms of the end of the recording are
   dropped from the pprox as well as the waveforms: intended, to keep the two
   in sync. (`test_spikes_too_close_to_edges_are_dropped`)
-- [ ] Question: by the same reasoning, spikes before the first trial are
-  dropped from the pprox but kept in the waveforms. Drop them from the
-  waveforms too? (`test_spikes_before_first_trial_are_dropped`)
+- [x] Spikes before the first trial were dropped from the pprox but kept in
+  the waveforms; now dropped from both, to keep them in sync.
 - [ ] Spikes are assigned to trials with
   `trials.recording_start.searchsorted(events.time)`, which assumes trial
   starts increase through the file and share the kilosort sample frame. With
@@ -146,11 +143,15 @@ when a fix makes one pass.
   outputs can't be used for A/B comparison: their onsets are exactly 31.765 s
   apart, drift to 41.5 s before the start messages by the end, and don't
   match any channel in the ARF.
-- [ ] `detect_sync_onsets` accepts low-amplitude channels: C401's ADC5/ADC6
-  (near the negative rail, ~250 counts of variation) pass the 20x-noise check
-  and give >120,000 events. Proposed: also require the peak to be at least
-  10% of the int16 range above baseline (real sync tracks are 22,000-30,000
-  counts). Needs a decision on the minimum.
+- [x] Sync detection accepted channels without a sync signal (e.g. C401's
+  floating ADC5/ADC6 gave >120,000 events). Now, by default, the threshold is
+  set automatically (halfway from baseline to peak, with the noise check),
+  and it is an error if there are more sync events than stimuli or more than
+  1% of stimuli (at least one) have none: this catches the wrong channel, a
+  recording without a sync signal, or a bad threshold. `--sync-thresh` now
+  overrides the automatic threshold with an absolute level, in the channel's
+  units (it skips the noise check, but not the count checks). Aux channels
+  always use the automatic threshold.
 
 ## pprox.py
 

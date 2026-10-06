@@ -221,3 +221,12 @@ def test_e36_led_pulses_match_condition_messages(caplog):
         result = split(E36, "ADC3", e36_names(), aux={"led": "ADC4"})
     assert [len(t.aux) for t in result] == [0, 0, 0, 0, 1]
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def test_e36_led_channel_is_not_a_sync_track():
+    """Giving the LED channel (one pulse in five trials) as the sync track is
+    an error, not five trials quietly reduced to one."""
+    with pytest.raises(
+        RuntimeError, match="only 1 sync events in 'ADC4' for 5 stimuli"
+    ):
+        split(E36, "ADC4", e36_names())

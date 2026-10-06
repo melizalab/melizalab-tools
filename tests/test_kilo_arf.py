@@ -11,6 +11,7 @@ a bug; see TODO.md.
 import logging
 
 import arf
+import h5py
 import numpy as np
 import pytest
 from conftest import (
@@ -46,11 +47,11 @@ def one_entry(**kwargs):
     return spec
 
 
-def trials(path, finder=None, **kwargs):
+def trials(path, finder=None, sync=SYNC, **kwargs):
     kwargs.setdefault("oeaudio_log", None)
     with arf.open_file(path, "r") as fp:
         return kilo.oeaudio_to_trials(
-            fp, finder or StubFinder(DURATIONS), SYNC, **kwargs
+            fp, finder or StubFinder(DURATIONS), sync, **kwargs
         )
 
 
@@ -262,9 +263,11 @@ def test_trials_from_oeaudio_log(make_arf, tmp_path):
 
 
 def test_trials_more_clicks_than_stimuli(make_arf):
-    """An extra click can't be matched to a stimulus, so this is an error."""
+    """More sync events than stimuli is an error that names the channel."""
     path = make_arf(one_entry(clicks=[*ONSETS, 190000]))
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        RuntimeError, match="4 sync events in 'ADC3' but only 3 stimuli"
+    ):
         trials(path)
 
 
@@ -358,12 +361,47 @@ def test_flat_sync_track_is_an_error(make_arf):
         trials(make_arf(one_entry(clicks=())))
 
 
-@pytest.mark.parametrize("thresh", [0.0, 1.0, 30.0])
-def test_sync_threshold_must_be_a_fraction(make_arf, thresh):
-    """The threshold is a fraction of the baseline-to-peak range; values from
-    the old z-score scale (like the former default of 30) are rejected."""
-    with pytest.raises(ValueError, match="between 0 and 1"):
-        trials(make_arf(one_entry()), sync_thresh=thresh)
+def test_sync_threshold_is_absolute(make_arf):
+    """--sync-thresh is a level in the channel's units. Below the clicks
+    (21000 counts above a baseline of ~330) it finds them; above them, none."""
+    path = make_arf(one_entry())
+    assert [t.stimulus_start for t in trials(path, sync_thresh=10000)] == ONSETS
+    with pytest.raises(RuntimeError, match="no sync events detected in 'ADC3'"):
+        trials(path, sync_thresh=25000)
+
+
+def test_sync_threshold_overrides_noise_check(make_arf):
+    """A sync track whose clicks are too small for the default (here ~60
+    counts on noise with SD 5) is rejected, but can be used by giving a
+    threshold."""
+    path = make_arf(one_entry(click_samples=60))
+    with h5py.File(path, "r+") as fp:
+        dset = fp["entry_0"][SYNC]
+        x = dset[:].astype(float)
+        noise = np.random.default_rng(1).normal(0, 5, x.size)
+        dset[:] = np.round(330 + (x - 330) * 0.003 + noise).astype("int16")
+    with pytest.raises(RuntimeError, match="no sync events detected"):
+        trials(path)
+    assert [t.stimulus_start for t in trials(path, sync_thresh=360)] == ONSETS
+
+
+def test_wrong_channel_with_too_many_events(make_arf):
+    """Using a channel with many more events than stimuli (e.g. audio, or
+    another device's TTL output) as the sync track is an error."""
+    pulses = [(20000 + 15000 * i, 20000 + 15000 * i + 3000) for i in range(10)]
+    path = make_arf(one_entry(aux_channels={"ADC4": pulses}))
+    with pytest.raises(RuntimeError, match="10 sync events in 'ADC4' but only 3"):
+        trials(path, sync="ADC4")
+
+
+def test_too_many_missing_sync_events(make_arf):
+    """More than 1% of stimuli (at least one) without sync events is an error
+    (e.g. the wrong channel, or a sync line that kept dropping out)."""
+    path = make_arf(one_entry(clicks=[30000]))
+    with pytest.raises(
+        RuntimeError, match="only 1 sync events in 'ADC3' for 3 stimuli"
+    ):
+        trials(path)
 
 
 # --- detect_sync_onsets on bare arrays

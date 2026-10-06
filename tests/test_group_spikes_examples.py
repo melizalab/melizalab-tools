@@ -58,7 +58,12 @@ CHANGED = {"entry_metadata"}
 # pprox fields written by group-kilo-spikes itself; the rest are neurobank metadata
 SCRIPT_FIELDS = {"$schema", "pprox", "recording", "processed_by", "entry_metadata"}
 
-pytestmark = pytest.mark.skipif(not EXAMPLES, reason="no examples with args files")
+# slow: runs group-kilo-spikes on full recordings (deselected by default; run
+# with `pytest -m slow`)
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(not EXAMPLES, reason="no examples with args files"),
+]
 
 
 def neurobank_record(reference: Path):
@@ -137,7 +142,11 @@ def test_pprox_match_reference(run_example):
 
 
 def test_waveforms_match_reference(run_example):
-    """Waveform files are identical to the reference (they don't depend on sync)."""
+    """Waveform files are identical to the reference (they don't depend on
+    sync), except that spikes before the first trial are no longer included."""
     out, reference = run_example
     for ref_path in sorted(reference.glob("*_spikes.h5")):
-        assert compare_waveforms(out / ref_path.name, ref_path) == [], ref_path.name
+        pprox = load(out / ref_path.name.replace("_spikes.h5", ".pprox"))
+        first_trial = pprox["pprox"][0]["recording"]["start"]
+        diffs = compare_waveforms(out / ref_path.name, ref_path, ref_from=first_trial)
+        assert diffs == [], ref_path.name

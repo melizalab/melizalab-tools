@@ -186,7 +186,11 @@ def entry_metadata(entry):
 
 
 def detect_pulses(
-    data: np.ndarray, thresh: float = 0.5, min_snr: float = 20.0
+    data: np.ndarray,
+    thresh: float = 0.5,
+    min_snr: float = 20.0,
+    *,
+    level: float | None = None,
 ) -> np.ndarray:
     """Returns the onset and offset of each pulse in a signal, as an (n, 2) array.
 
@@ -205,7 +209,12 @@ def detect_pulses(
     threshold) above the baseline, the signal is treated as having no events
     and an empty array is returned.
 
+    If `level` is given, it is used as the threshold instead (in the units of
+    data), and the noise check is skipped.
+
     """
+    if level is not None:
+        return _pulses_above(data, level)
     if not 0 < thresh < 1:
         raise ValueError(f"threshold must be between 0 and 1 (got {thresh})")
     # baseline and noise are estimated from a subsample, which bounds memory use
@@ -219,6 +228,11 @@ def detect_pulses(
     if peak - baseline < min_snr * noise:
         log.debug("    - peak is only %.1f x the noise", (peak - baseline) / noise)
         return np.empty((0, 2), dtype=int)
+    return _pulses_above(data, level)
+
+
+def _pulses_above(data: np.ndarray, level: float) -> np.ndarray:
+    """Onsets and offsets of the stretches of data at or above level"""
     above = data >= level
     rises = np.flatnonzero(~above[:-1] & above[1:]) + 1
     falls = np.flatnonzero(above[:-1] & ~above[1:]) + 1
@@ -227,7 +241,11 @@ def detect_pulses(
 
 
 def detect_sync_onsets(
-    data: np.ndarray, thresh: float = 0.5, min_snr: float = 20.0
+    data: np.ndarray,
+    thresh: float = 0.5,
+    min_snr: float = 20.0,
+    *,
+    level: float | None = None,
 ) -> np.ndarray:
     """Returns the sample indices where a sync signal rises through a threshold.
 
@@ -235,7 +253,7 @@ def detect_sync_onsets(
     how the threshold is set).
 
     """
-    return detect_pulses(data, thresh, min_snr)[:, 0]
+    return detect_pulses(data, thresh, min_snr, level=level)[:, 0]
 
 
 class StimulusFinder:
@@ -270,7 +288,7 @@ def oeaudio_to_trials(
     data_file: h5.File,
     stim_finder: StimulusFinder,
     sync_dset: str,
-    sync_thresh: float = 0.5,
+    sync_thresh: float | None = None,
     prepad: float = 1.0,
     *,
     oeaudio_log: Path | None,
@@ -286,9 +304,16 @@ def oeaudio_to_trials(
     play a synchronization signal on a second channel: a brief click at each
     stimulus onset (old style), or a pulse that stays high for the duration of
     the stimulus (new style). As long as the user remembers to record this
-    channel, it can be used to correct the onset values. `sync_thresh` sets the
-    detection threshold as a fraction of the way from the sync channel's
-    baseline to its peak (see detect_sync_onsets).
+    channel, it can be used to correct the onset values.
+
+    By default, sync events are detected with a threshold halfway between the
+    sync channel's baseline and its peak, and a channel whose peak doesn't
+    stand well clear of its noise has no events (see detect_pulses).
+    `sync_thresh` overrides this with an absolute threshold, in the channel's
+    units. Either way, it is an error if there are more sync events than
+    stimuli, or more than 1% of the stimuli (at least one) have none, since
+    that indicates the wrong channel, a recording without a sync signal, or a
+    bad threshold.
 
     The continuous recording is broken up into trials based on the stimulus
     presentation, such that each trial encompasses one and only one stimulus.
@@ -327,11 +352,13 @@ def oeaudio_to_trials(
                 f"unable to find sync track. Use --sync to configure. Options are: {available_tracks}"
             ) from err
 
-        stim_onsets = detect_sync_onsets(sync[:], sync_thresh)
+        stim_onsets = detect_sync_onsets(sync[:], level=sync_thresh)
         log.info("    - detected %d sync events", stim_onsets.size)
         if stim_onsets.size == 0:
             raise RuntimeError(
-                f"no sync events detected in '{sync_dset}'. Check --sync and --sync-thresh."
+                f"no sync events detected in '{sync_dset}': it may not be the sync "
+                "track, or the sync signal may not have been recorded. Check --sync, "
+                "or set --sync-thresh."
             )
         dset_offset = sync.attrs["offset"]
         dset_end = sync.size
@@ -369,6 +396,7 @@ def oeaudio_to_trials(
             stim._replace(start=stim.start - stim_sample_offset)
             for stim in entry_stimuli
         ]
+        check_sync_count(stim_onsets.size, len(entry_stimuli), sync_dset)
         entry_stimuli = match_clicks(entry_stimuli, stim_onsets)
         starts = np.array([stim.start for stim in entry_stimuli])
         lags = (stim_onsets - starts) / sampling_rate
@@ -409,9 +437,7 @@ def oeaudio_to_trials(
                 )
             )
         if aux:
-            entry_trials = assign_aux_pulses(
-                entry_trials, aux_pulses(entry, aux, sync_thresh)
-            )
+            entry_trials = assign_aux_pulses(entry_trials, aux_pulses(entry, aux))
             if stim_dset is not None:
                 conditions = [
                     c._replace(start=c.start - stim_sample_offset)
@@ -494,9 +520,10 @@ def check_aux_conditions(
     return with_condition
 
 
-def aux_pulses(entry, aux: Mapping[str, str], thresh: float) -> list[tuple]:
-    """Detects the pulses on each auxiliary channel in an entry. Returns a list
-    of (name, start, end) tuples, sorted by start."""
+def aux_pulses(entry, aux: Mapping[str, str]) -> list[tuple]:
+    """Detects the pulses on each auxiliary channel in an entry, with the
+    automatic threshold (see detect_pulses). Returns a list of (name, start,
+    end) tuples, sorted by start."""
     pulses = []
     for name, dset_name in aux.items():
         try:
@@ -506,7 +533,7 @@ def aux_pulses(entry, aux: Mapping[str, str], thresh: float) -> list[tuple]:
                 f"unable to find auxiliary channel '{dset_name}' for '{name}'. "
                 f"Options are: {', '.join(entry.keys())}"
             ) from err
-        detected = detect_pulses(dset[:], thresh)
+        detected = detect_pulses(dset[:])
         log.info(
             "  - aux '%s' (%s): detected %d pulses", name, dset_name, len(detected)
         )
@@ -532,6 +559,28 @@ def assign_aux_pulses(trials: list[Trial], pulses: list[tuple]) -> list[Trial]:
         trial._replace(aux=tuple(pulses))
         for trial, pulses in zip(trials, assigned, strict=True)
     ]
+
+
+def check_sync_count(
+    nsync: int, nstimuli: int, sync_dset: str, max_missing: float = 0.01
+) -> None:
+    """Raises RuntimeError if the number of sync events doesn't fit the number
+    of stimuli: if there are more sync events, or if more than max_missing of
+    the stimuli (at least one) would have none."""
+    hint = (
+        f"'{sync_dset}' may not be the sync track, or the threshold may be wrong. "
+        "Check --sync, or set --sync-thresh."
+    )
+    if nsync > nstimuli:
+        raise RuntimeError(
+            f"{nsync} sync events in '{sync_dset}' but only {nstimuli} stimuli: {hint}"
+        )
+    allowed = max(1, int(nstimuli * max_missing))
+    if nstimuli - nsync > allowed:
+        raise RuntimeError(
+            f"only {nsync} sync events in '{sync_dset}' for {nstimuli} stimuli "
+            f"(at most {allowed} may be missing): {hint}"
+        )
 
 
 def match_clicks(
@@ -681,10 +730,10 @@ def group_spikes_script(argv=None):
     )
     p.add_argument(
         "--sync-thresh",
-        default=0.5,
         type=float,
-        help="threshold for detecting sync events, as a fraction of the way from the "
-        "sync channel's baseline to its peak (default %(default)0.2f)",
+        help="threshold for detecting sync events, in the units of the sync channel "
+        "(default: halfway between the channel's baseline and its peak, with checks "
+        "that the channel has clear events). Only needed to override the default.",
     )
     p.add_argument(
         "--aux",
@@ -863,6 +912,12 @@ def group_spikes_script(argv=None):
     # this pandas magic sorts the events by cluster and trial
     log.info("- sorting events into trials:")
     events["trial"] = trials.recording_start.searchsorted(events.time, side="left") - 1
+    # spikes before the first trial are in no trial; drop them from the waveform
+    # files too, so these and the pprox files have the same spikes
+    before = events.trial < 0
+    if before.any():
+        log.info("  - dropping %d spikes before the first trial", before.sum())
+        events = events[~before]
 
     # describes the auxiliary channels; only written if there are any
     aux_tracks = (

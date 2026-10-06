@@ -161,14 +161,14 @@ def test_trial_without_spikes(make_recording):
 
 
 def test_spikes_before_first_trial_are_dropped(make_recording):
-    """Spikes before the first trial starts are not in any trial. NB: they are
-    still in the waveform file and counted in the log (see TODO.md)."""
+    """Spikes before the first trial starts are in no trial, so they are
+    dropped from the waveform file as well as the pprox."""
     run = make_recording({1: dict(times=[10000, 33000], group="good", ch=2)})
     out = run("--prepad", "0.5")  # first trial starts at 15000
     trials = load_pprox(out, 1)["pprox"]
     assert sum(len(t["events"]) for t in trials) == 1
     with h5py.File(out / "rec_c1_spikes.h5") as fp:
-        assert fp["times"][:].tolist() == [10000, 33000], "NB: in the waveforms"
+        assert fp["times"][:].tolist() == [33000]
 
 
 def test_waveforms(make_recording):

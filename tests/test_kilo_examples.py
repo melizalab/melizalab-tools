@@ -30,6 +30,10 @@ from conftest import StubFinder, oeaudio_log_text
 
 from dlab import kilo
 
+# slow: reads the full example recordings (deselected by default; run with
+# `pytest -m slow`)
+pytestmark = pytest.mark.slow
+
 EXAMPLES = Path(__file__).parent.parent / "examples"
 RATE = 30000
 
@@ -441,3 +445,18 @@ def test_aux_matches_klopto_opto(caplog):
             ((start, end),) = [a["interval"] for a in t["aux"]]
             assert abs(start - r["opto"]["led_start"][0]) * RATE <= 1
             assert abs(end - r["opto"]["led_end"][0]) * RATE <= 1
+
+
+@requires("C401_1_1b/output")
+def test_floating_channel_is_not_a_sync_track():
+    """C401's ADC5 (near the negative rail, ~250 counts of noise) has no sync
+    signal; using it as the sync track is an error rather than 100,000+
+    spurious events matched to stimuli."""
+    from conftest import StubFinder
+    from test_group_spikes_examples import stimulus_durations
+
+    ex = EXAMPLES / "C401_1_1b"
+    finder = StubFinder(stimulus_durations(ex / "output"))
+    with h5py.File(ex / "C401_1_1b.arf", "r") as fp:
+        with pytest.raises(RuntimeError, match="sync events in 'ADC5' but only 110"):
+            kilo.oeaudio_to_trials(fp, finder, "ADC5", oeaudio_log=None)
