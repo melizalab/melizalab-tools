@@ -339,6 +339,7 @@ def oeaudio_to_trials(
         stim_sample_offset = round(dset_offset * sampling_rate)
         log.info("  - recording clock offset: %d", stim_sample_offset)
 
+        stim_dset = None
         if oeaudio_log is not None:
             log.info("  - parsing stimulus log from %s", oeaudio_log)
             with open(oeaudio_log) as fp:
@@ -411,8 +412,86 @@ def oeaudio_to_trials(
             entry_trials = assign_aux_pulses(
                 entry_trials, aux_pulses(entry, aux, sync_thresh)
             )
+            if stim_dset is not None:
+                conditions = [
+                    c._replace(start=c.start - stim_sample_offset)
+                    for c in oeaudio_conditions(stim_dset)
+                ]
+                if conditions:
+                    check_aux_conditions(
+                        entry_trials, entry_stimuli, conditions, sampling_rate
+                    )
         trials.extend(entry_trials)
     return trials
+
+
+def oeaudio_conditions(dset: h5.Dataset) -> list[Stimulus]:
+    """Parse the 'condition_start <stimulus>' messages in the stimulus message
+    dataset. jpresent sends one with each stimulus presented under an
+    experimental condition (e.g. optogenetic stimulation). Times are sample
+    numbers, as for oeaudio_stims."""
+    re_condition = re.compile(r"condition_start (.*)")
+    out = []
+    for row in dset:
+        m = re_condition.match(row["message"].decode("utf-8"))
+        if m is not None:
+            out.append(Stimulus(Path(m.group(1)).stem, int(row["start"])))
+    return out
+
+
+def check_aux_conditions(
+    trials: list[Trial],
+    stimuli: list[Stimulus],
+    conditions: list[Stimulus],
+    sampling_rate: float,
+    tolerance: float = 0.5,
+) -> set[int]:
+    """Checks that the trials with condition messages are the trials with
+    auxiliary pulses, and logs a warning for each that isn't. Returns the
+    indices of the trials with a condition message.
+
+    trials and stimuli are the trials of one entry and their (matched)
+    stimuli, and conditions the condition messages, with start times in the
+    same units (samples from the start of the sync track). Each condition
+    message is assigned to the trial whose start message is nearest, if that
+    is within tolerance (in s) and names the same stimulus.
+
+    """
+    starts = np.array([stim.start for stim in stimuli])
+    with_condition = set()
+    for cond in conditions:
+        i = int(np.argmin(np.abs(starts - cond.start)))
+        if (
+            abs(starts[i] - cond.start) > tolerance * sampling_rate
+            or stimuli[i].name != cond.name
+        ):
+            log.warning(
+                "  - WARNING: condition message for %s (sample %d) does not match "
+                "any trial (was the trial dropped?)",
+                cond.name,
+                cond.start,
+            )
+        else:
+            with_condition.add(i)
+    with_pulses = {i for i, trial in enumerate(trials) if trial.aux}
+    log.info(
+        "    - %d trials with condition messages, %d with aux pulses",
+        len(with_condition),
+        len(with_pulses),
+    )
+    for i in sorted(with_condition - with_pulses):
+        log.warning(
+            "  - WARNING: trial %d (%s) has a condition message but no aux pulses",
+            i,
+            trials[i].stimulus_name,
+        )
+    for i in sorted(with_pulses - with_condition):
+        log.warning(
+            "  - WARNING: trial %d (%s) has aux pulses but no condition message",
+            i,
+            trials[i].stimulus_name,
+        )
+    return with_condition
 
 
 def aux_pulses(entry, aux: Mapping[str, str], thresh: float) -> list[tuple]:

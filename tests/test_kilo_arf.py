@@ -19,6 +19,7 @@ from conftest import (
     SAMPLING_RATE,
     SYNC,
     StubFinder,
+    jpresent_messages,
     oeaudio_log_text,
     oeaudio_messages,
 )
@@ -502,3 +503,86 @@ def test_no_aux_field_unless_requested(make_arf):
     result = trials(make_arf(aux_entry([(30000, 60000)])))
     pp = list(kilo.trials_to_pprox(pd.DataFrame(result).assign(events=np.nan), 30000.0))
     assert all("aux" not in t for t in pp)
+
+
+# --- condition messages (jpresent) vs aux pulses
+
+
+def opto_entry(pulses, conditions=("b",), **kwargs):
+    """A jpresent entry with condition messages for `conditions` and LED
+    pulses on ADC4"""
+    return one_entry(
+        messages=jpresent_messages(STIMULI, conditions=set(conditions)),
+        aux_channels={LED: pulses},
+        **kwargs,
+    )
+
+
+def aux_warnings(caplog):
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_oeaudio_conditions():
+    """condition_start messages are parsed into (stimulus, sample) pairs."""
+    import numpy as np
+
+    rows = np.array(
+        [
+            (100, b"start a"),
+            (130, b"condition_start a"),
+            (500, b"stop a"),
+            (500, b"condition_stop a"),
+        ],
+        dtype=[("start", "i8"), ("message", "S64")],
+    )
+    assert kilo.oeaudio_conditions(rows) == [kilo.Stimulus("a", 130)]
+
+
+def test_conditions_agree_with_pulses(make_arf, caplog):
+    """When the trials with condition messages are the trials with pulses,
+    there are no warnings."""
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(opto_entry([(90000, 105000)])), aux={"led": LED})
+    assert [bool(t.aux) for t in result] == [False, True, False]
+    assert aux_warnings(caplog) == []
+
+
+def test_condition_without_pulse_warns(make_arf, caplog):
+    """A condition message for a trial with no pulse (e.g. the LED didn't fire,
+    or --aux names the wrong channel) is logged."""
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        trials(
+            make_arf(opto_entry([(90000, 105000)], conditions=("b", "c"))),
+            aux={"led": LED},
+        )
+    assert aux_warnings(caplog) == [
+        "  - WARNING: trial 2 (c) has a condition message but no aux pulses"
+    ]
+
+
+def test_pulse_without_condition_warns(make_arf, caplog):
+    """A pulse in a trial without a condition message is logged."""
+    pulses = [(90000, 105000), (150000, 160000)]
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        trials(make_arf(opto_entry(pulses)), aux={"led": LED})
+    assert aux_warnings(caplog) == [
+        "  - WARNING: trial 2 (c) has aux pulses but no condition message"
+    ]
+
+
+def test_condition_for_dropped_trial_warns(make_arf, caplog):
+    """If the trial with the condition was dropped (its sync event was missed),
+    the condition message can't be matched, which is logged."""
+    spec = opto_entry([(90000, 105000)], clicks=[30000, 150000])
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(spec), aux={"led": LED})
+    assert [t.stimulus_name for t in result] == ["a", "c"]
+    warnings = aux_warnings(caplog)
+    assert any("condition message for b" in w for w in warnings)
+
+
+def test_no_condition_check_without_aux(make_arf, caplog):
+    """Without --aux, condition messages are not checked."""
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        trials(make_arf(opto_entry([])))
+    assert aux_warnings(caplog) == []

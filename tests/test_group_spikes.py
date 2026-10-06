@@ -400,3 +400,13 @@ def test_no_aux_fields_by_default(make_recording):
     pp = load_pprox(make_recording(aux_channels={"ADC4": [(30000, 60000)]})(), 1)
     assert "aux_tracks" not in pp
     assert all("aux" not in t for t in pp["pprox"])
+
+
+def test_outputs_conform_to_stimtrial_schema(make_recording):
+    """The synthetic run's pprox files, with and without --aux, conform to the
+    published stimtrial schema."""
+    from stimtrial_schema import validate
+
+    run = make_recording(aux_channels={"ADC4": [(30000, 60000)]})
+    validate(load_pprox(run(), 1))
+    validate(load_pprox(run("--aux", "led=ADC4"), 1))

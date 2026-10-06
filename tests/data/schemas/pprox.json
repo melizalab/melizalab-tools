@@ -1,0 +1,39 @@
+{
+    "$id": "https://meliza.org/spec:2/pprox.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "point process collection",
+
+    "$defs": {
+        "pproc": {
+            "$anchor": "pproc",
+            "description": "a single point process",
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": { "type": "number" }
+                },
+                "offset": {
+                    "type": "number",
+                    "description": "offset, in seconds, added to event times"
+                },
+                "marks": {
+                    "description": "map of arrays that mark the events",
+                    "type": "object",
+                    "additionalProperties": { "type": "array" }
+                }
+            },
+            "required": ["events"]
+        }
+    },
+
+    "type": "object",
+    "properties": {
+        "pprox": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/pproc" }
+        },
+        "version": { "type": "integer" }
+    },
+    "required": ["pprox"]
+}

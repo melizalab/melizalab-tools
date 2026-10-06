@@ -50,8 +50,10 @@ audio = ["samplerate>=0.2.3"]
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.18",
     "pytest>=9.0.3",
     "pytest-cov>=4.1.0",
+    "referencing>=0.37.0",
     "ruff>=0.14.3",
 ]
 
@@ -77,3 +79,6 @@ ignore = ["E221", "E501", "E701", "RUF012"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["dlab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

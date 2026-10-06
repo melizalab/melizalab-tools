@@ -77,15 +77,20 @@ when a fix makes one pass.
   (`{"name", "interval"}` relative to stimulus onset, assigned to the trial
   where they start, unclipped) and the channel in `aux_tracks`. On E36 this
   matches klopto's `opto` field on all 1300 trials, to within one sample.
-- [ ] Publish the stimtrial specification with `aux` and `aux_tracks` (drafts
-  in examples/stimtrial.json and stimulus_trial.md; originals in *.orig).
-  While there: stimtrial.json refers to `pprox.json#/$defs/pproc`, but
-  pprox.json defines it as `definitions/trial` (`$id` `#pproc`), so the
-  reference doesn't resolve; and `"length": 2` is not a JSON Schema keyword
-  (`minItems`/`maxItems`).
-- [ ] Cross-check aux pulses against jpresent's `condition_start` /
-  `condition_stop` messages (warn about a condition without a pulse, or a
-  pulse without a condition). The messages carry only the stimulus name.
+- [ ] Publish the specifications from melizalab/lab_specs (branch
+  aux-and-2020-12): pprox 1.0 as published (interval optional; schema in JSON
+  Schema 2020-12, with fixes that don't change which documents are valid) and
+  stimtrial 1.0 (requires `interval` and `stimulus`; optional `aux` and
+  `aux_tracks`), matching the ~37,500 stimtrial files in neurobank. Copies of
+  the schemas are in tests/data/schemas, and test_stimtrial_schema.py checks
+  that group-kilo-spikes output conforms; update them if the specs change.
+- [ ] The neurobank resource "trials" is the only stimtrial file without
+  `interval`; probably a dummy that should be removed.
+- [x] Cross-check aux pulses against jpresent's `condition_start` messages:
+  with `--aux`, each condition message is matched to its trial (nearest start
+  message, same stimulus), and a condition without a pulse, a pulse without a
+  condition, or an unmatched condition (e.g. a dropped trial) is logged. On
+  all of E36 the 650 condition messages match the 650 LED pulses.
 - [ ] Existing klopto outputs (e.g. E36's) have placeholder `led_start` /
   `led_end` values in trials without the LED (sample 0 relative to the
   stimulus, e.g. -3.27 s); analyses must use `led` first.

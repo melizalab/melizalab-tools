@@ -1,0 +1,79 @@
+{
+    "$id": "https://meliza.org/spec:2/stimtrial.json#",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "stimulus presentation trials",
+    "type": "object",
+    "properties": {
+        "pprox": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/stimtrial" }
+        },
+        "aux_tracks": {
+            "type": "object",
+            "description": "the auxiliary signals in `aux`, by name. Each value describes the source of the signal (e.g. the recording channel)",
+            "additionalProperties": { "type": "object" }
+        }
+    },
+    "required": ["pprox"],
+    "$defs": {
+        "stimtrial": {
+            "allOf": [
+                {
+                    "$ref": "https://meliza.org/spec:2/pprox.json#pproc"
+                },
+                {
+                    "type": "object",
+                    "description": "a single stimulus presentation trial",
+                    "properties": {
+                        "interval": {
+                            "type": "array",
+                            "items": { "type": "number" },
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "the start and end of the trial (the period in which events were recorded), in seconds, relative to `offset`, if present"
+                        },
+                        "stimulus": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "unique identifier for the presented stimulus"
+                                },
+                                "interval": {
+                                    "type": "array",
+                                    "items": { "type": "number" },
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "description": "the start and end time of the stimulus, in seconds, relative to `offset`, if present"
+                                }
+                            },
+                            "required": ["name", "interval"]
+                        },
+                        "aux": {
+                            "type": "array",
+                            "description": "pulses on auxiliary signals (e.g. an optogenetic light source, or the TTL output of a sensor) that start in the trial",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "the auxiliary signal the pulse is on"
+                                    },
+                                    "interval": {
+                                        "type": "array",
+                                        "items": { "type": "number" },
+                                        "minItems": 2,
+                                        "maxItems": 2,
+                                        "description": "the start and end time of the pulse, in seconds, relative to `offset`, if present"
+                                    }
+                                },
+                                "required": ["name", "interval"]
+                            }
+                        }
+                    },
+                    "required": ["interval", "stimulus"]
+                }
+            ]
+        }
+    }
+}

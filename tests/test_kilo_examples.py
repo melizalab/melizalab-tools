@@ -412,7 +412,7 @@ def test_audit_flags_reference_without_sync():
 
 
 @requires("E36_5_1/output")
-def test_aux_matches_klopto_opto():
+def test_aux_matches_klopto_opto(caplog):
     """On all of E36, the aux pulses on ADC4 match the opto field written by
     group-klopto-spikes: the same 650 trials have the LED, with the same onset
     and offset to within one sample."""
@@ -425,10 +425,15 @@ def test_aux_matches_klopto_opto():
     ex = EXAMPLES / "E36_5_1"
     ref = json.loads(next((ex / "output").glob("*.pprox")).read_text())["pprox"]
     finder = StubFinder(stimulus_durations(ex / "output"))
+    import logging
+
     with h5py.File(ex / "E36_5_1.arf", "r") as fp:
-        trials = kilo.oeaudio_to_trials(
-            fp, finder, "ADC3", prepad=0.5, oeaudio_log=None, aux={"led": "ADC4"}
-        )
+        with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+            trials = kilo.oeaudio_to_trials(
+                fp, finder, "ADC3", prepad=0.5, oeaudio_log=None, aux={"led": "ADC4"}
+            )
+    # every condition_start message is matched by an LED pulse, and vice versa
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
     pp = list(kilo.trials_to_pprox(pd.DataFrame(trials).assign(events=np.nan), RATE))
     assert [bool(t["aux"]) for t in pp] == [t["opto"]["led"] for t in ref]
     for t, r in zip(pp, ref, strict=True):
