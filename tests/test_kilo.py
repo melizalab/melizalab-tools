@@ -51,19 +51,19 @@ test_oeaudio_log = """
 
 def test_oeaudio_log_parsing():
     logfile = io.StringIO(test_oeaudio_log)
-    stimuli = list(kilo.oeaudio_log_stims(logfile, 30000))
+    stimuli = list(kilo.oeaudio_log_to_stimuli(logfile, 30000))
     assert len(stimuli) == 11
     assert stimuli[0].name == "arc607_SwC"
     assert stimuli[-1].name == "arc608_ScCB"
 
 
-# --- oeaudio_log_stims - parsing the oeaudio log file, which can be used as a
+# --- oeaudio_log_to_stimuli - parsing the oeaudio log file, which can be used as a
 # --- replacement for the arf file stimset
 
 
 def test_oeaudio_log_sample_offsets():
     """Sample offsets are (timestamp - StartAcquisition) * sampling_rate, truncated."""
-    stimuli = list(kilo.oeaudio_log_stims(io.StringIO(test_oeaudio_log), 30000))
+    stimuli = list(kilo.oeaudio_log_to_stimuli(io.StringIO(test_oeaudio_log), 30000))
     # StartAcquisition at 13:05:56.214688; first start at 13:06:01.938498
     assert stimuli[0].start == int(5.723810 * 30000), (
         "offset = (start - StartAcquisition) * rate"
@@ -79,8 +79,8 @@ def test_oeaudio_log_sample_offsets():
 
 def test_oeaudio_log_sampling_rate_scales_offsets():
     """Halving the sampling rate halves the offsets (to within rounding)."""
-    a = list(kilo.oeaudio_log_stims(io.StringIO(test_oeaudio_log), 30000))
-    b = list(kilo.oeaudio_log_stims(io.StringIO(test_oeaudio_log), 15000))
+    a = list(kilo.oeaudio_log_to_stimuli(io.StringIO(test_oeaudio_log), 30000))
+    b = list(kilo.oeaudio_log_to_stimuli(io.StringIO(test_oeaudio_log), 15000))
     assert [s.start // 2 for s in a] == pytest.approx([s.start for s in b], abs=1), (
         "offsets should scale with sampling rate"
     )
@@ -99,7 +99,7 @@ def test_oeaudio_log_ignores_comments_blanks_and_other_messages():
         '2026-06-17 13:00:02.000000,"GetRecordingPath"\n'
         '2026-06-17 13:00:03.000000,"start /some/dir/song_1.wav"\n'
     )
-    stimuli = list(kilo.oeaudio_log_stims(io.StringIO(log), 1000))
+    stimuli = list(kilo.oeaudio_log_to_stimuli(io.StringIO(log), 1000))
     assert stimuli == [kilo.Stimulus("song_1", 3000)], (
         "only 'start' messages should yield stimuli"
     )
@@ -115,7 +115,7 @@ def test_oeaudio_log_skips_bad_timestamps_with_warning(caplog):
         '2026-06-17 13:00:01.000000,"start good.wav"\n'
     )
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
-        stimuli = list(kilo.oeaudio_log_stims(io.StringIO(log), 1000))
+        stimuli = list(kilo.oeaudio_log_to_stimuli(io.StringIO(log), 1000))
     assert [s.name for s in stimuli] == ["good"]
     assert "error parsing" in caplog.text, "bad timestamp should be logged"
 
@@ -125,10 +125,10 @@ def test_oeaudio_log_start_before_acquisition_is_an_error():
     a ValueError naming the line."""
     log = '2026-06-17 13:00:00.000000,"start early.wav"\n'
     with pytest.raises(ValueError, match="line 0: stimulus started before"):
-        list(kilo.oeaudio_log_stims(io.StringIO(log), 1000))
+        list(kilo.oeaudio_log_to_stimuli(io.StringIO(log), 1000))
 
 
-# --- oeaudio_stims - parsing the stimulus log stored in the arf file
+# --- messages_to_stimuli - parsing the stimulus log stored in the arf file
 
 
 @pytest.fixture(params=["fixed", "vlen"])
@@ -154,11 +154,11 @@ def stim_dset(request, tmp_path):
         yield dset
 
 
-def test_oeaudio_stims_only_start_messages(stim_dset):
+def test_messages_to_stimuli_only_start_messages(stim_dset):
     """Only 'start <file>' rows become stimuli, with the row's start sample and the
     file's stem as the name. 'stop' and 'metadata:' rows are ignored.
     """
-    stimuli = list(kilo.oeaudio_stims(stim_dset))
+    stimuli = list(kilo.messages_to_stimuli(stim_dset))
     assert stimuli == [kilo.Stimulus("a", 100), kilo.Stimulus("b", 400)], (
         "only 'start' rows should yield stimuli"
     )
@@ -197,7 +197,7 @@ def test_read_kilo_params_missing_key(tmp_path):
         kilo.read_kilo_params(path)
 
 
-# --- match_clicks
+# --- match_sync_events
 
 
 def stims(*starts):
@@ -217,15 +217,15 @@ def names(stimuli):
 # the audio buffer, so in these tests each click follows its message.
 
 
-def test_match_clicks_one_click_per_stimulus():
+def test_match_sync_events_one_click_per_stimulus():
     """Each click is matched to the stimulus whose message precedes it."""
-    out = kilo.match_clicks(stims(100, 200, 300), np.array([110, 210, 310]))
+    out = kilo.match_sync_events(stims(100, 200, 300), np.array([110, 210, 310]))
     assert names(out) == ["a", "b", "c"]
 
 
-def test_match_clicks_message_at_click_sample_counts_as_preceding():
+def test_match_sync_events_message_at_click_sample_counts_as_preceding():
     """A message logged at the same sample as the click matches it."""
-    out = kilo.match_clicks(stims(100, 200), np.array([100, 200]))
+    out = kilo.match_sync_events(stims(100, 200), np.array([100, 200]))
     assert names(out) == ["a", "b"]
 
 
@@ -238,34 +238,34 @@ def test_match_clicks_message_at_click_sample_counts_as_preceding():
     ],
     ids=["middle", "first", "last"],
 )
-def test_match_clicks_drops_stimulus_without_a_click(clicks, expected, caplog):
+def test_match_sync_events_drops_stimulus_without_a_click(clicks, expected, caplog):
     """A stimulus whose click was missed is dropped with a warning naming it;
     the others keep their own clicks."""
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
-        out = kilo.match_clicks(stims(100, 200, 300), np.array(clicks))
+        out = kilo.match_sync_events(stims(100, 200, 300), np.array(clicks))
     assert names(out) == expected, "each click keeps its own stimulus"
     (dropped,) = set("abc") - set(expected)
     assert f"({dropped})" in caplog.text, "warning names the dropped stimulus"
 
 
-def test_match_clicks_extra_click_is_an_error():
+def test_match_sync_events_extra_click_is_an_error():
     """Two clicks after the same message can't be resolved."""
     with pytest.raises(
         ValueError, match=r"more than one sync event after stimulus 1 \(b\)"
     ):
-        kilo.match_clicks(stims(100, 200, 300), np.array([110, 210, 250, 310]))
+        kilo.match_sync_events(stims(100, 200, 300), np.array([110, 210, 250, 310]))
 
 
-def test_match_clicks_click_before_any_stimulus_is_an_error():
+def test_match_sync_events_click_before_any_stimulus_is_an_error():
     """A click before the first message can't belong to any stimulus."""
     with pytest.raises(ValueError, match="sync event at sample 50 comes before"):
-        kilo.match_clicks(stims(100, 200), np.array([50, 110, 210]))
+        kilo.match_sync_events(stims(100, 200), np.array([50, 110, 210]))
 
 
-def test_match_clicks_stimuli_must_be_in_order():
+def test_match_sync_events_stimuli_must_be_in_order():
     """Stimulus start times out of order indicate a problem with the log."""
     with pytest.raises(ValueError, match="not in order"):
-        kilo.match_clicks(stims(200, 100), np.array([110, 210]))
+        kilo.match_sync_events(stims(200, 100), np.array([110, 210]))
 
 
 # --- trials_to_pprox
@@ -362,10 +362,10 @@ def test_trials_to_pprox_output_can_be_split(trial_table):
     )
 
 
-# --- assign_events_flat
+# --- events_to_toelis
 
 
-def test_assign_events_flat_sorts_and_converts_to_ms():
+def test_events_to_toelis_sorts_and_converts_to_ms():
     """Spike samples are grouped by cluster, sorted, and converted to milliseconds,
     which is the unit toelis files use.
     """
@@ -375,7 +375,7 @@ def test_assign_events_flat_sorts_and_converts_to_ms():
             "clust": [1, 1, 1, 2],
         }
     ).set_index("clust")
-    out = kilo.assign_events_flat(events, 30000.0)
+    out = kilo.events_to_toelis(events, 30000.0)
     assert list(out.index) == [1, 2]
     assert out[1] == pytest.approx([1000.0, 1500.0, 2000.0]), (
         "times should be sorted and in ms"

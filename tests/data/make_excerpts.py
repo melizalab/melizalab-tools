@@ -134,9 +134,9 @@ def e36_sort(examples: Path):
     registry, record = neurobank_record(examples / "E36_5_1" / "output")
     durations = stimulus_durations(examples / "E36_5_1" / "output")
     with h5py.File(HERE / "E36_excerpt.arf", "r") as fp:
-        from dlab.kilo import oeaudio_stims
+        from dlab.kilo import messages_to_stimuli
 
-        names = [s.name for s in oeaudio_stims(fp["entry"]["MessageCenter"])]
+        names = [s.name for s in messages_to_stimuli(fp["entry"]["MessageCenter"])]
     (HERE / "E36_excerpt_neurobank.json").write_text(
         json.dumps(
             {

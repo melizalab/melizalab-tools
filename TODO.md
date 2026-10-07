@@ -22,13 +22,13 @@ when a fix makes one pass.
   `qs.peaks`, which needs a writable array; checked identical on P397).
   quickspikes is no longer used by dlab but is still a dependency.
 
-- [x] `oeaudio_log_stims`: a `start` line before `StartAcquisition` raised
+- [x] `oeaudio_log_to_stimuli`: a `start` line before `StartAcquisition` raised
   `TypeError`; now a `ValueError` naming the line.
 - [x] `entry_metadata` returned `None` when the message dataset has no
   `metadata:` message, as in every jpresent recording (its relay converts jack
   MIDI to zmq messages and sends none). Now returns the entry name and
   sampling rate.
-- [x] Missed-sync repair in `match_clicks` was wrong three ways: message
+- [x] Missed-sync repair in `match_sync_events` was wrong three ways: message
   times (open-ephys sample numbers, which include the recording's first
   sample number: 48114176 in E69, 2048 in P352) were compared with sync-track
   indices; each sync event was assumed to precede its message, but it follows
@@ -39,8 +39,8 @@ when a fix makes one pass.
   at or before it; this runs even when the counts agree. A stimulus with no
   sync event is dropped with a warning; a sync event before any message, or
   two after the same message, is a ValueError.
-- [x] Related: when `match_clicks` returned fewer stimuli than clicks, the
-  loop crashed with `AttributeError`. `match_clicks` now returns one stimulus
+- [x] Related: when `match_sync_events` returned fewer stimuli than clicks, the
+  loop crashed with `AttributeError`. `match_sync_events` now returns one stimulus
   per sync event or raises.
 - [x] Sync detection did not work for sustained pulses (the z-scored
   quickspikes detector found none in P352 at the default threshold, and found
@@ -61,11 +61,11 @@ when a fix makes one pass.
   messages match the recording's MessageCenter exactly, log times are 40-70 ms
   after the corresponding sample numbers, clicks follow logged starts by
   ~0.36 s, and both routes give identical trials.
-- [x] `find_stim_dset` only matched `MessageCenter`, the dataset name for GUI
+- [x] `find_message_dset` only matched `MessageCenter`, the dataset name for GUI
   >= 0.6, so earlier recordings (messages in `Network_Events-..._TEXT_...`)
   needed `--oeaudio-log`. Now matches both, skipping empty datasets (E69 has
   an empty `Message_Center-904.0_TEXT_group_1`).
-- [x] `oeaudio_to_trials` was annotated `-> Iterator[Trial]` but returns a
+- [x] `arf_to_trials` was annotated `-> Iterator[Trial]` but returns a
   list, and never closed the oeaudio log file.
 
 ## group-kilo-spikes (end to end)

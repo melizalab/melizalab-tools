@@ -94,13 +94,13 @@ class TestOldStyleClicks:
         """GUI 0.5 recordings keep the messages in the Network Events dataset;
         the empty 'Message_Center-904...' dataset is ignored."""
         with h5py.File(self.PATH, "r") as fp:
-            dset = kilo.find_stim_dset(only_entry(fp))
+            dset = kilo.find_message_dset(only_entry(fp))
             assert dset.name.endswith("Network_Events-104.0_TEXT_group_1")
 
     def test_metadata_from_message(self):
         """oeaudio-present's metadata message is read from that dataset."""
         with h5py.File(self.PATH, "r") as fp:
-            meta = kilo.entry_metadata(only_entry(fp))
+            meta = kilo.entry_to_metadata(only_entry(fp))
         assert meta["animal"] == "E69" and meta["sampling_rate"] == RATE
 
     def test_trials(self, rec):
@@ -111,7 +111,7 @@ class TestOldStyleClicks:
             rows = message_rows(entry["Network_Events-104.0_TEXT_group_1"])
             names = [Path(m[6:]).stem for _, m in rows if m.startswith("start ")]
             finder = StubFinder(dict.fromkeys(names, 1.0))
-            result = kilo.oeaudio_to_trials(fp, finder, "sync", oeaudio_log=None)
+            result = kilo.arf_to_trials(fp, finder, "sync", oeaudio_log=None)
         assert [t.stimulus_name for t in result] == names
         lag = np.array([t.stimulus_start for t in result]) - rec.edges
         assert ((lag >= 0) & (lag <= 1)).all(), "each trial starts at its click"
@@ -137,7 +137,7 @@ class TestOldStyleClicks:
         assert ((lag >= 0) & (lag <= 1)).all(), "detected at the rising edge"
 
     def test_clicks_follow_start_messages(self, rec):
-        """Each click comes 0.39-0.40 s after its start message. NB: match_clicks
+        """Each click comes 0.39-0.40 s after its start message. NB: match_sync_events
         assumes the click comes before the message (see TODO.md).
         """
         lag = (rec.edges - rec.starts) / RATE
@@ -155,7 +155,7 @@ class TestOldStyleClicks:
             log = tmp_path / "oeaudio.log"
             log.write_text(oeaudio_log_text(rows))
             finder = StubFinder(dict.fromkeys(names, 1.0))
-            result = kilo.oeaudio_to_trials(fp, finder, "sync", oeaudio_log=log)
+            result = kilo.arf_to_trials(fp, finder, "sync", oeaudio_log=log)
         assert [t.stimulus_name for t in result] == names
         lag = np.array([t.stimulus_start for t in result]) - rec.edges
         assert ((lag >= 0) & (lag <= 1)).all(), "each trial starts at its sync edge"
@@ -172,15 +172,15 @@ class TestSustainedPulses:
     def test_message_dataset_found(self):
         """GUI >= 0.6 recordings have a MessageCenter dataset."""
         with h5py.File(self.PATH, "r") as fp:
-            assert kilo.find_stim_dset(only_entry(fp)).name.endswith("MessageCenter")
+            assert kilo.find_message_dset(only_entry(fp)).name.endswith("MessageCenter")
 
     def test_metadata_without_metadata_message(self):
-        """jpresent sends no metadata message, so entry_metadata returns just the
+        """jpresent sends no metadata message, so entry_to_metadata returns just the
         entry name and sampling rate.
         """
         with h5py.File(self.PATH, "r") as fp:
             entry = only_entry(fp)
-            meta = kilo.entry_metadata(entry)
+            meta = kilo.entry_to_metadata(entry)
             assert meta == {"name": entry.name, "sampling_rate": RATE}
 
     def test_pulse_shape(self, rec):
@@ -216,10 +216,10 @@ class TestSustainedPulses:
         with h5py.File(self.PATH, "r") as fp:
             stimuli = [
                 stim._replace(start=stim.start - rec.first_sample)
-                for stim in kilo.oeaudio_stims(only_entry(fp)["MessageCenter"])
+                for stim in kilo.messages_to_stimuli(only_entry(fp)["MessageCenter"])
             ]
         missing = 100
-        out = kilo.match_clicks(stimuli, np.delete(onsets, missing))
+        out = kilo.match_sync_events(stimuli, np.delete(onsets, missing))
         assert out == stimuli[:missing] + stimuli[missing + 1 :]
 
     def test_trials(self, rec):
@@ -231,7 +231,7 @@ class TestSustainedPulses:
             rows = message_rows(entry["MessageCenter"])
             names = [m[6:] for _, m in rows if m.startswith("start ")]
             finder = StubFinder(dict.fromkeys(names, 1.0))
-            result = kilo.oeaudio_to_trials(fp, finder, "ADC3", oeaudio_log=None)
+            result = kilo.arf_to_trials(fp, finder, "ADC3", oeaudio_log=None)
         assert [t.stimulus_name for t in result] == names
         lag = np.array([t.stimulus_start for t in result]) - rec.edges
         assert ((lag >= 0) & (lag <= 1)).all(), "each trial starts at its sync edge"
@@ -308,8 +308,8 @@ class TestPairedLog:
                 if m.startswith("start ")
             ]
             finder = StubFinder(dict.fromkeys(names, 1.0))
-            from_messages = kilo.oeaudio_to_trials(fp, finder, "ADC3", oeaudio_log=None)
-            from_log = kilo.oeaudio_to_trials(fp, finder, "ADC3", oeaudio_log=self.LOG)
+            from_messages = kilo.arf_to_trials(fp, finder, "ADC3", oeaudio_log=None)
+            from_log = kilo.arf_to_trials(fp, finder, "ADC3", oeaudio_log=self.LOG)
         assert len(from_messages) == 110
         assert from_log == from_messages
 
@@ -319,10 +319,10 @@ class TestPairedLog:
         with open(self.LOG) as fp:
             stimuli = [
                 stim._replace(start=stim.start - rec.first_sample)
-                for stim in kilo.oeaudio_log_stims(fp, RATE)
+                for stim in kilo.oeaudio_log_to_stimuli(fp, RATE)
             ]
         onsets = kilo.detect_sync_onsets(rec.sync)
-        out = kilo.match_clicks(stimuli, np.delete(onsets, missing))
+        out = kilo.match_sync_events(stimuli, np.delete(onsets, missing))
         assert out == stimuli[:missing] + stimuli[missing + 1 :]
 
 
@@ -335,7 +335,7 @@ class TestLongRecording:
         splitting on it is a clear error naming the channel."""
         with h5py.File(self.PATH, "r") as fp:
             with pytest.raises(RuntimeError, match="no sync events detected in 'ADC3'"):
-                kilo.oeaudio_to_trials(fp, StubFinder({}), "ADC3", oeaudio_log=None)
+                kilo.arf_to_trials(fp, StubFinder({}), "ADC3", oeaudio_log=None)
 
     def test_trials(self):
         """End to end on the click channel: one trial per start message, in
@@ -348,7 +348,7 @@ class TestLongRecording:
                 if m.startswith("start ")
             ]
             finder = StubFinder(dict.fromkeys(names, 1.0))
-            result = kilo.oeaudio_to_trials(fp, finder, "ADC5", oeaudio_log=None)
+            result = kilo.arf_to_trials(fp, finder, "ADC5", oeaudio_log=None)
         assert len(result) == 1920
         assert [t.stimulus_name for t in result] == names
 
@@ -391,7 +391,7 @@ def pprox_lag_outliers(arf_path, pprox_path):
         dset = entry["MessageCenter"]
         rate = dset.attrs["sampling_rate"]
         first = round(entry["ADC1"].attrs["offset"] * rate)
-        starts = np.array([s.start - first for s in kilo.oeaudio_stims(dset)])
+        starts = np.array([s.start - first for s in kilo.messages_to_stimuli(dset)])
     with open(pprox_path) as fp:
         onsets = np.array([round(t["offset"] * rate) for t in json.load(fp)["pprox"]])
     return kilo.sync_lag_outliers(starts, onsets, rate)
@@ -433,7 +433,7 @@ def test_aux_matches_klopto_opto(caplog):
 
     with h5py.File(ex / "E36_5_1.arf", "r") as fp:
         with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
-            trials = kilo.oeaudio_to_trials(
+            trials = kilo.arf_to_trials(
                 fp, finder, "ADC3", prepad=0.5, oeaudio_log=None, aux={"led": "ADC4"}
             )
     # every condition_start message is matched by an LED pulse, and vice versa
@@ -459,4 +459,4 @@ def test_floating_channel_is_not_a_sync_track():
     finder = StubFinder(stimulus_durations(ex / "output"))
     with h5py.File(ex / "C401_1_1b.arf", "r") as fp:
         with pytest.raises(RuntimeError, match="sync events in 'ADC5' but only 110"):
-            kilo.oeaudio_to_trials(fp, finder, "ADC5", oeaudio_log=None)
+            kilo.arf_to_trials(fp, finder, "ADC5", oeaudio_log=None)

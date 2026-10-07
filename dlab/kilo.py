@@ -6,9 +6,9 @@ spikes in a kilosort/phy output directory into one pprox file (in the stimtrial
 format, https://meliza.org/spec:2/stimtrial/) per cluster, split into trials by
 stimulus. Stimulus onsets come from a sync channel recorded with the neural
 data (clicks or pulses; see detect_pulses), matched to the start messages sent
-by the presentation script (oeaudio-present or jpresent; see match_clicks).
+by the presentation script (oeaudio-present or jpresent; see match_sync_events).
 Pulses on other channels (e.g. optogenetic stimulation) can be recorded with
-each trial (see oeaudio_to_trials).
+each trial (see arf_to_trials).
 """
 
 import datetime
@@ -77,10 +77,10 @@ def read_kilo_params(fname: Path) -> dict:
     )
 
 
-def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
+def messages_to_stimuli(dset: h5.Dataset) -> Iterator[Stimulus]:
     """Parse the 'start <stimulus>' messages in the stimulus message dataset
-    (see find_stim_dset). Times are open-ephys sample numbers, which count
-    from the start of acquisition; oeaudio_to_trials converts them to samples
+    (see find_message_dset). Times are open-ephys sample numbers, which count
+    from the start of acquisition; arf_to_trials converts them to samples
     from the start of the recording and matches them to the sync events, which
     follow the messages by a few hundred ms.
 
@@ -95,12 +95,12 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
             yield Stimulus(stim_name, time)
 
 
-def oeaudio_log_stims(
+def oeaudio_log_to_stimuli(
     oeaudio_log: io.TextIOBase, sampling_rate: int
 ) -> Iterator[Stimulus]:
     """Parse the 'start <stimulus>' lines of an open-ephys-audio log. Times are
     in samples from StartAcquisition, the same origin as open-ephys sample
-    numbers (see oeaudio_stims).
+    numbers (see messages_to_stimuli).
 
     This is for recordings without the messages in the ARF file (some
     recordings with open-ephys GUI >= 0.6 were made without logging them).
@@ -147,7 +147,7 @@ def iter_entries(data_file):
     return enumerate(sorted(data_file.values(), key=entry_time))
 
 
-def find_stim_dset(entry):
+def find_message_dset(entry):
     """Returns the dataset with the network messages from the stimulus
     presentation script, or None if there isn't one.
 
@@ -165,8 +165,9 @@ def find_stim_dset(entry):
             return entry[name]
 
 
-def entry_metadata(entry):
-    """Extracts metadata from an entry in an oeaudio-present experiment ARF file.
+def entry_to_metadata(entry):
+    """Extracts metadata from an entry in an ARF file recorded with a stimulus
+    presentation script (oeaudio-present or jpresent).
 
     Metadata are passed to open-ephys through the network events socket as a
     json-encoded dictionary. There should be at most one metadata message
@@ -175,7 +176,7 @@ def entry_metadata(entry):
 
     """
     re_metadata = re.compile(r"metadata: (\{.*\})")
-    stim_dset = find_stim_dset(entry)
+    stim_dset = find_message_dset(entry)
     if stim_dset is None:
         log.warning(
             "  - no stimulus log dataset in %s; not saving entry metadata", entry.name
@@ -305,7 +306,7 @@ class StimulusFinder:
         return output
 
 
-def oeaudio_to_trials(
+def arf_to_trials(
     data_file: h5.File,
     stim_finder: StimulusFinder,
     sync_dset: str,
@@ -315,7 +316,8 @@ def oeaudio_to_trials(
     oeaudio_log: Path | None,
     aux: Mapping[str, str] | None = None,
 ) -> list[Trial]:
-    """Extracts trial information from an oeaudio-present experiment ARF file
+    """Extracts trial information from an ARF file recorded with a stimulus
+    presentation script (oeaudio-present or jpresent)
 
     When using oeaudio-present or jpresent, a single recording is made in
     response to all the stimuli. The stimulus presentation script sends network events to
@@ -389,17 +391,18 @@ def oeaudio_to_trials(
 
         stim_dset = None
         if oeaudio_log is not None:
-            log.info("  - parsing stimulus log from %s", oeaudio_log)
+            log.info("  - reading stimuli from oeaudio log %s", oeaudio_log)
             with open(oeaudio_log) as fp:
-                entry_stimuli = list(oeaudio_log_stims(fp, sampling_rate))
+                entry_stimuli = list(oeaudio_log_to_stimuli(fp, sampling_rate))
         else:
-            stim_dset = find_stim_dset(entry)
+            stim_dset = find_message_dset(entry)
             if stim_dset is None:
                 raise RuntimeError(
-                    "unable to find stimulus list in ARF file. You may need to provide the oeaudio logfile"
+                    "unable to find the stimulus messages in the ARF file. If they "
+                    "weren't recorded, use --oeaudio-log to read them from the log."
                 )
-            log.info("  - parsing stimulus log from %s", stim_dset)
-            entry_stimuli = list(oeaudio_stims(stim_dset))
+            log.info("  - reading stimuli from message dataset %s", stim_dset.name)
+            entry_stimuli = list(messages_to_stimuli(stim_dset))
         try:
             stim_durations = stim_finder.get_durations(
                 stim.name for stim in entry_stimuli
@@ -423,7 +426,10 @@ def oeaudio_to_trials(
                 entry_stimuli, stim_onsets, sampling_rate
             )
         else:
-            entry_stimuli, times_fit = match_clicks(entry_stimuli, stim_onsets), True
+            entry_stimuli, times_fit = (
+                match_sync_events(entry_stimuli, stim_onsets),
+                True,
+            )
         # lags (sync event after start message) are meaningless for a log from
         # another session
         if times_fit:
@@ -472,7 +478,7 @@ def oeaudio_to_trials(
             if stim_dset is not None:
                 conditions = [
                     c._replace(start=c.start - stim_sample_offset)
-                    for c in oeaudio_conditions(stim_dset)
+                    for c in messages_to_conditions(stim_dset)
                 ]
                 if conditions:
                     check_aux_conditions(
@@ -482,11 +488,11 @@ def oeaudio_to_trials(
     return trials
 
 
-def oeaudio_conditions(dset: h5.Dataset) -> list[Stimulus]:
+def messages_to_conditions(dset: h5.Dataset) -> list[Stimulus]:
     """Parse the 'condition_start <stimulus>' messages in the stimulus message
     dataset. jpresent sends one with each stimulus presented under an
     experimental condition (e.g. optogenetic stimulation). Times are sample
-    numbers, as for oeaudio_stims."""
+    numbers, as for messages_to_stimuli."""
     re_condition = re.compile(r"condition_start (.*)")
     out = []
     for row in dset:
@@ -614,7 +620,7 @@ def check_sync_count(
         )
 
 
-def match_clicks(
+def match_sync_events(
     entry_stimuli: list[Stimulus], stim_onsets: np.ndarray
 ) -> list[Stimulus]:
     """Match sync events to stimuli, returning the stimulus for each sync event.
@@ -666,7 +672,7 @@ def match_log_stimuli(
     are paired in order; if the times don't fit, the log is probably from
     another session, and a warning is logged, since the labels are only right if
     the stimuli were presented in the same order. If sync events are missing,
-    repairing the gap needs the times (see match_clicks), so a log whose times
+    repairing the gap needs the times (see match_sync_events), so a log whose times
     don't fit is an error.
 
     """
@@ -684,7 +690,7 @@ def match_log_stimuli(
             )
         return list(stimuli), fits
     try:
-        matched = match_clicks(stimuli, onsets)
+        matched = match_sync_events(stimuli, onsets)
         starts = np.array([stim.start for stim in matched])
         fits = sync_lag_outliers(starts, onsets, sampling_rate).size == 0
     except ValueError:
@@ -721,7 +727,7 @@ def sync_lag_outliers(
     return np.flatnonzero(np.abs(lags - np.median(lags)) > tolerance)
 
 
-def assign_events_flat(events: pd.DataFrame, sampling_rate: float):
+def events_to_toelis(events: pd.DataFrame, sampling_rate: float):
     """Assign event_times to clusters, generating a large toelis object"""
     nevents, _ = events.shape
     nclusters = events.index.unique().size
@@ -970,7 +976,7 @@ def group_spikes_script(argv=None):
 
     events.set_index("clust", inplace=True)
     if args.toelis:
-        clusters = assign_events_flat(events, params["sampling_rate"])
+        clusters = events_to_toelis(events, params["sampling_rate"])
         outfile = (args.output / recording_name).with_suffix(".toe_lis")
         if not args.dry_run:
             with open(outfile, "w") as ofp:
@@ -988,7 +994,7 @@ def group_spikes_script(argv=None):
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
         trials = pd.DataFrame(
-            oeaudio_to_trials(
+            arf_to_trials(
                 afp,
                 stim_finder,
                 args.sync,
@@ -998,7 +1004,7 @@ def group_spikes_script(argv=None):
                 aux=args.aux,
             )
         )
-        entry_attrs = tuple(entry_metadata(e) for _, e in iter_entries(afp))
+        entry_attrs = tuple(entry_to_metadata(e) for _, e in iter_entries(afp))
 
     # this pandas magic sorts the events by cluster and trial
     log.info("- sorting events into trials:")

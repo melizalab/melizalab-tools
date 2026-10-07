@@ -80,7 +80,7 @@ def build(make_arf, tmp_path, combo, source, missing=()):
 
 def split(path, log):
     with arf.open_file(path, "r") as fp:
-        return kilo.oeaudio_to_trials(fp, StubFinder(DURATIONS), SYNC, oeaudio_log=log)
+        return kilo.arf_to_trials(fp, StubFinder(DURATIONS), SYNC, oeaudio_log=log)
 
 
 CASES = [
@@ -114,13 +114,13 @@ def test_one_trial_per_stimulus_at_sync_onset(make_arf, tmp_path, combo, source)
         pytest.param("jpresent-pulses", "messages", id="jpresent"),
     ],
 )
-def test_entry_metadata_has_sampling_rate(make_arf, tmp_path, combo, source):
+def test_entry_to_metadata_has_sampling_rate(make_arf, tmp_path, combo, source):
     """Entry metadata is a dict with the sampling rate, which pprox consumers
     (pprox.trial_iterator) need. The sync method doesn't affect this.
     """
     path, _ = build(make_arf, tmp_path, combo, source)
     with arf.open_file(path, "r") as fp:
-        meta = kilo.entry_metadata(fp["entry_0"])
+        meta = kilo.entry_to_metadata(fp["entry_0"])
     assert isinstance(meta, dict), "metadata should be a dict"
     assert meta["sampling_rate"] == SAMPLING_RATE
 

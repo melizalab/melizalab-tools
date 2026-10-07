@@ -40,19 +40,21 @@ def read(path, *channels):
 
 def e36_names():
     with h5py.File(E36, "r") as fp:
-        return [stim.name for stim in kilo.oeaudio_stims(fp["entry"]["MessageCenter"])]
+        return [
+            stim.name for stim in kilo.messages_to_stimuli(fp["entry"]["MessageCenter"])
+        ]
 
 
 def p397_names():
     with open(P397_LOG) as fp:
-        return [stim.name for stim in kilo.oeaudio_log_stims(fp, 30000)]
+        return [stim.name for stim in kilo.oeaudio_log_to_stimuli(fp, 30000)]
 
 
 def split(path, sync, names, **kwargs):
     kwargs.setdefault("oeaudio_log", None)
     finder = StubFinder(dict.fromkeys(names, 1.0))
     with arf.open_file(path, "r") as fp:
-        return kilo.oeaudio_to_trials(fp, finder, sync, **kwargs)
+        return kilo.arf_to_trials(fp, finder, sync, **kwargs)
 
 
 # --- E36: clicks and pulses
@@ -111,10 +113,10 @@ def test_e36_missed_pulse(tmp_path, e36_onsets):
     assert [t.stimulus_start for t in result] == np.delete(pulses, 2).tolist()
 
 
-def test_e36_entry_metadata():
+def test_e36_entry_to_metadata():
     """jpresent sends no metadata message; the entry name and rate are returned."""
     with h5py.File(E36, "r") as fp:
-        meta = kilo.entry_metadata(fp["entry"])
+        meta = kilo.entry_to_metadata(fp["entry"])
     assert meta == {"name": "/entry", "sampling_rate": 30000.0}
 
 
@@ -147,7 +149,8 @@ def test_sync_lags_consistent(e36_onsets):
         dset = fp["entry"]["ADC3"]
         first = round(dset.attrs["offset"] * dset.attrs["sampling_rate"])
         starts = [
-            s.start - first for s in kilo.oeaudio_stims(fp["entry"]["MessageCenter"])
+            s.start - first
+            for s in kilo.messages_to_stimuli(fp["entry"]["MessageCenter"])
         ]
     assert kilo.sync_lag_outliers(starts, pulses, 30000).size == 0
 
@@ -160,7 +163,10 @@ def test_sync_lag_outliers_flag_old_errors(e36_onsets):
         dset = fp["entry"]["ADC3"]
         first = round(dset.attrs["offset"] * dset.attrs["sampling_rate"])
         starts = np.array(
-            [s.start - first for s in kilo.oeaudio_stims(fp["entry"]["MessageCenter"])]
+            [
+                s.start - first
+                for s in kilo.messages_to_stimuli(fp["entry"]["MessageCenter"])
+            ]
         )
     at_end = pulses.copy()
     at_end[3] += 35669  # trial 3's pulse reported at its end, as the old version did
@@ -172,7 +178,7 @@ def test_sync_lag_outliers_flag_old_errors(e36_onsets):
 
 
 def test_lag_outliers_are_logged(tmp_path, e36_onsets, caplog):
-    """oeaudio_to_trials logs a warning for each trial with an outlying lag.
+    """arf_to_trials logs a warning for each trial with an outlying lag.
     Here a spurious event takes the place of trial 3's pulse."""
     pulses, _, x = e36_onsets
     path = shutil.copy(E36, tmp_path / "late.arf")
@@ -204,14 +210,14 @@ def test_p397_trials_from_log(sync):
 
 def test_p397_needs_log():
     """Without the log there is no stimulus list, and the error says so."""
-    with pytest.raises(RuntimeError, match="oeaudio logfile"):
+    with pytest.raises(RuntimeError, match="use --oeaudio-log"):
         split(P397, "ADC3", p397_names())
 
 
-def test_p397_entry_metadata():
+def test_p397_entry_to_metadata():
     """With no message dataset, only the sampling rate is known."""
     with h5py.File(P397, "r") as fp:
-        assert kilo.entry_metadata(fp["entry"]) == {"sampling_rate": 30000.0}
+        assert kilo.entry_to_metadata(fp["entry"]) == {"sampling_rate": 30000.0}
 
 
 def test_e36_led_pulses_match_condition_messages(caplog):

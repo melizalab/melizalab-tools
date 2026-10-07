@@ -1,7 +1,7 @@
 # -*- mode: python -*-
 """Tests for the parts of dlab.kilo that read ARF recordings: entry ordering,
 locating the stimulus message dataset, entry metadata, and splitting a
-recording into trials with oeaudio_to_trials.
+recording into trials with arf_to_trials.
 
 Recordings are built with the helpers in conftest.py, which follow the layout
 arfx-oephys writes. Tests marked PINNED record current behavior that looks like
@@ -50,9 +50,7 @@ def one_entry(**kwargs):
 def trials(path, finder=None, sync=SYNC, **kwargs):
     kwargs.setdefault("oeaudio_log", None)
     with arf.open_file(path, "r") as fp:
-        return kilo.oeaudio_to_trials(
-            fp, finder or StubFinder(DURATIONS), sync, **kwargs
-        )
+        return kilo.arf_to_trials(fp, finder or StubFinder(DURATIONS), sync, **kwargs)
 
 
 # --- iter_entries / entry_time
@@ -77,55 +75,55 @@ def test_entry_time_includes_microseconds(make_arf):
         assert kilo.entry_time(fp["entry_0"]) == pytest.approx(1000.25)
 
 
-# --- find_stim_dset
+# --- find_message_dset
 
 
-def test_find_stim_dset(make_arf):
+def test_find_message_dset(make_arf):
     """The message dataset written for GUI >= 0.6 is found by name."""
     path = make_arf(one_entry())
     with arf.open_file(path, "r") as fp:
-        dset = kilo.find_stim_dset(fp["entry_0"])
+        dset = kilo.find_message_dset(fp["entry_0"])
         assert dset is not None and dset.name.endswith(MESSAGES)
 
 
-def test_find_stim_dset_absent(make_arf):
+def test_find_message_dset_absent(make_arf):
     """An entry with no message dataset returns None."""
     path = make_arf(one_entry(messages=None))
     with arf.open_file(path, "r") as fp:
-        assert kilo.find_stim_dset(fp["entry_0"]) is None
+        assert kilo.find_message_dset(fp["entry_0"]) is None
 
 
-def test_find_stim_dset_pre_0_6_dataset_name(make_arf):
+def test_find_message_dset_pre_0_6_dataset_name(make_arf):
     """For GUI < 0.6, arfx-oephys names the message dataset after the Network
     Events plugin's text channel; that is found too."""
     name = "Network_Events-104.0_TEXT_group_1"
     path = make_arf(one_entry(message_dset=name))
     with arf.open_file(path, "r") as fp:
-        assert kilo.find_stim_dset(fp["entry_0"]).name.endswith(name)
+        assert kilo.find_message_dset(fp["entry_0"]).name.endswith(name)
 
 
-def test_find_stim_dset_skips_empty_datasets(make_arf):
+def test_find_message_dset_skips_empty_datasets(make_arf):
     """An empty message dataset (logging to it wasn't enabled) is skipped, so
     the caller asks for the oeaudio log instead of finding no stimuli."""
     path = make_arf(one_entry(messages=[]))
     with arf.open_file(path, "r") as fp:
-        assert kilo.find_stim_dset(fp["entry_0"]) is None
+        assert kilo.find_message_dset(fp["entry_0"]) is None
 
 
-# --- entry_metadata
+# --- entry_to_metadata
 
 
-def test_entry_metadata_from_message(make_arf):
+def test_entry_to_metadata_from_message(make_arf):
     """The JSON in the metadata message is returned, plus the entry's HDF5 path
     and the message dataset's sampling rate.
     """
     path = make_arf(one_entry())
     with arf.open_file(path, "r") as fp:
-        meta = kilo.entry_metadata(fp["entry_0"])
+        meta = kilo.entry_to_metadata(fp["entry_0"])
     assert meta == {"animal": "P1", "name": "/entry_0", "sampling_rate": SAMPLING_RATE}
 
 
-def test_entry_metadata_uses_first_valid_message(make_arf):
+def test_entry_to_metadata_uses_first_valid_message(make_arf):
     """Malformed metadata messages are skipped; the first valid one wins."""
     messages = [
         (FIRST_SAMPLE, "metadata: {not json}"),
@@ -134,43 +132,43 @@ def test_entry_metadata_uses_first_valid_message(make_arf):
     ]
     path = make_arf(one_entry(messages=messages))
     with arf.open_file(path, "r") as fp:
-        meta = kilo.entry_metadata(fp["entry_0"])
+        meta = kilo.entry_to_metadata(fp["entry_0"])
     assert meta["animal"] == "first", "malformed message skipped, then first wins"
 
 
-def test_entry_metadata_without_message_dataset_uses_channel_rate(make_arf, caplog):
+def test_entry_to_metadata_without_message_dataset_uses_channel_rate(make_arf, caplog):
     """With no message dataset, only the sampling rate is returned, taken from
     the first dataset that has one, and a warning is logged.
     """
     path = make_arf(one_entry(messages=None, sampling_rate=20000))
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
         with arf.open_file(path, "r") as fp:
-            meta = kilo.entry_metadata(fp["entry_0"])
+            meta = kilo.entry_to_metadata(fp["entry_0"])
     assert meta == {"sampling_rate": 20000}
     assert "no stimulus log dataset" in caplog.text
 
 
-def test_entry_metadata_without_any_rate(make_arf, caplog):
+def test_entry_to_metadata_without_any_rate(make_arf, caplog):
     """With no message dataset and no sampled datasets, the rate is 'unknown'."""
     path = make_arf(one_entry(messages=None, sync=None))
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
         with arf.open_file(path, "r") as fp:
-            meta = kilo.entry_metadata(fp["entry_0"])
+            meta = kilo.entry_to_metadata(fp["entry_0"])
     assert meta == {"sampling_rate": "unknown"}
     assert "unable to infer sampling rate" in caplog.text
 
 
-def test_entry_metadata_without_metadata_message(make_arf):
+def test_entry_to_metadata_without_metadata_message(make_arf):
     """With a message dataset but no metadata message (jpresent never sends
     one), the entry name and the message dataset's sampling rate are returned.
     """
     path = make_arf(one_entry(messages=oeaudio_messages(STIMULI)))
     with arf.open_file(path, "r") as fp:
-        meta = kilo.entry_metadata(fp["entry_0"])
+        meta = kilo.entry_to_metadata(fp["entry_0"])
     assert meta == {"name": "/entry_0", "sampling_rate": SAMPLING_RATE}
 
 
-# --- oeaudio_to_trials
+# --- arf_to_trials
 
 
 def test_trials_from_clicks(make_arf):
@@ -199,9 +197,7 @@ def test_trials_prepad(make_arf):
 def test_trials_returns_list():
     """NB: annotated as returning an Iterator, but returns a list (see TODO.md)."""
     # checked without a file: no entries means no trials
-    assert (
-        kilo.oeaudio_to_trials({}, StubFinder(DURATIONS), SYNC, oeaudio_log=None) == []
-    )
+    assert kilo.arf_to_trials({}, StubFinder(DURATIONS), SYNC, oeaudio_log=None) == []
 
 
 def test_trials_across_entries_use_time_order(make_arf):
@@ -236,7 +232,7 @@ def test_trials_missing_sync_channel(make_arf):
 
 def test_trials_missing_message_dataset(make_arf):
     """With no message dataset and no log file, there is no stimulus list."""
-    with pytest.raises(RuntimeError, match="unable to find stimulus list"):
+    with pytest.raises(RuntimeError, match="unable to find the stimulus messages"):
         trials(make_arf(one_entry(messages=None)))
 
 
@@ -412,7 +408,7 @@ def test_pulse_falling_edge_not_used(make_arf):
 
 def test_flat_sync_track_is_an_error(make_arf):
     """A sync track with no events (e.g. the wrong channel) is a RuntimeError
-    that names the channel, not an IndexError from match_clicks."""
+    that names the channel, not an IndexError from match_sync_events."""
     with pytest.raises(RuntimeError, match=f"no sync events detected in '{SYNC}'"):
         trials(make_arf(one_entry(clicks=())))
 
@@ -616,7 +612,7 @@ def aux_warnings(caplog):
     return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
 
 
-def test_oeaudio_conditions():
+def test_messages_to_conditions():
     """condition_start messages are parsed into (stimulus, sample) pairs."""
     import numpy as np
 
@@ -629,7 +625,7 @@ def test_oeaudio_conditions():
         ],
         dtype=[("start", "i8"), ("message", "S64")],
     )
-    assert kilo.oeaudio_conditions(rows) == [kilo.Stimulus("a", 130)]
+    assert kilo.messages_to_conditions(rows) == [kilo.Stimulus("a", 130)]
 
 
 def test_conditions_agree_with_pulses(make_arf, caplog):
