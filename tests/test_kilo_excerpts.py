@@ -230,3 +230,24 @@ def test_e36_led_channel_is_not_a_sync_track():
         RuntimeError, match="only 1 sync events in 'ADC4' for 5 stimuli"
     ):
         split(E36, "ADC4", e36_names())
+
+
+def test_p397_log_from_another_session(tmp_path, caplog):
+    """A log with the same stimuli in the same order but different times (here
+    P397's log with StartAcquisition moved 30 s earlier, as a log from another
+    session would be) gives the same trials, with a warning."""
+    lines = P397_LOG.read_text().splitlines()
+    timestamp, rest = lines[0].split(",", maxsplit=1)
+    assert rest == '"StartAcquisition"'
+    import datetime
+
+    t0 = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")
+    earlier = t0 - datetime.timedelta(seconds=30)
+    lines[0] = f"{earlier:%Y-%m-%d %H:%M:%S.%f},{rest}"
+    other = tmp_path / "other_session.log"
+    other.write_text("\n".join(lines) + "\n")
+    same = split(P397, "ADC3", p397_names(), oeaudio_log=P397_LOG)
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = split(P397, "ADC3", p397_names(), oeaudio_log=other)
+    assert result == same
+    assert "probably from another session" in caplog.text

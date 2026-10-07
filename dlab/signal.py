@@ -10,6 +10,9 @@ import numpy as np
 
 @dataclasses.dataclass
 class Signal:
+    """Audio samples and their sampling rate. duration (s) and dBFS (RMS level)
+    are computed when the Signal is created."""
+
     samples: np.ndarray
     sampling_rate: float  # in Hz
     name: str | None = None

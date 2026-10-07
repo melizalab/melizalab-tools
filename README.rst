@@ -38,7 +38,10 @@ console scripts
 
 -  ``group-kilo-spikes``: sort spike times output from
    `kilosort <https://github.com/MouseLand/Kilosort>`__ and
-   `phy2 <https://github.com/cortex-lab/phy/>`__ into pprox files.
+   `phy2 <https://github.com/cortex-lab/phy/>`__ into pprox files
+   (`stimtrial <https://meliza.org/spec:2/stimtrial/>`__ format), optionally
+   recording pulses on auxiliary channels such as optogenetic stimulation
+   (``--aux``).
 - ``get-songs``: extract segments from arf files, rescale, resample, save into
    wave files, and optionally deposit back into neurobank. Usually the first
    step in generating a stimulus set, keeps a nice provenance trail.

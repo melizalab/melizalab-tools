@@ -39,10 +39,11 @@ def find_resources(
     - a local directory (alt_base, if set),
     - a local neurobank archive (using registry_url and alt_base, if provided),
     - a local cache of previously fetched resources
-    - a remote HTTP archive (using registry_url, caching the file for local access later)
+    - a remote HTTP archive (using registry_url, caching the file for local access later;
+      credentials for archives that need them are read from ~/.netrc)
 
     Yields results as they become available. The result for each requested id is
-    a Path if the resource was successfully located, or exist, or a
+    a Path if the resource was successfully located, or a
     FileNotFoundError if the resource cannot be located.
 
     """
@@ -209,6 +210,7 @@ def add_registry_argument(parser, dest="registry_url"):
 
 
 def main(argv=None):
+    """Locate neurobank resources from the command line (python -m dlab.neurobank)"""
     import argparse
 
     from dlab.util import setup_log

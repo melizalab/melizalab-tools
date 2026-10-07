@@ -249,17 +249,73 @@ def test_trials_unknown_stimulus(make_arf):
     assert isinstance(excinfo.value.__cause__, FileNotFoundError)
 
 
-def test_trials_from_oeaudio_log(make_arf, tmp_path):
+RENAMED = [(new, on, off) for new, (_, on, off) in zip("xyz", STIMULI, strict=True)]
+RENAMED_FINDER = StubFinder({"x": 0.5, "y": 0.5, "z": 0.5})
+
+
+def write_log(tmp_path, messages):
+    path = tmp_path / "oeaudio.log"
+    path.write_text(oeaudio_log_text(messages))
+    return path
+
+
+def other_session(messages, seed=0):
+    """The messages as another session's log would have them: the stimuli in
+    the same order, but starting 40 s later, with different gaps."""
+    rng = np.random.default_rng(seed)
+    out, shift = [], 40 * SAMPLING_RATE
+    for sample, text in messages:
+        if text.startswith("start "):
+            shift += int(rng.normal(0, 0.3) * SAMPLING_RATE)
+        out.append((sample + shift, text))
+    return out
+
+
+def test_trials_from_oeaudio_log(make_arf, tmp_path, caplog):
     """With oeaudio_log, stimulus names come from the log file instead of the
     message dataset, which need not exist. Log times count from
-    StartAcquisition, like open-ephys sample numbers."""
-    renamed = [(new, on, off) for new, (_, on, off) in zip("xyz", STIMULI, strict=True)]
-    log = tmp_path / "oeaudio.log"
-    log.write_text(oeaudio_log_text(oeaudio_messages(renamed)))
-    finder = StubFinder({"x": 0.5, "y": 0.5, "z": 0.5})
-    result = trials(make_arf(one_entry(messages=None)), finder, oeaudio_log=log)
+    StartAcquisition, like open-ephys sample numbers, so a log from the same
+    session fits the recording and there are no warnings."""
+    log = write_log(tmp_path, oeaudio_messages(RENAMED))
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(
+            make_arf(one_entry(messages=None)), RENAMED_FINDER, oeaudio_log=log
+        )
     assert [t.stimulus_name for t in result] == ["x", "y", "z"]
     assert [t.stimulus_start for t in result] == ONSETS
+    assert caplog.text == ""
+
+
+def test_trials_from_another_sessions_log(make_arf, tmp_path, caplog):
+    """A log from another session (same stimuli, same order, different times)
+    labels the trials by order, with a warning."""
+    log = write_log(tmp_path, other_session(oeaudio_messages(RENAMED)))
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(
+            make_arf(one_entry(messages=None)), RENAMED_FINDER, oeaudio_log=log
+        )
+    assert [t.stimulus_name for t in result] == ["x", "y", "z"]
+    assert [t.stimulus_start for t in result] == ONSETS
+    assert "probably from another session" in caplog.text
+    assert "sync event for stimulus" not in caplog.text, "no per-trial lag warnings"
+
+
+def test_another_sessions_log_cannot_repair_missing_sync(make_arf, tmp_path):
+    """With a sync event missing, labeling by order would shift every later
+    trial, and the times in another session's log can't place the gap, so this
+    is an error."""
+    log = write_log(tmp_path, other_session(oeaudio_messages(RENAMED)))
+    spec = one_entry(messages=None, clicks=[30000, 150000])
+    with pytest.raises(RuntimeError, match="trials can't be labeled"):
+        trials(make_arf(spec), RENAMED_FINDER, oeaudio_log=log)
+
+
+def test_same_sessions_log_repairs_missing_sync(make_arf, tmp_path):
+    """With the log from the same session, a missing sync event is repaired."""
+    log = write_log(tmp_path, oeaudio_messages(RENAMED))
+    spec = one_entry(messages=None, clicks=[30000, 150000])
+    result = trials(make_arf(spec), RENAMED_FINDER, oeaudio_log=log)
+    assert [t.stimulus_name for t in result] == ["x", "z"]
 
 
 def test_trials_more_clicks_than_stimuli(make_arf):

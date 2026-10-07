@@ -1,5 +1,15 @@
 # -*- mode: python -*-
-"""Functions for using kilosort/phy data"""
+"""Functions for using kilosort/phy data
+
+The main entry point is group-kilo-spikes (group_spikes_script), which sorts the
+spikes in a kilosort/phy output directory into one pprox file (in the stimtrial
+format, https://meliza.org/spec:2/stimtrial/) per cluster, split into trials by
+stimulus. Stimulus onsets come from a sync channel recorded with the neural
+data (clicks or pulses; see detect_pulses), matched to the start messages sent
+by the presentation script (oeaudio-present or jpresent; see match_clicks).
+Pulses on other channels (e.g. optogenetic stimulation) can be recorded with
+each trial (see oeaudio_to_trials).
+"""
 
 import datetime
 import io
@@ -22,6 +32,8 @@ from dlab import pprox
 from dlab.spikes import SpikeWaveforms, save_waveforms
 
 log = logging.getLogger(__name__)
+# version of group-kilo-spikes, recorded in its output files
+SCRIPT_VERSION = "2026.10.06"
 
 
 class Trial(NamedTuple):
@@ -41,6 +53,8 @@ class Trial(NamedTuple):
 
 
 class Stimulus(NamedTuple):
+    """A stimulus start message: the stimulus name and its time, in samples."""
+
     name: str
     start: int
     end: int | None = None
@@ -64,9 +78,11 @@ def read_kilo_params(fname: Path) -> dict:
 
 
 def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
-    """Parse the messages in the 'stim' dataset to get a table of stimuli with
-    start samples. Note that these will need to be corrected for offset of the
-    recording and network lag.
+    """Parse the 'start <stimulus>' messages in the stimulus message dataset
+    (see find_stim_dset). Times are open-ephys sample numbers, which count
+    from the start of acquisition; oeaudio_to_trials converts them to samples
+    from the start of the recording and matches them to the sync events, which
+    follow the messages by a few hundred ms.
 
     """
     re_start = re.compile(r"start (.*)")
@@ -82,11 +98,16 @@ def oeaudio_stims(dset: h5.Dataset) -> Iterator[Stimulus]:
 def oeaudio_log_stims(
     oeaudio_log: io.TextIOBase, sampling_rate: int
 ) -> Iterator[Stimulus]:
-    """Parse an open-ephys-audio log to get a table of stimuli with start
-    samples. This function can be used when the 'stim' dataset is missing from
-    the recording (e.g., during the time period when we were falsely assuming
-    that the new version of the NetworkEvents plugin was storing these
-    messages)"""
+    """Parse the 'start <stimulus>' lines of an open-ephys-audio log. Times are
+    in samples from StartAcquisition, the same origin as open-ephys sample
+    numbers (see oeaudio_stims).
+
+    This is for recordings without the messages in the ARF file (some
+    recordings with open-ephys GUI >= 0.6 were made without logging them).
+    Ideally the log is from the same session as the recording. A log from
+    another session can be used if the stimuli were presented in the same order
+    (see match_log_stimuli).
+    """
     re_start = re.compile(r'"start (.*)"')
     start_acq_time = None
     for i, line in enumerate(oeaudio_log):
@@ -296,8 +317,8 @@ def oeaudio_to_trials(
 ) -> list[Trial]:
     """Extracts trial information from an oeaudio-present experiment ARF file
 
-    When using oeaudio-present, a single recording is made in response to all
-    the stimuli. The stimulus presentation script sends network events to
+    When using oeaudio-present or jpresent, a single recording is made in
+    response to all the stimuli. The stimulus presentation script sends network events to
     open-ephys to mark the start and stop of each stimulus. There is typically a
     significant lag between the 'start' event and the onset of the stimulus, due
     to buffering of the audio playback. However, the presentation script will
@@ -397,19 +418,29 @@ def oeaudio_to_trials(
             for stim in entry_stimuli
         ]
         check_sync_count(stim_onsets.size, len(entry_stimuli), sync_dset)
-        entry_stimuli = match_clicks(entry_stimuli, stim_onsets)
-        starts = np.array([stim.start for stim in entry_stimuli])
-        lags = (stim_onsets - starts) / sampling_rate
-        log.info("    - sync events follow start messages by %.3f s", np.median(lags))
-        for i in sync_lag_outliers(starts, stim_onsets, sampling_rate):
-            log.warning(
-                "  - WARNING: sync event for stimulus %d (%s) is %.3f s after its "
-                "start message (median %.3f s). Check the sync track.",
-                i,
-                entry_stimuli[i].name,
-                lags[i],
-                np.median(lags),
+        if oeaudio_log is not None:
+            entry_stimuli, times_fit = match_log_stimuli(
+                entry_stimuli, stim_onsets, sampling_rate
             )
+        else:
+            entry_stimuli, times_fit = match_clicks(entry_stimuli, stim_onsets), True
+        # lags (sync event after start message) are meaningless for a log from
+        # another session
+        if times_fit:
+            starts = np.array([stim.start for stim in entry_stimuli])
+            lags = (stim_onsets - starts) / sampling_rate
+            log.info(
+                "    - sync events follow start messages by %.3f s", np.median(lags)
+            )
+            for i in sync_lag_outliers(starts, stim_onsets, sampling_rate):
+                log.warning(
+                    "  - WARNING: sync event for stimulus %d (%s) is %.3f s after its "
+                    "start message (median %.3f s). Check the sync track.",
+                    i,
+                    entry_stimuli[i].name,
+                    lags[i],
+                    np.median(lags),
+                )
 
         padding_samples = int(prepad * sampling_rate)
         entry_trials = []
@@ -623,6 +654,52 @@ def match_clicks(
     return [entry_stimuli[i] for i in idx]
 
 
+def match_log_stimuli(
+    stimuli: list[Stimulus], onsets: np.ndarray, sampling_rate: float
+) -> tuple[list[Stimulus], bool]:
+    """Match sync events to the stimuli in an oeaudio log, which may be from a
+    different session than the recording (session logs aren't kept long).
+
+    Returns the stimulus for each sync event, and whether the log's times fit
+    the recording (every sync event follows its stimulus by a consistent lag;
+    see sync_lag_outliers). If there is a sync event for every stimulus, they
+    are paired in order; if the times don't fit, the log is probably from
+    another session, and a warning is logged, since the labels are only right if
+    the stimuli were presented in the same order. If sync events are missing,
+    repairing the gap needs the times (see match_clicks), so a log whose times
+    don't fit is an error.
+
+    """
+    if len(stimuli) == onsets.size:
+        starts = np.array([stim.start for stim in stimuli])
+        fits = (onsets >= starts).all() and sync_lag_outliers(
+            starts, onsets, sampling_rate
+        ).size == 0
+        if not fits:
+            log.warning(
+                "  - WARNING: the times in the oeaudio log don't fit this recording, "
+                "so it is probably from another session. Trials are labeled by "
+                "presentation order, which is only right if the stimuli were "
+                "presented in the same order."
+            )
+        return list(stimuli), fits
+    try:
+        matched = match_clicks(stimuli, onsets)
+        starts = np.array([stim.start for stim in matched])
+        fits = sync_lag_outliers(starts, onsets, sampling_rate).size == 0
+    except ValueError:
+        fits = False
+    if not fits:
+        raise RuntimeError(
+            f"{len(stimuli) - onsets.size} sync event(s) are missing, and the times "
+            "in the oeaudio log don't fit this recording (is it from another "
+            "session?), so the trials can't be labeled: by order, every trial after "
+            "a missing sync event would get the wrong stimulus. Use the log from the "
+            "same session."
+        )
+    return matched, True
+
+
 def sync_lag_outliers(
     starts: np.ndarray, onsets: np.ndarray, sampling_rate: float, tolerance: float = 0.1
 ) -> np.ndarray:
@@ -655,7 +732,15 @@ def assign_events_flat(events: pd.DataFrame, sampling_rate: float):
 
 
 def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
-    """Convert pandas trials to pproc"""
+    """Yields a stimtrial point process (dict) for each row of trials.
+
+    trials is a DataFrame of Trial rows with an `events` column (spike times in
+    samples, or NaN for none). `events` in the output are in seconds from the
+    stimulus onset; `offset` is the onset, in seconds from the start of the
+    recording; `interval` is the trial (and `stimulus.interval` the stimulus)
+    relative to the onset; `recording` gives the entry and the trial's sample
+    range; and `aux` lists any auxiliary pulses, if they were requested.
+    """
     for trial in trials.itertuples():
         if isinstance(trial.events, float):
             events = []
@@ -698,13 +783,15 @@ def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
 
 
 def group_spikes_script(argv=None):
+    """group-kilo-spikes: write a pprox file (and a waveform file) for each
+    good cluster in a kilosort/phy output directory. See --help."""
     import argparse
     import os
 
     from dlab import __version__
     from dlab.util import ParseKeyVal, json_serializable, setup_log
 
-    version = "2026.07.15"
+    version = SCRIPT_VERSION
 
     p = argparse.ArgumentParser(
         prog="group-kilo-spikes",
@@ -726,7 +813,8 @@ def group_spikes_script(argv=None):
     p.add_argument(
         "--sync",
         default="ADC3",
-        help="name of channel with synchronization signal (default '%(default)s')",
+        help="name of the channel with the sync signal, clicks or pulses at stimulus "
+        "onset (default '%(default)s')",
     )
     p.add_argument(
         "--sync-thresh",
@@ -745,7 +833,10 @@ def group_spikes_script(argv=None):
     p.add_argument(
         "--oeaudio-log",
         type=Path,
-        help="use an open-ephys-audio logfile to determine list of stimuli instead of using network messages",
+        help="get the list of stimuli from this open-ephys-audio log file, for "
+        "recordings without the messages in the ARF file. Ideally the log from the "
+        "same session; a log from another session with the stimuli in the same "
+        "order can be used (with a warning) if no sync events are missing.",
     )
     p.add_argument(
         "--prepad",
@@ -794,13 +885,13 @@ def group_spikes_script(argv=None):
         "--waveform-pre-peak",
         type=float,
         default=2.0,
-        help="samples before the spike to keep (default %(default).1f ms)",
+        help="time before the spike to keep in the waveforms (default %(default).1f ms)",
     )
     p.add_argument(
         "--waveform-post-peak",
         type=float,
         default=5.0,
-        help="samples after the spike to keep (default %(default).1f ms)",
+        help="time after the spike to keep in the waveforms (default %(default).1f ms)",
     )
     p.add_argument(
         "--local-stim-dir",

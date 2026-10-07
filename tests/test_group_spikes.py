@@ -134,7 +134,7 @@ def test_pprox_metadata(make_recording):
         {"animal": "P1", "name": "/entry_0", "sampling_rate": SAMPLING_RATE}
     ]
     assert pp["bird"] == "P1", "neurobank metadata merged in"
-    assert pp["processed_by"] == ["group-kilo-spikes 2026.07.15"]
+    assert pp["processed_by"] == [f"group-kilo-spikes {kilo.SCRIPT_VERSION}"]
 
 
 def test_pprox_trials(make_recording):
@@ -433,4 +433,4 @@ def test_recording_found_in_neurobank_with_registry_option(
 def test_waveform_file_records_program(make_recording):
     """The waveform file records the program name, whatever the invocation."""
     with h5py.File(make_recording()() / "rec_c1_spikes.h5") as fp:
-        assert fp.attrs["processed_by"] == "group-kilo-spikes 2026.07.15"
+        assert fp.attrs["processed_by"] == f"group-kilo-spikes {kilo.SCRIPT_VERSION}"

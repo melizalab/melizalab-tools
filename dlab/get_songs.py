@@ -37,6 +37,8 @@ from dlab.signal import Signal, hp_filter, resample, rescale
 # disable locking - neurobank archive is probably on an NFS share
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 log = logging.getLogger("dlab")
+# version of get-songs, recorded in the metadata of deposited files
+SCRIPT_VERSION = "2026.10.06"
 
 
 def get_interval(path: Path, dataset: str, interval_ms: Sequence[float]) -> Signal:
@@ -64,6 +66,7 @@ def get_interval(path: Path, dataset: str, interval_ms: Sequence[float]) -> Sign
 
 
 def script(argv=None):
+    """get-songs: extract songs from ARF files into WAVE files. See --help."""
     import argparse
 
     import yaml
@@ -71,7 +74,7 @@ def script(argv=None):
     from dlab import __version__
     from dlab.util import setup_log
 
-    script_version = "2025.07.28"
+    script_version = SCRIPT_VERSION
 
     p = argparse.ArgumentParser(
         prog="get-songs",

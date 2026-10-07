@@ -1,7 +1,9 @@
 # -*- mode: python -*-
 """Process pprox (point process) data
 
-See https://meliza.org/spec:2/pprox/ for specification
+See https://meliza.org/spec:2/pprox/ for the specification, and
+https://meliza.org/spec:2/stimtrial/ for the extension used for trials with
+stimuli (written by group-kilo-spikes).
 
 This package deliberately does not include any functions for serialization, as
 pprox objects are just python dictionaries.
@@ -23,17 +25,23 @@ _stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
 
 
 class Stimulus(TypedDict):
+    """The stimulus presented in a stimtrial trial"""
+
     name: str
     interval: tuple[float, float]
 
 
 class Trial(TypedDict):
+    """A stimtrial point process (the main fields; others may be present)"""
+
     events: Sequence[float]
     interval: tuple[float, float]
     stimulus: Stimulus
 
 
 class Collection(TypedDict):
+    """A pprox collection of trials"""
+
     pprox: Sequence[Trial]
 
 
@@ -72,7 +80,7 @@ def groupby(pprox: Collection, keyfun: Callable[[Trial], Any]) -> Iterator:
 
 
 def validate(obj: Collection):
-    """Validates object against pprox schema"""
+    """Validates object against pprox schema. Not implemented yet."""
     raise NotImplementedError("pprox.validate is not implemented")
 
 
@@ -98,7 +106,8 @@ def aggregate_events(pprox: Collection) -> np.ndarray:
 
 
 def combine_recordings(*pprox):
-    """Combine events from multiple pprox objects into a single object, matching based on trial number"""
+    """Combine events from multiple pprox objects into a single object, matching
+    based on trial number. Not implemented yet."""
     raise NotImplementedError("pprox.combine_recordings is not implemented")
 
 

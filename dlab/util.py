@@ -9,6 +9,8 @@ import numpy as np
 
 
 def setup_log(debug=False):
+    """Configure logging for a script: info messages (or debug, if debug is
+    True) to stderr, without httpx's info messages."""
     logging.basicConfig(
         format="%(message)s", level=logging.DEBUG if debug else logging.INFO
     )
