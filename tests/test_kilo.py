@@ -154,14 +154,16 @@ def stim_dset(request, tmp_path):
         yield dset
 
 
-def test_messages_to_stimuli_only_start_messages(stim_dset):
-    """Only 'start <file>' rows become stimuli, with the row's start sample and the
-    file's stem as the name. 'stop' and 'metadata:' rows are ignored.
+def test_messages_to_stimuli_start_and_stop_messages(stim_dset):
+    """Each 'start <file>' row becomes a stimulus, with the row's start sample,
+    the file's stem as the name, and the end from its 'stop' row (if any).
+    'metadata:' rows are ignored.
     """
-    stimuli = list(kilo.messages_to_stimuli(stim_dset))
-    assert stimuli == [kilo.Stimulus("a", 100), kilo.Stimulus("b", 400)], (
+    stimuli = kilo.messages_to_stimuli(stim_dset)
+    assert [(s.name, s.start) for s in stimuli] == [("a", 100), ("b", 400)], (
         "only 'start' rows should yield stimuli"
     )
+    assert stimuli[0].end == 200
 
 
 # --- read_kilo_params

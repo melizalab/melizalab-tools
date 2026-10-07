@@ -595,7 +595,12 @@ def test_no_aux_field_unless_requested(make_arf):
     assert all("aux" not in t for t in pp)
 
 
-# --- condition messages (jpresent) vs aux pulses
+# --- jrelay message streams vs aux pulses
+#
+# In these entries the stream start messages come 768 samples after the
+# stimulus start message, so an LED pulse at the stimulus onset follows its
+# message by 6732 samples (0.22 s), and the stop message is at the stimulus
+# offset.
 
 
 def opto_entry(pulses, conditions=("b",), **kwargs):
@@ -612,67 +617,139 @@ def aux_warnings(caplog):
     return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
 
 
-def test_messages_to_conditions():
-    """condition_start messages are parsed into (stimulus, sample) pairs."""
-    import numpy as np
-
+def test_messages_to_events():
+    """Start and stop messages are parsed by stream (the prefix before '_');
+    a stop message gives the end of the last open event with its name. Names
+    are reduced to their stem and may contain spaces; other messages are
+    ignored."""
     rows = np.array(
         [
-            (100, b"start a"),
+            (50, b"jrelay connected"),
+            (100, b"start stims/a.wav"),
             (130, b"condition_start a"),
-            (500, b"stop a"),
+            (140, b"channel3_start ttl 1"),
+            (150, b"channel3_stop ttl 1"),
+            (500, b"stop stims/a.wav"),
             (500, b"condition_stop a"),
+            (600, b"trial_start b"),
+            (700, b"start b"),
         ],
         dtype=[("start", "i8"), ("message", "S64")],
     )
-    assert kilo.messages_to_conditions(rows) == [kilo.Stimulus("a", 130)]
+    S = kilo.Stimulus
+    assert kilo.messages_to_events(rows) == {
+        "stimulus": [S("a", 100, 500), S("b", 700)],
+        "condition": [S("a", 130, 500)],
+        "channel3": [S("ttl 1", 140, 150)],
+        "trial": [S("b", 600)],
+    }
+    assert kilo.messages_to_stimuli(rows) == [S("a", 100, 500), S("b", 700)]
 
 
-def test_conditions_agree_with_pulses(make_arf, caplog):
-    """When the trials with condition messages are the trials with pulses,
+def test_aux_pulses_agree_with_stream(make_arf, caplog):
+    """When each condition message has a pulse and each pulse a message,
     there are no warnings."""
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
-        result = trials(make_arf(opto_entry([(90000, 105000)])), aux={"led": LED})
+        result = trials(
+            make_arf(opto_entry([(90000, 105000)])), aux={"led": f"{LED}:condition"}
+        )
     assert [bool(t.aux) for t in result] == [False, True, False]
     assert aux_warnings(caplog) == []
 
 
-def test_condition_without_pulse_warns(make_arf, caplog):
-    """A condition message for a trial with no pulse (e.g. the LED didn't fire,
-    or --aux names the wrong channel) is logged."""
+def test_message_without_pulse_warns(make_arf, caplog):
+    """A message with no pulse (e.g. the LED didn't fire, or --aux names the
+    wrong channel) is logged."""
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
         trials(
             make_arf(opto_entry([(90000, 105000)], conditions=("b", "c"))),
-            aux={"led": LED},
+            aux={"led": f"{LED}:condition"},
         )
     assert aux_warnings(caplog) == [
-        "  - WARNING: trial 2 (c) has a condition message but no aux pulses"
+        "  - WARNING: no 'led' pulse for condition message 1 (c)"
     ]
 
 
-def test_pulse_without_condition_warns(make_arf, caplog):
-    """A pulse in a trial without a condition message is logged."""
+def test_pulse_without_message_warns(make_arf, caplog):
+    """A pulse outside the window of every message is logged."""
     pulses = [(90000, 105000), (150000, 160000)]
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
-        trials(make_arf(opto_entry(pulses)), aux={"led": LED})
+        trials(make_arf(opto_entry(pulses)), aux={"led": f"{LED}:condition"})
     assert aux_warnings(caplog) == [
-        "  - WARNING: trial 2 (c) has aux pulses but no condition message"
+        "  - WARNING: 'led' pulse at sample 150000 is not in the window of any "
+        "condition message"
     ]
 
 
-def test_condition_for_dropped_trial_warns(make_arf, caplog):
-    """If the trial with the condition was dropped (its sync event was missed),
-    the condition message can't be matched, which is logged."""
-    spec = opto_entry([(90000, 105000)], clicks=[30000, 150000])
+def test_no_pulses_warns(make_arf, caplog):
+    """A channel with no pulses at all gives a warning for each message."""
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
-        result = trials(make_arf(spec), aux={"led": LED})
-    assert [t.stimulus_name for t in result] == ["a", "c"]
-    warnings = aux_warnings(caplog)
-    assert any("condition message for b" in w for w in warnings)
+        trials(make_arf(opto_entry([])), aux={"led": f"{LED}:condition"})
+    assert aux_warnings(caplog) == [
+        "  - WARNING: no 'led' pulse for condition message 0 (b)"
+    ]
 
 
-def test_no_condition_check_without_aux(make_arf, caplog):
-    """Without --aux, condition messages are not checked."""
+def test_pulse_train_in_window(make_arf, caplog):
+    """Several pulses in one message's window (a train) are fine."""
+    pulses = [(90000 + k * 3000, 91500 + k * 3000) for k in range(5)]
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(opto_entry(pulses)), aux={"led": f"{LED}:condition"})
+    assert len(result[1].aux) == 5
+    assert aux_warnings(caplog) == []
+
+
+def test_pulse_out_of_line_warns(make_arf, caplog):
+    """A message's first pulse whose lag differs from the others by more than
+    0.1 s is logged."""
+    pulses = [(30000, 45000), (90000, 105000), (156000, 160000)]
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        trials(
+            make_arf(opto_entry(pulses, conditions=("a", "b", "c"))),
+            aux={"led": f"{LED}:condition"},
+        )
+    assert aux_warnings(caplog) == [
+        "  - WARNING: 'led' pulse for condition message 2 (c) is out of line with "
+        "the others"
+    ]
+
+
+def test_channel_stream(make_arf, caplog):
+    """Any jrelay stream can be named, e.g. channel3 for MIDI channel 3."""
+    spec = one_entry(
+        messages=jpresent_messages(STIMULI, streams={"channel3": {"a", "c"}}),
+        aux_channels={"ADC5": [(30000, 31000), (150000, 151000)]},
+    )
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(spec), aux={"ttl": "ADC5:channel3"})
+    assert [len(t.aux) for t in result] == [1, 0, 1]
+    assert aux_warnings(caplog) == []
+
+
+def test_missing_stream_warns(make_arf, caplog):
+    """A stream with no messages can't be checked, which is logged; the pulses
+    are still recorded."""
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(
+            make_arf(opto_entry([(90000, 105000)])), aux={"led": f"{LED}:trial"}
+        )
+    assert result[1].aux == (("led", 90000, 105000),)
+    assert aux_warnings(caplog) == [
+        "  - WARNING: no 'trial' messages to check aux 'led' against"
+    ]
+
+
+def test_no_check_without_stream(make_arf, caplog):
+    """Without a stream, the pulses are recorded but not checked."""
+    pulses = [(150000, 160000)]  # no condition message for c
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(opto_entry(pulses)), aux={"led": LED})
+    assert result[2].aux == (("led", 150000, 160000),)
+    assert aux_warnings(caplog) == []
+
+
+def test_no_check_without_aux(make_arf, caplog):
+    """Without --aux, the stream messages are not checked."""
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
         trials(make_arf(opto_entry([])))
     assert aux_warnings(caplog) == []

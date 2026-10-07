@@ -224,7 +224,7 @@ def test_e36_led_pulses_match_condition_messages(caplog):
     """The LED channel (ADC4) has one pulse, in trial 4, which is the trial with
     a condition_start message, so the cross-check logs no warnings."""
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
-        result = split(E36, "ADC3", e36_names(), aux={"led": "ADC4"})
+        result = split(E36, "ADC3", e36_names(), aux={"led": "ADC4:condition"})
     assert [len(t.aux) for t in result] == [0, 0, 0, 0, 1]
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 

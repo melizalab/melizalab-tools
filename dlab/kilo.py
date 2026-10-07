@@ -77,22 +77,52 @@ def read_kilo_params(fname: Path) -> dict:
     )
 
 
-def messages_to_stimuli(dset: h5.Dataset) -> Iterator[Stimulus]:
-    """Parse the 'start <stimulus>' messages in the stimulus message dataset
-    (see find_message_dset). Times are open-ephys sample numbers, which count
-    from the start of acquisition; arf_to_trials converts them to samples
-    from the start of the recording and matches them to the sync events, which
-    follow the messages by a few hundred ms.
+# '<verb> <name>' with an optional '<stream>_' prefix on the verb (see
+# messages_to_events)
+_re_message = re.compile(r"(?:([A-Za-z0-9]+)_)?(start|stop) (.*)")
+
+
+def messages_to_events(dset: h5.Dataset) -> dict[str, list[Stimulus]]:
+    """Parse the start and stop messages in the stimulus message dataset (see
+    find_message_dset) into events, by stream.
+
+    The presentation script sends '<verb> <name>' for the stimulus, where verb
+    is 'start' or 'stop'. jpresent (through jrelay) sends events on other MIDI
+    channels with the channel as a prefix on the verb: 'trial_' for a window
+    around the stimulus, 'condition_' for trials carrying a manipulation, and
+    'channelN_' for any other channel N. These are returned by stream name
+    ('stimulus', 'trial', 'condition', 'channelN'), each a list of
+    Stimulus(name, start, end) in the order the start messages were sent; end
+    is the time of the matching stop message, or None. Names are reduced to
+    their stem (directory and extension removed). Times are open-ephys sample
+    numbers, which count from the start of acquisition.
 
     """
-    re_start = re.compile(r"start (.*)")
+    events: dict[str, list[Stimulus]] = {}
     for row in dset:
-        time = row["start"]
-        message = row["message"].decode("utf-8")
-        m = re_start.match(message)
-        if m is not None:
-            stim_name = Path(m.group(1)).stem
-            yield Stimulus(stim_name, time)
+        m = _re_message.fullmatch(row["message"].decode("utf-8"))
+        if m is None:
+            continue
+        prefix, verb, name = m.groups()
+        stream = events.setdefault(prefix or "stimulus", [])
+        name, time = Path(name).stem, int(row["start"])
+        if verb == "start":
+            stream.append(Stimulus(name, time))
+            continue
+        # a stop closes the most recent open event with the same name
+        for i in range(len(stream) - 1, -1, -1):
+            if stream[i].name == name and stream[i].end is None:
+                stream[i] = stream[i]._replace(end=time)
+                break
+    return events
+
+
+def messages_to_stimuli(dset: h5.Dataset) -> list[Stimulus]:
+    """The stimulus events in the message dataset (see messages_to_events).
+    arf_to_trials converts their times to samples from the start of the
+    recording and matches them to the sync events, which follow the messages by
+    a few hundred ms."""
+    return messages_to_events(dset).get("stimulus", [])
 
 
 def oeaudio_log_to_stimuli(
@@ -349,7 +379,9 @@ def arf_to_trials(
     "ADC4"}) carrying pulses from other devices, such as an optogenetic light
     source or a sensor's TTL output. Pulses are detected as for the sync
     channel, and each is assigned, unclipped, to the trial in which it starts
-    (see Trial.aux).
+    (see Trial.aux). A channel may be given as 'CHANNEL:STREAM' (e.g.
+    "ADC4:condition") to check its pulses against the messages on that stream
+    of the message dataset (see messages_to_events and check_aux_pulses).
 
     """
     from itertools import zip_longest
@@ -390,6 +422,7 @@ def arf_to_trials(
         log.info("  - recording clock offset: %d", stim_sample_offset)
 
         stim_dset = None
+        events = None  # messages on all streams (not available from an oeaudio log)
         if oeaudio_log is not None:
             log.info("  - reading stimuli from oeaudio log %s", oeaudio_log)
             with open(oeaudio_log) as fp:
@@ -402,7 +435,12 @@ def arf_to_trials(
                     "weren't recorded, use --oeaudio-log to read them from the log."
                 )
             log.info("  - reading stimuli from message dataset %s", stim_dset.name)
-            entry_stimuli = list(messages_to_stimuli(stim_dset))
+            events = messages_to_events(stim_dset)
+            log.info(
+                "    - messages: %s",
+                ", ".join(f"{len(v)} {k}" for k, v in events.items()),
+            )
+            entry_stimuli = events.get("stimulus", [])
         try:
             stim_durations = stim_finder.get_durations(
                 stim.name for stim in entry_stimuli
@@ -474,95 +512,129 @@ def arf_to_trials(
                 )
             )
         if aux:
-            entry_trials = assign_aux_pulses(entry_trials, aux_pulses(entry, aux))
-            if stim_dset is not None:
-                conditions = [
-                    c._replace(start=c.start - stim_sample_offset)
-                    for c in messages_to_conditions(stim_dset)
-                ]
-                if conditions:
-                    check_aux_conditions(
-                        entry_trials, entry_stimuli, conditions, sampling_rate
+            pulses = aux_pulses(entry, aux)
+            entry_trials = assign_aux_pulses(entry_trials, pulses)
+            for name, spec in aux.items():
+                _, _, stream = spec.partition(":")
+                if not stream:
+                    continue
+                if events is None or stream not in events:
+                    log.warning(
+                        "  - WARNING: no '%s' messages to check aux '%s' against",
+                        stream,
+                        name,
                     )
+                    continue
+                messages = [
+                    ev._replace(
+                        start=ev.start - stim_sample_offset,
+                        end=None if ev.end is None else ev.end - stim_sample_offset,
+                    )
+                    for ev in events[stream]
+                ]
+                check_aux_pulses(
+                    name,
+                    [pulse for pulse in pulses if pulse[0] == name],
+                    stream,
+                    messages,
+                    sampling_rate,
+                )
         trials.extend(entry_trials)
     return trials
 
 
-def messages_to_conditions(dset: h5.Dataset) -> list[Stimulus]:
-    """Parse the 'condition_start <stimulus>' messages in the stimulus message
-    dataset. jpresent sends one with each stimulus presented under an
-    experimental condition (e.g. optogenetic stimulation). Times are sample
-    numbers, as for messages_to_stimuli."""
-    re_condition = re.compile(r"condition_start (.*)")
-    out = []
-    for row in dset:
-        m = re_condition.match(row["message"].decode("utf-8"))
-        if m is not None:
-            out.append(Stimulus(Path(m.group(1)).stem, int(row["start"])))
-    return out
-
-
-def check_aux_conditions(
-    trials: list[Trial],
-    stimuli: list[Stimulus],
-    conditions: list[Stimulus],
+def check_aux_pulses(
+    name: str,
+    pulses: list[tuple],
+    stream: str,
+    messages: list[Stimulus],
     sampling_rate: float,
-    tolerance: float = 0.5,
-) -> set[int]:
-    """Checks that the trials with condition messages are the trials with
-    auxiliary pulses, and logs a warning for each that isn't. Returns the
-    indices of the trials with a condition message.
+    tolerance: float = 0.1,
+) -> dict[str, list[int]]:
+    """Checks the pulses on an auxiliary channel against the messages on the
+    stream that drives it, logging a warning for each problem. Returns the
+    indices of the messages without a pulse ('missing'), the pulses outside any
+    message's window ('unexpected'), and the messages whose pulse is out of line
+    ('late').
 
-    trials and stimuli are the trials of one entry and their (matched)
-    stimuli, and conditions the condition messages, with start times in the
-    same units (samples from the start of the sync track). Each condition
-    message is assigned to the trial whose start message is nearest, if that
-    is within tolerance (in s) and names the same stimulus.
+    pulses are (name, start, end) tuples and messages Stimulus(name, start,
+    end) events, in samples from the start of the sync track. Like the sync
+    pulses, each pulse follows its message by a lag (from audio buffering).
+    The first pulse after each start message, before the next one, is that
+    message's; its lag should agree with the others (see sync_lag_outliers).
+    More pulses may follow (e.g. a train) until the stop message, plus the lag.
 
     """
-    starts = np.array([stim.start for stim in stimuli])
-    with_condition = set()
-    for cond in conditions:
-        i = int(np.argmin(np.abs(starts - cond.start)))
-        if (
-            abs(starts[i] - cond.start) > tolerance * sampling_rate
-            or stimuli[i].name != cond.name
-        ):
-            log.warning(
-                "  - WARNING: condition message for %s (sample %d) does not match "
-                "any trial (was the trial dropped?)",
-                cond.name,
-                cond.start,
-            )
-        else:
-            with_condition.add(i)
-    with_pulses = {i for i, trial in enumerate(trials) if trial.aux}
-    log.info(
-        "    - %d trials with condition messages, %d with aux pulses",
-        len(with_condition),
-        len(with_pulses),
+    onsets = np.array(sorted(pulse[1] for pulse in pulses), dtype=int)
+    starts = np.array([msg.start for msg in messages], dtype=int)
+    nexts = np.append(starts[1:], np.iinfo(np.int64).max)
+    first = np.searchsorted(onsets, starts, side="left")
+    has_pulse = (first < onsets.size) & (np.append(onsets, nexts[-1])[first] < nexts)
+    missing = np.flatnonzero(~has_pulse).tolist()
+    lags = onsets[first[has_pulse]] - starts[has_pulse]
+    late = (
+        np.flatnonzero(has_pulse)[
+            sync_lag_outliers(np.zeros(lags.size), lags, sampling_rate, tolerance)
+        ].tolist()
+        if lags.size
+        else []
     )
-    for i in sorted(with_condition - with_pulses):
+    lag = int(np.median(lags)) if lags.size else 0
+    # the window for a message's pulses: from the message to its stop message
+    # plus the lag (or, without a stop message, the next message)
+    unexpected = []
+    for k, onset in enumerate(onsets):
+        i = np.searchsorted(starts, onset, side="right") - 1
+        if i < 0:
+            unexpected.append(k)
+            continue
+        end = messages[i].end
+        limit = nexts[i] if end is None else end + lag + tolerance * sampling_rate
+        if onset > limit:
+            unexpected.append(k)
+    log.info(
+        "  - aux '%s': %d '%s' messages, %d with pulses (lag %.3f s), %d pulses",
+        name,
+        len(messages),
+        stream,
+        int(has_pulse.sum()),
+        lag / sampling_rate,
+        onsets.size,
+    )
+    for i in missing:
         log.warning(
-            "  - WARNING: trial %d (%s) has a condition message but no aux pulses",
+            "  - WARNING: no '%s' pulse for %s message %d (%s)",
+            name,
+            stream,
             i,
-            trials[i].stimulus_name,
+            messages[i].name,
         )
-    for i in sorted(with_pulses - with_condition):
+    for k in unexpected:
         log.warning(
-            "  - WARNING: trial %d (%s) has aux pulses but no condition message",
-            i,
-            trials[i].stimulus_name,
+            "  - WARNING: '%s' pulse at sample %d is not in the window of any %s message",
+            name,
+            onsets[k],
+            stream,
         )
-    return with_condition
+    for i in late:
+        log.warning(
+            "  - WARNING: '%s' pulse for %s message %d (%s) is out of line with the others",
+            name,
+            stream,
+            i,
+            messages[i].name,
+        )
+    return {"missing": missing, "unexpected": unexpected, "late": late}
 
 
 def aux_pulses(entry, aux: Mapping[str, str]) -> list[tuple]:
     """Detects the pulses on each auxiliary channel in an entry, with the
-    automatic threshold (see detect_pulses). Returns a list of (name, start,
-    end) tuples, sorted by start."""
+    automatic threshold (see detect_pulses). aux maps names to 'CHANNEL' or
+    'CHANNEL:STREAM' (see arf_to_trials). Returns a list of (name, start, end)
+    tuples, sorted by start."""
     pulses = []
-    for name, dset_name in aux.items():
+    for name, spec in aux.items():
+        dset_name = spec.partition(":")[0]
         try:
             dset = entry[dset_name]
         except KeyError as err:
@@ -832,9 +904,11 @@ def group_spikes_script(argv=None):
     p.add_argument(
         "--aux",
         action=ParseKeyVal,
-        metavar="NAME=CHANNEL",
+        metavar="NAME=CHANNEL[:STREAM]",
         help="record pulses on an auxiliary channel (e.g. an optogenetic light "
-        "source or a sensor's TTL output) in each trial as NAME. May be repeated.",
+        "source or a sensor's TTL output) in each trial as NAME. If STREAM is given "
+        "(condition, trial, or channelN), check the pulses against the messages on "
+        "that jrelay stream. May be repeated.",
     )
     p.add_argument(
         "--oeaudio-log",
@@ -1017,11 +1091,15 @@ def group_spikes_script(argv=None):
         events = events[~before]
 
     # describes the auxiliary channels; only written if there are any
-    aux_tracks = (
-        {"aux_tracks": {name: {"channel": dset} for name, dset in args.aux.items()}}
-        if args.aux
-        else {}
-    )
+    aux_tracks = {}
+    if args.aux:
+        aux_tracks = {"aux_tracks": {}}
+        for name, spec in args.aux.items():
+            channel, _, stream = spec.partition(":")
+            track = {"channel": channel}
+            if stream:
+                track["stream"] = stream
+            aux_tracks["aux_tracks"][name] = track
     total_spikes = 0
     total_clusters = 0
     good_clust_types = ("good",)

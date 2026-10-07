@@ -116,25 +116,41 @@ def oeaudio_messages(
 
 
 def jpresent_messages(
-    stimuli, *, conditions=(), first_sample=FIRST_SAMPLE, lead=JPRESENT_LEAD
+    stimuli,
+    *,
+    conditions=(),
+    streams=None,
+    first_sample=FIRST_SAMPLE,
+    lead=JPRESENT_LEAD,
 ):
     """The messages jpresent (jill) sends, modeled on examples/P352_1_1.arf.
 
-    As for oeaudio_messages, but names have no directory or extension, there is
-    no metadata message, and the stimuli named in `conditions` also get
-    condition_start/condition_stop messages. jrelay's connect message predates
-    the recording.
+    As for oeaudio_messages, but names have no directory or extension, and there
+    is no metadata message. jrelay's connect message predates the recording.
+    streams maps other jrelay streams (e.g. 'condition', 'channel3') to the
+    stimuli that get <stream>_start messages, 768 samples after the stimulus
+    start message, and <stream>_stop messages, with the stimulus stop message.
+    conditions is short for streams={'condition': conditions}.
     """
+    streams = dict(streams or {})
+    if conditions:
+        streams["condition"] = conditions
     out = [(first_sample - 690, "jrelay connected")]
     for name, onset, offset in stimuli:
         start = first_sample + onset - lead
         stop = first_sample + offset - lead
         out.append((start, f"start {name}"))
-        if name in conditions:
-            out.append((start + 768, f"condition_start {name}"))
+        out.extend(
+            (start + 768, f"{stream}_start {name}")
+            for stream, names in streams.items()
+            if name in names
+        )
         out.append((stop, f"stop {name}"))
-        if name in conditions:
-            out.append((stop, f"condition_stop {name}"))
+        out.extend(
+            (stop, f"{stream}_stop {name}")
+            for stream, names in streams.items()
+            if name in names
+        )
     return out
 
 

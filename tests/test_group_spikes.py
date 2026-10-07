@@ -395,6 +395,13 @@ def test_aux_option(make_recording):
     ]
 
 
+def test_aux_option_with_stream(make_recording):
+    """--aux NAME=CHANNEL:STREAM records the stream in aux_tracks."""
+    run = make_recording(aux_channels={"ADC4": [(30000, 60000)]})
+    pp = load_pprox(run("--aux", "led=ADC4:condition"), 1)
+    assert pp["aux_tracks"] == {"led": {"channel": "ADC4", "stream": "condition"}}
+
+
 def test_no_aux_fields_by_default(make_recording):
     """Without --aux, neither aux nor aux_tracks is written."""
     pp = load_pprox(make_recording(aux_channels={"ADC4": [(30000, 60000)]})(), 1)

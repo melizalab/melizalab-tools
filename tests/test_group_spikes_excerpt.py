@@ -137,13 +137,13 @@ def test_click_track_gives_same_output(tmp_path, outputs):
 
 
 def test_led_pulses_as_aux(tmp_path, outputs):
-    """With --aux led=ADC4, trial 4 (the one with a condition_start message)
+    """With --aux led=ADC4:condition, trial 4 (the one with a condition_start message)
     has the 1 s LED pulse, starting 1 sample before the stimulus; the others
     have none. Otherwise the output is the same as the golden output."""
-    out = run_excerpt(tmp_path, extra=("--aux", "led=ADC4"))
+    out = run_excerpt(tmp_path, extra=("--aux", "led=ADC4:condition"))
     for path in sorted(GOLDEN.glob("*.pprox")):
         pp = load(out / path.name)
-        assert pp["aux_tracks"] == {"led": {"channel": "ADC4"}}
+        assert pp["aux_tracks"] == {"led": {"channel": "ADC4", "stream": "condition"}}
         assert [len(t["aux"]) for t in pp["pprox"]] == [0, 0, 0, 0, 1]
         ((name, (start, end)),) = [
             (a["name"], a["interval"]) for a in pp["pprox"][4]["aux"]

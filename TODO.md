@@ -85,11 +85,16 @@ when a fix makes one pass.
   that group-kilo-spikes output conforms; update them if the specs change.
 - [ ] The neurobank resource "trials" is the only stimtrial file without
   `interval`; probably a dummy that should be removed.
-- [x] Cross-check aux pulses against jpresent's `condition_start` messages:
-  with `--aux`, each condition message is matched to its trial (nearest start
-  message, same stimulus), and a condition without a pulse, a pulse without a
-  condition, or an unmatched condition (e.g. a dropped trial) is logged. On
-  all of E36 the 650 condition messages match the 650 LED pulses.
+- [x] Cross-check aux pulses against jrelay messages: start/stop messages on
+  every stream (stimulus, `trial_`, `condition_`, `channelN_`) are parsed by
+  `messages_to_events`. With `--aux NAME=CHANNEL:STREAM`, each pulse is checked
+  against that stream's messages (`check_aux_pulses`): a message without a
+  pulse, a pulse outside every message's window, or a pulse whose lag is out of
+  line is logged. On all of E36 the 650 condition messages match the 650 LED
+  pulses (lag 0.266 s).
+- [ ] Remind experimenters to shorten the JACK period and audio driver/card
+  buffers: TTL pulses and sync events follow the jrelay messages by 0.2-0.3 s
+  (up to 1 s on some setups), which loosens message-to-pulse matching.
 - [ ] Existing klopto outputs (e.g. E36's) have placeholder `led_start` /
   `led_end` values in trials without the LED (sample 0 relative to the
   stimulus, e.g. -3.27 s); analyses must use `led` first.

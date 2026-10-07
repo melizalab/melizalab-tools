@@ -434,7 +434,12 @@ def test_aux_matches_klopto_opto(caplog):
     with h5py.File(ex / "E36_5_1.arf", "r") as fp:
         with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
             trials = kilo.arf_to_trials(
-                fp, finder, "ADC3", prepad=0.5, oeaudio_log=None, aux={"led": "ADC4"}
+                fp,
+                finder,
+                "ADC3",
+                prepad=0.5,
+                oeaudio_log=None,
+                aux={"led": "ADC4:condition"},
             )
     # every condition_start message is matched by an LED pulse, and vice versa
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
