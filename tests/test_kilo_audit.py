@@ -444,10 +444,13 @@ def fake_registry(monkeypatch, tmp_path):
         "spikes-hdf5": ["A_1_c1_spikes", "A_1_c2_spikes", "B_1_c7_spikes"],
     }
     root = local_archive(tmp_path / "archive", "A_1", "A_10", "B_1")
+    # resource records give locations as strings; the dicts come from the bulk
+    # locations endpoint (fetch_locations)
     recordings = {  # Z_9 isn't registered
-        name: {"name": name, "locations": [archived(name, root)]}
+        name: {"name": name, "locations": [f"neurobank://archive/{name}"]}
         for name in ("A_1", "A_10", "B_1")
     }
+    locations = {name: [archived(name, root)] for name in recordings}
     queries = []
 
     def search(registry_url, **params):
@@ -462,6 +465,11 @@ def fake_registry(monkeypatch, tmp_path):
 
     monkeypatch.setattr(kilo_audit.nbank_core, "search", search)
     monkeypatch.setattr(kilo_audit.nbank_core, "describe_many", describe_many)
+    monkeypatch.setattr(
+        kilo_audit,
+        "fetch_locations",
+        lambda url, names: {n: locations[n] for n in names if n in locations},
+    )
     return queries
 
 
@@ -544,11 +552,29 @@ def test_local_copy(tmp_path):
     tape = {"scheme": "tape", "root": "T1:4", "resource_name": "A_1"}
     web = {"scheme": "https", "root": "https://x/", "resource_name": "A_1"}
     elsewhere = archived("A_1", tmp_path / "not_mounted")
-    found = kilo_audit.local_copy({"locations": [tape, web, archived("A_1", root)]})
+    found = kilo_audit.local_copy([tape, web, archived("A_1", root)])
     assert found is not None and found.name == "A_1.arf" and found.exists()
-    assert kilo_audit.local_copy({"locations": [tape, web, elsewhere]}) is None
-    assert kilo_audit.local_copy({"locations": [archived("B_1", root)]}) is None
-    assert kilo_audit.local_copy({"name": "A_1"}) is None
+    assert kilo_audit.local_copy([tape, web, elsewhere]) is None
+    assert kilo_audit.local_copy([archived("B_1", root)]) is None
+    assert kilo_audit.local_copy([]) is None
+    # locations as the resource records give them (strings) are ignored
+    assert kilo_audit.local_copy(["neurobank://archive/A_1"]) is None
+
+
+def test_fetch_locations(monkeypatch):
+    """Locations come from the registry's bulk locations endpoint, which gives
+    them as dicts (the resource records only have strings)."""
+    queries = []
+
+    def query_registry_bulk(client, url, query):
+        queries.append((url, query))
+        yield {"name": "A_1", "locations": [{"scheme": "tape"}]}
+
+    monkeypatch.setattr("nbank.util.query_registry_bulk", query_registry_bulk)
+    found = kilo_audit.fetch_locations("https://registry/", ["A_1", "B_1"])
+    assert found == {"A_1": [{"scheme": "tape"}]}
+    assert queries == [("https://registry/bulk/locations/", {"names": ["A_1", "B_1"]})]
+    assert kilo_audit.fetch_locations("https://registry/", []) == {}
 
 
 def test_find_units_skips_recordings_not_on_this_host(
@@ -559,18 +585,15 @@ def test_find_units_skips_recordings_not_on_this_host(
     --unavailable file instead. Their orphans can still be regenerated (from
     other units' trials, without the ARF file)."""
     root = local_archive(tmp_path / "here", "A_1")
-    records = {
-        "A_1": {"name": "A_1", "locations": [archived("A_1", root)]},
-        "A_10": {
-            "name": "A_10",
-            "locations": [{"scheme": "tape", "root": "T1:4", "resource_name": "A_10"}],
-        },
-        "B_1": {"name": "B_1", "locations": [archived("B_1", tmp_path / "elsewhere")]},
+    locations = {
+        "A_1": [archived("A_1", root)],
+        "A_10": [{"scheme": "tape", "root": "T1:4", "resource_name": "A_10"}],
+        "B_1": [archived("B_1", tmp_path / "elsewhere")],
     }
     monkeypatch.setattr(
-        kilo_audit.nbank_core,
-        "describe_many",
-        lambda url, *ids: [records[i] for i in ids if i in records],
+        kilo_audit,
+        "fetch_locations",
+        lambda url, names: {n: locations[n] for n in names if n in locations},
     )
     control, unavailable, orphans = (tmp_path / n for n in ("a.tsv", "u.tsv", "o.tsv"))
     kilo_audit.find_units_script(
@@ -587,11 +610,7 @@ def test_find_units_skips_recordings_not_on_this_host(
 def test_find_units_warns_if_no_archive_here(fake_registry, monkeypatch, caplog):
     """If none of the recordings is on this host, the archive probably isn't
     mounted here, and the script says so."""
-    monkeypatch.setattr(
-        kilo_audit.nbank_core,
-        "describe_many",
-        lambda url, *ids: [{"name": i, "locations": []} for i in ids],
-    )
+    monkeypatch.setattr(kilo_audit, "fetch_locations", lambda url, names: {})
     with caplog.at_level("WARNING", logger="dlab"):
         kilo_audit.find_units_script(["-r", "https://registry/", "--name", "B_1"])
     assert "run find-kilo-units (and the audits) on the archive host" in caplog.text

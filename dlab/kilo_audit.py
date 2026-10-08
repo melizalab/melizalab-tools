@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import h5py as h5
+import httpx
 import numpy as np
 from nbank import core as nbank_core
 
@@ -1214,14 +1215,33 @@ def group_units(
     return groups, unmatched
 
 
-def local_copy(record: dict) -> Path | None:
-    """The path of a resource in a neurobank archive on this host, from its
-    registry record, or None. Copies elsewhere (other hosts, http, tape) are
-    not used: the audit scripts never download."""
+def fetch_locations(registry_url: str, names: Iterable[str]) -> dict[str, list]:
+    """The locations of resources, by name, from the registry's bulk locations
+    endpoint (the resource records only give them as strings)"""
+    from httpx import Client
+    from nbank import registry, util
+
+    names = list(names)
+    if not names:
+        return {}
+    url, query = registry.get_locations_bulk(registry_url, names)
+    with Client(auth=nbank.default_auth) as client:
+        return {
+            r["name"]: r.get("locations", [])
+            for r in util.query_registry_bulk(client, url, query)
+        }
+
+
+def local_copy(locations: list) -> Path | None:
+    """The path of a resource in a neurobank archive on this host, given its
+    locations (see fetch_locations), or None. Copies elsewhere (other hosts,
+    http, tape) are not used: the audit scripts never download."""
     from nbank.registry import local_schemes
     from nbank.util import parse_location
 
-    for location in record.get("locations", []):
+    for location in locations:
+        if not isinstance(location, dict):
+            continue
         if location.get("scheme") not in local_schemes():
             continue
         try:
@@ -1357,7 +1377,8 @@ def find_units_script(argv=None):
         records = {
             r["name"]: r for r in nbank_core.describe_many(args.registry_url, *groups)
         }
-    except OSError as err:
+        locations = fetch_locations(args.registry_url, records)
+    except (OSError, httpx.HTTPError) as err:
         log.error("find-kilo-units: %s", err)
         sys.exit(1)
 
@@ -1375,7 +1396,7 @@ def find_units_script(argv=None):
             orphans[rec] = group["orphans"]
         if not group["units"]:
             continue
-        if local_copy(records[rec]) is None:
+        if local_copy(locations.get(rec, [])) is None:
             log.debug("  - %s: recording not in an archive on this host; skipped", rec)
             unavailable[rec] = group["units"]
             continue
