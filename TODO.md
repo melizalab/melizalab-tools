@@ -171,16 +171,14 @@ recordings, which are out of scope).
   waveform files fall outside the trials and are ignored. Done as
   `kilo.waveforms_to_events`, with `kilo.assign_spikes` for the boundary rule
   (also used by group-kilo-spikes).
-- [ ] `regenerate-pprox RECORDING --units ...`: one recording. Writes pprox
-  files for units whose pprox is missing, to a directory, for manual deposit.
-  Trial table from another pprox of the same recording and run (exact), or
-  else from the ARF with the current pipeline (needs the sync track and
-  prepad unless recorded in the waveform file; onsets may differ from the
-  original version). Metadata: `kilosort_*`, `recording` and the original
-  `processed_by` from the waveform file; cluster id from the name;
-  `entry_metadata` from the ARF; unit metadata from the registry. Adds a
-  `derived_from` field naming the waveform resource and appends its own
-  `processed_by`.
+- [x] `regenerate-pprox RECORDING --units ...` (`dlab/kilo_regenerate.py`):
+  rebuilds pprox files from waveform files into a directory, for manual
+  deposit. Trials from another unit's pprox of the same recording (checked to
+  reproduce that unit's own events; by version if the units disagree), from
+  `--trials`, or `--from-arf` (current pipeline; sync track and prepad from
+  the waveform file or options; no aux). Adds `derived_from`, `trials_from`
+  and its own `processed_by` entry. Three P397 units regenerated from
+  siblings are identical to the deposited originals apart from provenance.
 - [x] `audit-kilo-spikes RECORDING --units ...` (`dlab/kilo_audit.py`): one
   recording; writes a JSON report. Exit code 0 if the audit ran, whatever it
   found; 1 only if it couldn't run. Findings are graded by their effect on

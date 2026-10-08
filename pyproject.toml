@@ -46,6 +46,7 @@ get-songs = "dlab.get_songs:script"
 audit-kilo-spikes = "dlab.kilo_audit:script"
 find-kilo-units = "dlab.kilo_audit:find_units_script"
 collect-kilo-audit = "dlab.kilo_audit:collect_script"
+regenerate-pprox = "dlab.kilo_regenerate:script"
 
 [project.optional-dependencies]
 audio = ["samplerate>=0.2.3"]

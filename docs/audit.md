@@ -65,7 +65,7 @@ Other options:
   newly deposited unit is audited again.
 - `--orphans FILE` writes a second control file, in the same format, listing
   waveform files that have no pprox. These are the candidates for regenerating
-  pprox files (a `regenerate-pprox` script is planned).
+  pprox files (see [Regenerating missing pprox files](#regenerating-missing-pprox-files)).
 
 ## 2. Run the audits
 
@@ -166,8 +166,7 @@ jq '.units[] | select(.status == "fail") | {name, findings}' reports/C401_1_1b.j
 
 ## Fixing problems
 
-Deposited files are never edited in place, because neurobank resources are supposed to be immutable. A
-problem can be addressed in three ways, from least to most disruptive:
+None of the scripts modify deposited files, because neurobank resources are supposed to be immutable. Problems can be addressed in three ways, from least to most disruptive:
 
 1. **Exclude trials or units in analyses.** Use this for `warn` findings, with the
    affected trials listed in the report.
@@ -180,6 +179,59 @@ problem can be addressed in three ways, from least to most disruptive:
    with anyone who has analyzed the original. There is no convention yet for
    superceding old resources, so discuss with Dan if you feel a re-deposit after
    use is needed.
+
+### Regenerating missing pprox files
+
+If a recording is missing one or more pprox files, they can be rebuilt from the corresponding waveform files (`_spikes.h5`), if those exist. **Before you do this**, make sure
+you understand why the pprox files are missing; a common pattern is when pprox files from a bad sort get purged but not the corresponding waveform files.
+
+The `regenerate-pprox` script will attempt to regenerate the missing pprox files
+using the times in the waveform files and information about the trial structure
+in other pprox files from the same recording (if they exist) or from the ARF
+file. Use the orphans file. You can set up a parallel job using the orphans file
+from `find-kilo-units`:
+
+```bash
+find-kilo-units --name P397 -o audit.tsv --orphans orphans.tsv
+parallel --colsep '\t' -a orphans.tsv \
+    'regenerate-pprox {1} --units {2} -o regenerated'
+```
+
+Regenerated files are written to `regenerated/` for you to check and
+deposit by hand. The script refuses to overwrite a file that already exists,
+and exits with a non-zero status if any unit couldn't be regenerated.
+
+The trial table comes from one of three places:
+
+1. **Another unit of the same recording** (the default), if other units'
+   pprox files are found next to local waveform files, or in the registry.
+   - If the other units don't all have the same trials, only those processed
+     by the same version as the waveform file are used.
+   - A table is only used if it reproduces its own unit's events from that
+     unit's waveform file.
+
+   This reproduces the original pprox exactly. On P397_1_1, three deposited
+   units regenerated this way were identical to the originals apart from
+   their provenance.
+2. **`--trials PPROX`:** a pprox from the same recording and run, given
+   explicitly. Use this when the default can't choose.
+3. **`--from-arf`:** the trials made from the ARF file by the current version
+   of `group-kilo-spikes`, for recordings with no pprox from the same run.
+   - The sync track and prepad are taken from the waveform file (files from
+     after 2026.10.07 record them), or manually specified with `--sync` and `--prepad`. Add
+     `--oeaudio-log` and `--local-stim-dir` as for `group-kilo-spikes`.
+   - The onsets may differ by a few samples from what the original version
+     made, or more for pulse sync before 2026.10.07.
+   - Aux pulses are not included.
+
+Each regenerated file records how it was generated:
+
+- `derived_from`: the waveform file's neurobank URL, or its path.
+- `trials_from`: the pprox the trials came from, or the ARF file.
+- `processed_by`: the version that made the waveform file, followed by
+  `regenerate-pprox`.
+
+Check the regenerated files with `audit-kilo-spikes` before depositing them.
 
 ## Dictionary of findings
 
@@ -254,7 +306,8 @@ a truncated or edited file.
 
 **Fixable:** sometimes. If the waveform file and another unit's pprox from the
 same run exist, the pprox can be regenerated from the waveform file and
-deposited as a new resource (`regenerate-pprox`, planned). Otherwise the unit
+deposited as a new resource (see
+[Regenerating missing pprox files](#regenerating-missing-pprox-files)). Otherwise the unit
 needs reprocessing.
 
 #### `recording-name`
@@ -380,7 +433,8 @@ waveform file. One of the two files is wrong, or they come from different
 runs or sorts. Compare their `kilosort_*` attributes and `processed_by`.
 
 **Fixable:** sometimes. If the waveform file is the right one and the trial
-table is good (no message findings), regenerate the pprox from it and deposit
+table is good (no message findings), regenerate the pprox from it
+(`regenerate-pprox --trials`) and deposit
 it as a new resource.
 
 #### `waveforms-before-first-trial`

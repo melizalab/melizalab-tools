@@ -419,15 +419,21 @@ def check_recording_name(unit: Unit, recording: str) -> list[dict]:
 # --- across units
 
 
-def trial_table(unit: Unit) -> tuple:
+def trials_key(trials: list[dict]) -> tuple:
+    """A hashable summary of a trial table (onset, stimulus and interval of
+    each trial), for comparing the trials of different units"""
     return tuple(
         (
             round(t.get("offset", np.nan), 6),
             t.get("stimulus", {}).get("name"),
             *np.round(t.get("interval", (np.nan, np.nan)), 6),
         )
-        for t in unit.trials
+        for t in trials
     )
+
+
+def trial_table(unit: Unit) -> tuple:
+    return trials_key(unit.trials)
 
 
 def check_units(units: list[Unit]) -> list[dict]:
@@ -447,14 +453,15 @@ def check_units(units: list[Unit]) -> list[dict]:
                 + "; ".join(", ".join(names) for names in groups),
             )
         )
-    versions = {tuple(unit.processed_by) for unit in units}
+    # the version that made the trials (later entries, e.g. from
+    # regenerate-pprox, don't change them)
+    versions = {(unit.processed_by or ["unknown"])[0] for unit in units}
     if len(versions) > 1:
         out.append(
             finding(
                 "versions",
                 "info",
-                "units processed by different versions: "
-                + "; ".join(" + ".join(v) for v in sorted(versions)),
+                "units processed by different versions: " + "; ".join(sorted(versions)),
             )
         )
     return out
