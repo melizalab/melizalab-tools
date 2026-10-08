@@ -45,8 +45,8 @@ console scripts
 -  ``audit-kilo-spikes``: check the ``group-kilo-spikes`` output for one
    recording against its waveform files, the stimulus messages in the ARF
    file, and each other, and write a JSON report. Changes nothing.
--  ``select-kilo-recordings``: find the units in the registry and write a
-   control file for running ``audit-kilo-spikes`` in batches.
+-  ``find-kilo-units``: find the units of recordings in the registry and write
+   a control file for running ``audit-kilo-spikes`` in batches.
 - ``get-songs``: extract segments from arf files, rescale, resample, save into
    wave files, and optionally deposit back into neurobank. Usually the first
    step in generating a stimulus set, keeps a nice provenance trail.

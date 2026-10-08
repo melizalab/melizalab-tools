@@ -44,7 +44,7 @@ Homepage = "https://github.com/melizalab/melizalab-tools"
 group-kilo-spikes = "dlab.kilo:group_spikes_script"
 get-songs = "dlab.get_songs:script"
 audit-kilo-spikes = "dlab.kilo_audit:script"
-select-kilo-recordings = "dlab.kilo_audit:select_script"
+find-kilo-units = "dlab.kilo_audit:find_units_script"
 
 [project.optional-dependencies]
 audio = ["samplerate>=0.2.3"]

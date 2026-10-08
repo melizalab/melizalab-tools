@@ -213,9 +213,10 @@ recordings, which are out of scope).
     only a dev dependency).
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
     or found by trying channels for older files) and compare per trial.
-- [x] Selection script, `select-kilo-recordings`: searches the registry for
+- [x] Selection script, `find-kilo-units`: searches the registry for
   `spikes-pprox` and `spikes-hdf5` resources (optionally by `--name`
-  fragment), groups them by recording using group-kilo-spikes's names
+  fragment, or for the recordings listed in a file or on stdin, e.g. piped
+  from `nbank search`), groups them by recording using group-kilo-spikes's names
   (`<recording>_c<N>`, `<recording>_c<N>_spikes`), drops recordings that
   aren't registered, and writes a control file, one line per recording
   (`RECORDING<TAB>UNIT,UNIT,...`), plus (`--orphans`) one of waveform files

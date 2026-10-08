@@ -377,10 +377,10 @@ def test_already_audited(tmp_path):
 def fake_registry(monkeypatch):
     """Stands in for the registry searches; records the queries"""
     resources = {
-        "spikes-pprox": ["A_1_c1", "A_1_c2", "B_1_c5", "Z_9_c1", "odd"],
+        "spikes-pprox": ["A_1_c1", "A_1_c2", "A_10_c1", "B_1_c5", "Z_9_c1", "odd"],
         "spikes-hdf5": ["A_1_c1_spikes", "A_1_c2_spikes", "B_1_c7_spikes"],
     }
-    recordings = {"A_1", "B_1"}  # Z_9 isn't registered
+    recordings = {"A_1", "A_10", "B_1"}  # Z_9 isn't registered
     queries = []
 
     def search(registry_url, **params):
@@ -398,27 +398,27 @@ def fake_registry(monkeypatch):
     return queries
 
 
-def test_select_script(fake_registry, tmp_path):
+def test_find_units_script(fake_registry, tmp_path):
     """The control file has a line per registered recording with units; waveform
     files without a pprox go in the orphans file in the same format."""
     control, orphans = tmp_path / "audit.tsv", tmp_path / "orphans.tsv"
-    kilo_audit.select_script(
+    kilo_audit.find_units_script(
         ["-r", "https://registry/", "-o", str(control), "--orphans", str(orphans)]
     )
-    assert control.read_text() == "A_1\tA_1_c1,A_1_c2\nB_1\tB_1_c5\n"
+    assert control.read_text() == ("A_1\tA_1_c1,A_1_c2\nA_10\tA_10_c1\nB_1\tB_1_c5\n")
     assert orphans.read_text() == "B_1\tB_1_c7_spikes\n"
     assert [q["dtype"] for q in fake_registry] == ["spikes-pprox", "spikes-hdf5"]
 
 
-def test_select_script_name_filter(fake_registry, capsys):
+def test_find_units_script_name_filter(fake_registry, capsys):
     """--name is passed to the registry searches; the control file goes to
     standard output by default."""
-    kilo_audit.select_script(["-r", "https://registry/", "--name", "A_1"])
-    assert capsys.readouterr().out == "A_1\tA_1_c1,A_1_c2\n"
-    assert all(q["name"] == "A_1" for q in fake_registry)
+    kilo_audit.find_units_script(["-r", "https://registry/", "--name", "B_1"])
+    assert capsys.readouterr().out == "B_1\tB_1_c5\n"
+    assert all(q["name"] == "B_1" for q in fake_registry)
 
 
-def test_select_script_skips_audited(fake_registry, tmp_path, capsys):
+def test_find_units_script_skips_audited(fake_registry, tmp_path, capsys):
     """With --reports, recordings whose report covers the current units are
     skipped; a recording with a new unit is audited again."""
     reports = tmp_path / "reports"
@@ -427,5 +427,48 @@ def test_select_script_skips_audited(fake_registry, tmp_path, capsys):
         (reports / f"{rec}.json").write_text(
             json.dumps({"units": [{"name": u} for u in units]})
         )
-    kilo_audit.select_script(["-r", "https://registry/", "--reports", str(reports)])
+    kilo_audit.find_units_script(["-r", "https://registry/", "--reports", str(reports)])
+    assert capsys.readouterr().out == "A_10\tA_10_c1\nB_1\tB_1_c5\n"
+
+
+def test_read_recordings():
+    """The first word of each line, as nbank search prints them, without
+    blank lines, comments, or repeats."""
+    lines = ["A_1\n", "\n", "# a comment\n", "B_1  extra\n", "A_1\n"]
+    assert kilo_audit.read_recordings(lines) == ["A_1", "B_1"]
+
+
+def test_find_units_for_listed_recordings(fake_registry, tmp_path, capsys, caplog):
+    """With a file of recordings, only their units are found, though a name
+    search for A_1 also returns A_10's; a recording without units is logged."""
+    listed = tmp_path / "recordings.txt"
+    listed.write_text("A_1\nC_3\n")
+    with caplog.at_level("INFO", logger="dlab"):
+        kilo_audit.find_units_script(["-r", "https://registry/", str(listed)])
+    assert capsys.readouterr().out == "A_1\tA_1_c1,A_1_c2\n"
+    assert {q["name"] for q in fake_registry} == {"A_1", "C_3"}
+    assert "C_3: no units found" in caplog.text
+
+
+def test_find_units_from_stdin(fake_registry, monkeypatch, capsys):
+    """'-' reads the recordings from standard input, e.g. piped from nbank
+    search."""
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("B_1\n"))
+    kilo_audit.find_units_script(["-r", "https://registry/", "-"])
     assert capsys.readouterr().out == "B_1\tB_1_c5\n"
+
+
+def test_find_units_name_or_list(fake_registry):
+    """--name and a list of recordings can't both be given."""
+    with pytest.raises(SystemExit):
+        kilo_audit.find_units_script(["--name", "A", "-"])
+
+
+def test_httpx_messages_suppressed(fake_registry, capsys):
+    """httpx's info messages (one per request) are not shown."""
+    import logging
+
+    kilo_audit.find_units_script(["-r", "https://registry/", "--name", "B_1"])
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING

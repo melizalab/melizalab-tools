@@ -1,6 +1,6 @@
 # -*- mode: python -*-
-"""Audit the group-kilo-spikes output for one recording, and select the
-recordings to audit.
+"""Audit the group-kilo-spikes output for one recording, and find the units
+of recordings to audit.
 
 audit-kilo-spikes checks the pprox files (one per unit) sorted from a
 recording against their waveform files, against the stimulus messages in the
@@ -22,13 +22,17 @@ The report is JSON, with a status (the worst finding) for the recording and
 each unit. The exit status is 0 if the audit ran, whatever it found, so batch
 runs (e.g. with GNU parallel) only see failures to run.
 
-select-kilo-recordings finds the units in the registry and writes a control
-file for batch runs, one line per recording: the recording id, a tab, and its
-units, comma-separated. For example:
+find-kilo-units finds the units of recordings in the registry and writes a
+control file for batch runs, one line per recording: the recording id, a tab,
+and its units, comma-separated. For example:
 
-    select-kilo-recordings --name P397 --reports reports -o audit.tsv
+    find-kilo-units --name P397 --reports reports -o audit.tsv
     parallel --colsep '\t' -a audit.tsv \
         'audit-kilo-spikes {1} --units {2} -o reports/{1}.json'
+
+The recordings can also be listed in a file, or piped from a custom search:
+
+    nbank search -d <arf dtype> -k <key>=<value> | find-kilo-units - -o audit.tsv
 
 Units are grouped by name, as group-kilo-spikes names them (<recording>_c<N>,
 with waveform files <recording>_c<N>_spikes), so the audit checks that each
@@ -51,6 +55,7 @@ from nbank import core as nbank_core
 
 from dlab import __version__, kilo
 from dlab import neurobank as nbank
+from dlab.util import setup_log
 
 log = logging.getLogger("dlab")
 
@@ -598,9 +603,7 @@ def script(argv=None):
     p.add_argument("recording", help="the ARF file: a path or neurobank id")
     args = p.parse_args(argv)
 
-    logging.basicConfig(
-        format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
-    )
+    setup_log(args.debug)
     try:
         arf_path = locate(args.recording, args.registry_url)
         units = load_units(args.units, args.registry_url)
@@ -679,28 +682,47 @@ def already_audited(report: Path, units: list[str]) -> bool:
 
 
 def write_control(path: Path | None, lines: dict[str, list[str]]) -> None:
-    text = "".join(f"{rec}\t{','.join(units)}\n" for rec, units in lines.items())
+    text = "".join(f"{rec}\t{','.join(lines[rec])}\n" for rec in sorted(lines))
     if path is None:
         sys.stdout.write(text)
     else:
         path.write_text(text)
 
 
-def select_script(argv=None):
+def read_recordings(fp) -> list[str]:
+    """Recording ids from a file, one per line (the first word of each line,
+    as `nbank search` prints them); blank lines and comments are skipped."""
+    out = []
+    for line in fp:
+        words = line.split("#", 1)[0].split()
+        if words:
+            out.append(words[0])
+    return list(dict.fromkeys(out))
+
+
+def find_units_script(argv=None):
     p = argparse.ArgumentParser(
-        prog="select-kilo-recordings",
-        description="Find the group-kilo-spikes units in the registry and write a "
-        "control file for audit-kilo-spikes, one line per recording: the "
-        "recording id, a tab, and its units, comma-separated.",
+        prog="find-kilo-units",
+        description="Find the group-kilo-spikes units of recordings in the "
+        "registry and write a control file for audit-kilo-spikes, one line per "
+        "recording: the recording id, a tab, and its units, comma-separated.",
     )
     p.add_argument(
         "-v", "--version", action="version", version=f"%(prog)s {__version__}"
     )
     p.add_argument("--debug", help="show verbose log messages", action="store_true")
     nbank.add_registry_argument(p)
-    p.add_argument(
+    which = p.add_mutually_exclusive_group()
+    which.add_argument(
         "--name",
         help="only resources whose names contain this (e.g. a bird or recording)",
+    )
+    which.add_argument(
+        "recordings",
+        nargs="?",
+        type=argparse.FileType("r"),
+        help="only the recordings listed in this file, one id per line ('-' for "
+        "standard input, e.g. piped from nbank search)",
     )
     p.add_argument(
         "--reports",
@@ -726,28 +748,41 @@ def select_script(argv=None):
     )
     args = p.parse_args(argv)
 
-    logging.basicConfig(
-        format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
-    )
-    query = {"name": args.name} if args.name else {}
+    setup_log(args.debug)
+    if args.recordings is not None:
+        recordings = read_recordings(args.recordings)
+        log.info("- finding units for %d recordings", len(recordings))
+        # one search per recording; a name search matches fragments, so the
+        # results include other recordings (e.g. P397_1_10 for P397_1_1)
+        queries = [{"name": rec} for rec in recordings]
+    else:
+        recordings = None
+        queries = [{"name": args.name} if args.name else {}]
 
     def names(dtype: str) -> list[str]:
-        found = [
+        found = {
             r["name"]
+            for query in queries
             for r in nbank_core.search(args.registry_url, dtype=dtype, **query)
-        ]
+        }
         log.info("- %d %s resources", len(found), dtype)
-        return found
+        return sorted(found)
 
     try:
         groups, unmatched = group_units(
             names(args.pprox_dtype), names(args.waveforms_dtype)
         )
+        if recordings is not None:
+            groups = {rec: groups[rec] for rec in recordings if rec in groups}
+            unmatched = []
+            for rec in recordings:
+                if rec not in groups:
+                    log.info("  - %s: no units found", rec)
         registered = {
             r["name"] for r in nbank_core.describe_many(args.registry_url, *groups)
         }
     except OSError as err:
-        log.error("select-kilo-recordings: %s", err)
+        log.error("find-kilo-units: %s", err)
         sys.exit(1)
 
     for name in unmatched:
