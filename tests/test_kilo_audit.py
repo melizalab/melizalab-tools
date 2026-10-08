@@ -60,6 +60,12 @@ def excerpt_output(tmp_path_factory):
 
 
 @pytest.fixture
+def e36_arf(tmp_path):
+    """The excerpt under its recording's id, as the script expects"""
+    return shutil.copy(E36, tmp_path / "E36_5_1.arf")
+
+
+@pytest.fixture
 def output(excerpt_output, tmp_path):
     """A copy of the excerpt output that a test can modify"""
     return shutil.copytree(excerpt_output, tmp_path / "out")
@@ -67,7 +73,7 @@ def output(excerpt_output, tmp_path):
 
 def audit(output, *units, **kwargs):
     units = kilo_audit.load_units([str(u) for u in units] or [str(output)], None)
-    return kilo_audit.audit_recording(E36, units, **kwargs)
+    return kilo_audit.audit_recording(E36, units, recording="E36_5_1", **kwargs)
 
 
 def unit_report(report, name=UNIT):
@@ -213,6 +219,15 @@ def test_spikes_before_first_trial(output):
     assert checks(unit) == [("waveforms-before-first-trial", "info", None)]
 
 
+def test_pprox_names_another_recording(excerpt_output):
+    """Units are grouped by name for the audit, so a pprox that names another
+    recording is a warning."""
+    units = kilo_audit.load_units([str(excerpt_output)], None)
+    report = kilo_audit.audit_recording(E36, units, recording="E36_5_2")
+    for unit in report["units"]:
+        assert checks(unit) == [("recording-name", "warn", None)]
+
+
 def test_different_versions(output):
     edit_pprox(output, lambda pp: pp.update(processed_by=["group-kilo-spikes 0.1"]))
     assert [(f["check"], f["severity"]) for f in audit(output)["findings"]] == [
@@ -249,19 +264,20 @@ def test_units_from_registry(excerpt_output, monkeypatch):
 # --- script
 
 
-def test_script_writes_report(excerpt_output, tmp_path):
+def test_script_writes_report(excerpt_output, e36_arf, tmp_path):
     """--units takes a directory or comma-separated files; the report is
     written to --output and the exit status is 0."""
     out = tmp_path / "report.json"
     units = ",".join(str(p) for p in sorted(excerpt_output.glob("*.pprox"))[:2])
-    kilo_audit.script(["--units", units, "-o", str(out), str(E36)])
+    kilo_audit.script(["--units", units, "-o", str(out), str(e36_arf)])
     report = json.loads(out.read_text())
     assert report["status"] == "ok" and len(report["units"]) == 2
     assert report["audited_by"].startswith("audit-kilo-spikes ")
+    assert report["recording"] == "E36_5_1"
 
 
-def test_script_report_to_stdout(excerpt_output, capsys):
-    kilo_audit.script(["--units", str(excerpt_output), str(E36)])
+def test_script_report_to_stdout(excerpt_output, e36_arf, capsys):
+    kilo_audit.script(["--units", str(excerpt_output), str(e36_arf)])
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
 
 
@@ -322,3 +338,94 @@ def test_c401_fails():
     for unit in report["units"]:
         found = {f["check"] for f in unit["findings"] if f["severity"] == "fail"}
         assert {"stimulus-labels", "sync-lag", "waveforms-recording"} <= found
+
+
+# --- selection
+
+
+def test_group_units():
+    """Units are grouped by recording; waveform files without a pprox are
+    orphans, and names that don't fit <recording>_c<N> are listed."""
+    groups, unmatched = kilo_audit.group_units(
+        ["A_1_1_c3", "A_1_1_c12", "B_2_c1", "summary"],
+        ["A_1_1_c3_spikes", "A_1_1_c12_spikes", "A_1_1_c40_spikes", "C_c2_spikes"],
+    )
+    assert groups == {
+        "A_1_1": {
+            "units": ["A_1_1_c12", "A_1_1_c3"],
+            "orphans": ["A_1_1_c40_spikes"],
+            "no_waveforms": [],
+        },
+        "B_2": {"units": ["B_2_c1"], "orphans": [], "no_waveforms": ["B_2_c1"]},
+        "C": {"units": [], "orphans": ["C_c2_spikes"], "no_waveforms": []},
+    }
+    assert unmatched == ["summary"]
+
+
+def test_already_audited(tmp_path):
+    """A report covers a recording if it lists exactly the current units."""
+    report = tmp_path / "A.json"
+    report.write_text(json.dumps({"units": [{"name": "A_c1"}, {"name": "A_c2"}]}))
+    assert kilo_audit.already_audited(report, ["A_c2", "A_c1"])
+    assert not kilo_audit.already_audited(report, ["A_c1", "A_c2", "A_c3"])
+    assert not kilo_audit.already_audited(tmp_path / "missing.json", ["A_c1"])
+    (tmp_path / "bad.json").write_text("{")
+    assert not kilo_audit.already_audited(tmp_path / "bad.json", ["A_c1"])
+
+
+@pytest.fixture
+def fake_registry(monkeypatch):
+    """Stands in for the registry searches; records the queries"""
+    resources = {
+        "spikes-pprox": ["A_1_c1", "A_1_c2", "B_1_c5", "Z_9_c1", "odd"],
+        "spikes-hdf5": ["A_1_c1_spikes", "A_1_c2_spikes", "B_1_c7_spikes"],
+    }
+    recordings = {"A_1", "B_1"}  # Z_9 isn't registered
+    queries = []
+
+    def search(registry_url, **params):
+        queries.append(params)
+        fragment = params.get("name", "")
+        for name in resources[params["dtype"]]:
+            if fragment in name:
+                yield {"name": name, "dtype": params["dtype"]}
+
+    def describe_many(registry_url, *ids):
+        return [{"name": name} for name in ids if name in recordings]
+
+    monkeypatch.setattr(kilo_audit.nbank_core, "search", search)
+    monkeypatch.setattr(kilo_audit.nbank_core, "describe_many", describe_many)
+    return queries
+
+
+def test_select_script(fake_registry, tmp_path):
+    """The control file has a line per registered recording with units; waveform
+    files without a pprox go in the orphans file in the same format."""
+    control, orphans = tmp_path / "audit.tsv", tmp_path / "orphans.tsv"
+    kilo_audit.select_script(
+        ["-r", "https://registry/", "-o", str(control), "--orphans", str(orphans)]
+    )
+    assert control.read_text() == "A_1\tA_1_c1,A_1_c2\nB_1\tB_1_c5\n"
+    assert orphans.read_text() == "B_1\tB_1_c7_spikes\n"
+    assert [q["dtype"] for q in fake_registry] == ["spikes-pprox", "spikes-hdf5"]
+
+
+def test_select_script_name_filter(fake_registry, capsys):
+    """--name is passed to the registry searches; the control file goes to
+    standard output by default."""
+    kilo_audit.select_script(["-r", "https://registry/", "--name", "A_1"])
+    assert capsys.readouterr().out == "A_1\tA_1_c1,A_1_c2\n"
+    assert all(q["name"] == "A_1" for q in fake_registry)
+
+
+def test_select_script_skips_audited(fake_registry, tmp_path, capsys):
+    """With --reports, recordings whose report covers the current units are
+    skipped; a recording with a new unit is audited again."""
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    for rec, units in {"A_1": ["A_1_c1", "A_1_c2"], "B_1": ["B_1_c4"]}.items():
+        (reports / f"{rec}.json").write_text(
+            json.dumps({"units": [{"name": u} for u in units]})
+        )
+    kilo_audit.select_script(["-r", "https://registry/", "--reports", str(reports)])
+    assert capsys.readouterr().out == "B_1\tB_1_c5\n"

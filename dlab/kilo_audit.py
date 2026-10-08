@@ -1,5 +1,6 @@
 # -*- mode: python -*-
-"""Audit the group-kilo-spikes output for one recording.
+"""Audit the group-kilo-spikes output for one recording, and select the
+recordings to audit.
 
 audit-kilo-spikes checks the pprox files (one per unit) sorted from a
 recording against their waveform files, against the stimulus messages in the
@@ -21,11 +22,24 @@ The report is JSON, with a status (the worst finding) for the recording and
 each unit. The exit status is 0 if the audit ran, whatever it found, so batch
 runs (e.g. with GNU parallel) only see failures to run.
 
+select-kilo-recordings finds the units in the registry and writes a control
+file for batch runs, one line per recording: the recording id, a tab, and its
+units, comma-separated. For example:
+
+    select-kilo-recordings --name P397 --reports reports -o audit.tsv
+    parallel --colsep '\t' -a audit.tsv \
+        'audit-kilo-spikes {1} --units {2} -o reports/{1}.json'
+
+Units are grouped by name, as group-kilo-spikes names them (<recording>_c<N>,
+with waveform files <recording>_c<N>_spikes), so the audit checks that each
+pprox names the same recording.
+
 """
 
 import argparse
 import json
 import logging
+import re
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -33,6 +47,7 @@ from pathlib import Path
 
 import h5py as h5
 import numpy as np
+from nbank import core as nbank_core
 
 from dlab import __version__, kilo
 from dlab import neurobank as nbank
@@ -374,6 +389,24 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     return out
 
 
+def check_recording_name(unit: Unit, recording: str) -> list[dict]:
+    """Checks that a unit's pprox names the recording it is audited against
+    (by neurobank id, the last part of its URL)."""
+    url = unit.pprox.get("recording")
+    if url is None:
+        return [finding("recording-name", "info", "the pprox names no recording")]
+    name = url.rstrip("/").rsplit("/", 1)[-1]
+    if name != recording:
+        return [
+            finding(
+                "recording-name",
+                "warn",
+                f"the pprox names recording {name}, not {recording}",
+            )
+        ]
+    return []
+
+
 # --- across units
 
 
@@ -422,9 +455,15 @@ def check_units(units: list[Unit]) -> list[dict]:
 
 
 def audit_recording(
-    arf_path: Path, units: list[Unit], oeaudio_log: Path | None = None
+    arf_path: Path,
+    units: list[Unit],
+    oeaudio_log: Path | None = None,
+    recording: str | None = None,
 ) -> dict:
-    """Audits the units sorted from a recording. Returns the report."""
+    """Audits the units sorted from a recording. recording is its neurobank id
+    (by default, the name of the ARF file without its extension). Returns the
+    report."""
+    recording = recording or Path(arf_path).stem
     findings = check_units(units)
     with h5.File(arf_path, "r") as afp:
         entries = [entry for _, entry in kilo.iter_entries(afp)]
@@ -442,6 +481,7 @@ def audit_recording(
             sampling_rate, first_sample = entry_clock(
                 entry, unit.pprox.get("sync_track")
             )
+            unit.findings.extend(check_recording_name(unit, recording))
             unit.findings.extend(check_pprox(unit, sampling_rate))
             if worst(unit.findings) == "fail":
                 continue
@@ -466,7 +506,7 @@ def audit_recording(
             )
     status = worst([*findings, *(f for u in units for f in u.findings)])
     return {
-        "recording": units[0].pprox.get("recording") if units else None,
+        "recording": recording,
         "arf": str(arf_path),
         "audited_by": f"audit-kilo-spikes {__version__}",
         "status": status,
@@ -567,7 +607,8 @@ def script(argv=None):
         if not units:
             raise RuntimeError("no units to audit")
         log.info("- auditing %d units from %s", len(units), arf_path)
-        report = audit_recording(arf_path, units, args.oeaudio_log)
+        recording = Path(args.recording).stem
+        report = audit_recording(arf_path, units, args.oeaudio_log, recording)
     except (OSError, RuntimeError, ValueError, KeyError) as err:
         log.error("audit-kilo-spikes: %s", err)
         sys.exit(1)
@@ -588,6 +629,160 @@ def script(argv=None):
         print(text)
     else:
         args.output.write_text(text + "\n")
+
+
+# --- selection
+
+PPROX_DTYPE = "spikes-pprox"
+WAVEFORMS_DTYPE = "spikes-hdf5"
+_re_unit = re.compile(r"(?P<recording>.+)_c\d+")
+
+
+def group_units(
+    pprox_names: Iterable[str], waveform_names: Iterable[str]
+) -> tuple[dict[str, dict[str, list[str]]], list[str]]:
+    """Groups unit resources by recording, using group-kilo-spikes's names
+    (<recording>_c<N>.pprox and <recording>_c<N>_spikes.h5). Returns a dict
+    mapping each recording to its 'units' (pprox ids), 'orphans' (waveform ids
+    without a pprox), and 'no_waveforms' (pprox ids without a waveform file),
+    and a list of the names that don't fit the pattern."""
+    pprox = set(pprox_names)
+    waveforms = {name.removesuffix("_spikes") for name in waveform_names}
+    unmatched = sorted(
+        {n for n in pprox if not _re_unit.fullmatch(n)}
+        | {f"{n}_spikes" for n in waveforms if not _re_unit.fullmatch(n)}
+    )
+    groups: dict[str, dict[str, list[str]]] = {}
+    for name in sorted(pprox | waveforms):
+        m = _re_unit.fullmatch(name)
+        if m is None:
+            continue
+        group = groups.setdefault(
+            m["recording"], {"units": [], "orphans": [], "no_waveforms": []}
+        )
+        if name not in pprox:
+            group["orphans"].append(f"{name}_spikes")
+            continue
+        group["units"].append(name)
+        if name not in waveforms:
+            group["no_waveforms"].append(name)
+    return groups, unmatched
+
+
+def already_audited(report: Path, units: list[str]) -> bool:
+    """True if report is an audit of exactly these units"""
+    try:
+        done = {u["name"] for u in json.loads(report.read_text())["units"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return done == set(units)
+
+
+def write_control(path: Path | None, lines: dict[str, list[str]]) -> None:
+    text = "".join(f"{rec}\t{','.join(units)}\n" for rec, units in lines.items())
+    if path is None:
+        sys.stdout.write(text)
+    else:
+        path.write_text(text)
+
+
+def select_script(argv=None):
+    p = argparse.ArgumentParser(
+        prog="select-kilo-recordings",
+        description="Find the group-kilo-spikes units in the registry and write a "
+        "control file for audit-kilo-spikes, one line per recording: the "
+        "recording id, a tab, and its units, comma-separated.",
+    )
+    p.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    nbank.add_registry_argument(p)
+    p.add_argument(
+        "--name",
+        help="only resources whose names contain this (e.g. a bird or recording)",
+    )
+    p.add_argument(
+        "--reports",
+        type=Path,
+        help="skip recordings with a report (<recording>.json) in this directory "
+        "that covers the same units",
+    )
+    p.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        help="write the control file here (default: standard output)",
+    )
+    p.add_argument(
+        "--orphans",
+        type=Path,
+        help="write a control file of waveform files without a pprox here, in the "
+        "same format (for regenerating the pprox files)",
+    )
+    p.add_argument("--pprox-dtype", default=PPROX_DTYPE, help="default: %(default)s")
+    p.add_argument(
+        "--waveforms-dtype", default=WAVEFORMS_DTYPE, help="default: %(default)s"
+    )
+    args = p.parse_args(argv)
+
+    logging.basicConfig(
+        format="%(message)s", level=logging.DEBUG if args.debug else logging.INFO
+    )
+    query = {"name": args.name} if args.name else {}
+
+    def names(dtype: str) -> list[str]:
+        found = [
+            r["name"]
+            for r in nbank_core.search(args.registry_url, dtype=dtype, **query)
+        ]
+        log.info("- %d %s resources", len(found), dtype)
+        return found
+
+    try:
+        groups, unmatched = group_units(
+            names(args.pprox_dtype), names(args.waveforms_dtype)
+        )
+        registered = {
+            r["name"] for r in nbank_core.describe_many(args.registry_url, *groups)
+        }
+    except OSError as err:
+        log.error("select-kilo-recordings: %s", err)
+        sys.exit(1)
+
+    for name in unmatched:
+        log.info("  - %s: name doesn't match <recording>_c<N>; skipped", name)
+    for rec in sorted(set(groups) - registered):
+        log.info("  - %s: recording not in the registry; skipped", rec)
+        del groups[rec]
+    to_audit, orphans, skipped = {}, {}, 0
+    for rec, group in groups.items():
+        for name in group["no_waveforms"]:
+            log.debug("  - %s: no waveform file", name)
+        if group["orphans"]:
+            orphans[rec] = group["orphans"]
+        if not group["units"]:
+            continue
+        if args.reports and already_audited(
+            args.reports / f"{rec}.json", group["units"]
+        ):
+            skipped += 1
+            continue
+        to_audit[rec] = group["units"]
+    log.info(
+        "- %d recordings to audit (%d units); %d already audited",
+        len(to_audit),
+        sum(map(len, to_audit.values())),
+        skipped,
+    )
+    log.info(
+        "- %d waveform files without a pprox, in %d recordings",
+        sum(map(len, orphans.values())),
+        len(orphans),
+    )
+    write_control(args.output, to_audit)
+    if args.orphans is not None:
+        write_control(args.orphans, orphans)
 
 
 def _trials(f: dict, n: int = 10) -> str:

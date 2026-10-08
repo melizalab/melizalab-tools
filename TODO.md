@@ -213,13 +213,19 @@ recordings, which are out of scope).
     only a dev dependency).
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
     or found by trying channels for older files) and compare per trial.
-  - which neurobank id the waveform file has: assumed `<pprox id>_spikes`.
-- [ ] Selection script (separate): queries the registry and writes a control
-  file, one line per recording (`RECORDING<TAB>UNIT,UNIT,...`), plus orphans
-  (waveform files without a pprox, for regenerate-pprox; pprox without a
-  waveform file). Run with e.g. `parallel --colsep '\t' --joblog audit.log
-  --resume -a control.tsv 'audit-kilo-spikes {1} --units {2} -o
-  reports/{1}.json'` on the archive host, where the ARF files are local.
+- [x] Selection script, `select-kilo-recordings`: searches the registry for
+  `spikes-pprox` and `spikes-hdf5` resources (optionally by `--name`
+  fragment), groups them by recording using group-kilo-spikes's names
+  (`<recording>_c<N>`, `<recording>_c<N>_spikes`), drops recordings that
+  aren't registered, and writes a control file, one line per recording
+  (`RECORDING<TAB>UNIT,UNIT,...`), plus (`--orphans`) one of waveform files
+  without a pprox, for regenerate-pprox. With `--reports DIR`, recordings
+  whose report covers the same units are skipped (incremental runs; the
+  registry has no date filter). Run with e.g. `parallel --colsep '\t' -a
+  audit.tsv 'audit-kilo-spikes {1} --units {2} -o reports/{1}.json'` on the
+  archive host, where the ARF files are local. Since units are grouped by
+  name, the audit checks that each pprox names the recording
+  (`recording-name`).
 
 ## pprox.py
 
