@@ -115,7 +115,7 @@ def test_siblings_from_registry(output, monkeypatch):
     other units in the registry; derived_from is the waveform file's URL."""
     files = {p.stem: p for p in output.iterdir()}
 
-    def find_resource(name, registry_url):
+    def find_resource(name, registry_url, **kwargs):
         if name not in files:
             raise FileNotFoundError(name)
         return files[name]

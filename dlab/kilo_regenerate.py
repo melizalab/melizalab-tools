@@ -43,7 +43,7 @@ import pandas as pd
 
 from dlab import __version__, kilo, pprox
 from dlab import neurobank as nbank
-from dlab.kilo_audit import PPROX_DTYPE, _re_unit, nbank_core, trials_key
+from dlab.kilo_audit import PPROX_DTYPE, _re_unit, find_local, nbank_core, trials_key
 from dlab.util import json_serializable, setup_log
 
 log = logging.getLogger("dlab")
@@ -152,9 +152,9 @@ def registry_siblings(
     )
     found = []
     for name in names:
-        path = nbank.find_resource(name, registry_url=registry_url)
+        path = find_local(name, registry_url)
         try:
-            waveforms = nbank.find_resource(f"{name}_spikes", registry_url=registry_url)
+            waveforms = find_local(f"{name}_spikes", registry_url)
         except FileNotFoundError:
             waveforms = None
         found.append((path, waveforms))
@@ -232,7 +232,7 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         sync_thresh = {w.attrs.get("sync_thresh") for w in waveforms}.pop()
     arf_path = Path(args.recording)
     if not arf_path.exists():
-        arf_path = nbank.find_resource(args.recording, registry_url=args.registry_url)
+        arf_path = find_local(args.recording, args.registry_url)
     finder = kilo.StimulusFinder(args.registry_url, args.local_stim_dir)
     log.info(
         "- splitting '%s' into trials (sync %s, prepad %.2f s):", arf_path, sync, prepad
@@ -311,7 +311,7 @@ def load_waveforms(names: list[str], registry_url: str | None) -> list[Waveforms
         elif path.exists():
             out.append(Waveforms.load(path, str(path)))
         else:
-            found = nbank.find_resource(name, registry_url=registry_url)
+            found = find_local(name, registry_url)
             source = (
                 nbank.registry.full_url(registry_url, name) if registry_url else name
             )
@@ -384,7 +384,7 @@ def script(argv=None):
             path = (
                 Path(args.trials)
                 if Path(args.trials).exists()
-                else nbank.find_resource(args.trials, registry_url=args.registry_url)
+                else find_local(args.trials, args.registry_url)
             )
             with open(path) as fp:
                 shared = TrialSource(Path(args.trials).stem, json.load(fp))

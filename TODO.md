@@ -240,6 +240,10 @@ recordings, which are out of scope).
   archive host, where the ARF files are local. Since units are grouped by
   name, the audit checks that each pprox names the recording
   (`recording-name`).
+  Requires a selection (a list, `--name` or `--all`). Recordings whose ARF isn't in
+  a neurobank archive on this host (e.g. cold storage) are skipped, or listed
+  with `--unavailable`; their orphans are still listed. The audit scripts
+  never download (`find_local`, `no_download=True`).
 - [x] `collect-kilo-audit REPORTS...`: summarizes the reports (recordings and
   units by status, findings by check, units by version, and the recordings at
   or above `--level`, worst first). `--tsv` writes one row per finding;

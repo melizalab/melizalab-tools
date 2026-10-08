@@ -291,7 +291,7 @@ def test_units_from_registry(excerpt_output, monkeypatch):
     }
     requested = []
 
-    def find_resource(name, registry_url):
+    def find_resource(name, registry_url, **kwargs):
         requested.append((name, registry_url))
         if name not in files:
             raise FileNotFoundError(name)
@@ -418,14 +418,36 @@ def test_already_audited(tmp_path):
     assert not kilo_audit.already_audited(tmp_path / "bad.json", ["A_c1"])
 
 
+def local_archive(root: Path, *names: str) -> Path:
+    """A neurobank archive on this host holding an (empty) ARF file for each
+    name; returns the archive's path"""
+    from nbank import archive
+
+    archive.create(root, "https://registry/")
+    for name in names:
+        path = archive.resource_path(root, name).with_suffix(".arf")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    return root
+
+
+def archived(name: str, root: Path) -> dict:
+    return {"scheme": "neurobank", "root": str(root), "resource_name": name}
+
+
 @pytest.fixture
-def fake_registry(monkeypatch):
-    """Stands in for the registry searches; records the queries"""
+def fake_registry(monkeypatch, tmp_path):
+    """Stands in for the registry searches; records the queries. The
+    registered recordings' ARF files are in a neurobank archive on this host."""
     resources = {
         "spikes-pprox": ["A_1_c1", "A_1_c2", "A_10_c1", "B_1_c5", "Z_9_c1", "odd"],
         "spikes-hdf5": ["A_1_c1_spikes", "A_1_c2_spikes", "B_1_c7_spikes"],
     }
-    recordings = {"A_1", "A_10", "B_1"}  # Z_9 isn't registered
+    root = local_archive(tmp_path / "archive", "A_1", "A_10", "B_1")
+    recordings = {  # Z_9 isn't registered
+        name: {"name": name, "locations": [archived(name, root)]}
+        for name in ("A_1", "A_10", "B_1")
+    }
     queries = []
 
     def search(registry_url, **params):
@@ -436,7 +458,7 @@ def fake_registry(monkeypatch):
                 yield {"name": name, "dtype": params["dtype"]}
 
     def describe_many(registry_url, *ids):
-        return [{"name": name} for name in ids if name in recordings]
+        return [recordings[name] for name in ids if name in recordings]
 
     monkeypatch.setattr(kilo_audit.nbank_core, "search", search)
     monkeypatch.setattr(kilo_audit.nbank_core, "describe_many", describe_many)
@@ -448,7 +470,15 @@ def test_find_units_script(fake_registry, tmp_path):
     files without a pprox go in the orphans file in the same format."""
     control, orphans = tmp_path / "audit.tsv", tmp_path / "orphans.tsv"
     kilo_audit.find_units_script(
-        ["-r", "https://registry/", "-o", str(control), "--orphans", str(orphans)]
+        [
+            "-r",
+            "https://registry/",
+            "--all",
+            "-o",
+            str(control),
+            "--orphans",
+            str(orphans),
+        ]
     )
     assert control.read_text() == ("A_1\tA_1_c1,A_1_c2\nA_10\tA_10_c1\nB_1\tB_1_c5\n")
     assert orphans.read_text() == "B_1\tB_1_c7_spikes\n"
@@ -472,7 +502,9 @@ def test_find_units_script_skips_audited(fake_registry, tmp_path, capsys):
         (reports / f"{rec}.json").write_text(
             json.dumps({"units": [{"name": u} for u in units]})
         )
-    kilo_audit.find_units_script(["-r", "https://registry/", "--reports", str(reports)])
+    kilo_audit.find_units_script(
+        ["-r", "https://registry/", "--all", "--reports", str(reports)]
+    )
     assert capsys.readouterr().out == "A_10\tA_10_c1\nB_1\tB_1_c5\n"
 
 
@@ -503,6 +535,91 @@ def test_find_units_from_stdin(fake_registry, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO("B_1\n"))
     kilo_audit.find_units_script(["-r", "https://registry/", "-"])
     assert capsys.readouterr().out == "B_1\tB_1_c5\n"
+
+
+def test_local_copy(tmp_path):
+    """Only a copy in a neurobank archive on this host counts: not one in an
+    archive that isn't here, a missing file, or a copy on tape or the web."""
+    root = local_archive(tmp_path / "archive", "A_1")
+    tape = {"scheme": "tape", "root": "T1:4", "resource_name": "A_1"}
+    web = {"scheme": "https", "root": "https://x/", "resource_name": "A_1"}
+    elsewhere = archived("A_1", tmp_path / "not_mounted")
+    found = kilo_audit.local_copy({"locations": [tape, web, archived("A_1", root)]})
+    assert found is not None and found.name == "A_1.arf" and found.exists()
+    assert kilo_audit.local_copy({"locations": [tape, web, elsewhere]}) is None
+    assert kilo_audit.local_copy({"locations": [archived("B_1", root)]}) is None
+    assert kilo_audit.local_copy({"name": "A_1"}) is None
+
+
+def test_find_units_skips_recordings_not_on_this_host(
+    fake_registry, monkeypatch, tmp_path
+):
+    """Recordings whose ARF files aren't in a neurobank archive on this host
+    (e.g. in cold storage) can't be audited here, so they go in the
+    --unavailable file instead. Their orphans can still be regenerated (from
+    other units' trials, without the ARF file)."""
+    root = local_archive(tmp_path / "here", "A_1")
+    records = {
+        "A_1": {"name": "A_1", "locations": [archived("A_1", root)]},
+        "A_10": {
+            "name": "A_10",
+            "locations": [{"scheme": "tape", "root": "T1:4", "resource_name": "A_10"}],
+        },
+        "B_1": {"name": "B_1", "locations": [archived("B_1", tmp_path / "elsewhere")]},
+    }
+    monkeypatch.setattr(
+        kilo_audit.nbank_core,
+        "describe_many",
+        lambda url, *ids: [records[i] for i in ids if i in records],
+    )
+    control, unavailable, orphans = (tmp_path / n for n in ("a.tsv", "u.tsv", "o.tsv"))
+    kilo_audit.find_units_script(
+        [
+            *("-r", "https://registry/", "--all", "-o", str(control)),
+            *("--unavailable", str(unavailable), "--orphans", str(orphans)),
+        ]
+    )
+    assert control.read_text() == "A_1\tA_1_c1,A_1_c2\n"
+    assert unavailable.read_text() == "A_10\tA_10_c1\nB_1\tB_1_c5\n"
+    assert orphans.read_text() == "B_1\tB_1_c7_spikes\n"
+
+
+def test_find_units_warns_if_no_archive_here(fake_registry, monkeypatch, caplog):
+    """If none of the recordings is on this host, the archive probably isn't
+    mounted here, and the script says so."""
+    monkeypatch.setattr(
+        kilo_audit.nbank_core,
+        "describe_many",
+        lambda url, *ids: [{"name": i, "locations": []} for i in ids],
+    )
+    with caplog.at_level("WARNING", logger="dlab"):
+        kilo_audit.find_units_script(["-r", "https://registry/", "--name", "B_1"])
+    assert "run find-kilo-units (and the audits) on the archive host" in caplog.text
+
+
+def test_audit_never_downloads(monkeypatch):
+    """Resources are only looked up in archives on this host (and the cache):
+    the audit scripts never download, and say where they looked."""
+    calls = []
+
+    def find_resource(name, registry_url, no_download=False):
+        calls.append(no_download)
+        raise FileNotFoundError("resource not found")
+
+    monkeypatch.setattr(kilo_audit.nbank, "find_resource", find_resource)
+    with pytest.raises(FileNotFoundError, match="not in a neurobank archive on this"):
+        kilo_audit.locate("E36_5_1", "https://registry/")
+    assert calls == [True]
+
+
+def test_find_units_needs_a_selection(fake_registry, capsys):
+    """Without recordings, --name or --all, the script refuses to run, rather
+    than fetching every record in the registry."""
+    with pytest.raises(SystemExit) as exc:
+        kilo_audit.find_units_script(["-r", "https://registry/"])
+    assert exc.value.code == 2
+    assert "--all" in capsys.readouterr().err
+    assert fake_registry == []  # no queries
 
 
 def test_find_units_name_or_list(fake_registry):

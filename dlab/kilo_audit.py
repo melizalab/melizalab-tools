@@ -22,8 +22,8 @@ The report is JSON, with a status (the worst finding) for the recording and
 each unit. The exit status is 0 if the audit ran, whatever it found, so batch
 runs (e.g. with GNU parallel) only see failures to run.
 
-find-kilo-units finds the units of recordings in the registry and writes a
-control file for batch runs, one line per recording: the recording id, a tab,
+find-kilo-units finds the units of recordings in the registry (given by name
+fragment, as a list, or --all) and writes a control file for batch runs, one line per recording: the recording id, a tab,
 and its units, comma-separated. For example:
 
     find-kilo-units --name P397 --reports reports -o audit.tsv
@@ -1050,12 +1050,24 @@ def audit_recording(
     }
 
 
+def find_local(name: str, registry_url: str | None) -> Path:
+    """The path of a neurobank resource in an archive on this host (or the local
+    cache). Never downloads: the ARF files are large, and the audit is meant to
+    run on the archive host. Raises FileNotFoundError."""
+    try:
+        return nbank.find_resource(name, registry_url=registry_url, no_download=True)
+    except FileNotFoundError as err:
+        raise FileNotFoundError(
+            f"{name}: not in a neurobank archive on this host ({err})"
+        ) from err
+
+
 def locate(name: str, registry_url: str) -> Path:
-    """A local path, or the path of a neurobank resource"""
+    """A local path, or the path of a neurobank resource on this host"""
     path = Path(name)
     if path.exists():
         return path
-    return nbank.find_resource(name, registry_url=registry_url)
+    return find_local(name, registry_url)
 
 
 def load_units(names: list[str], registry_url: str | None) -> list[Unit]:
@@ -1073,11 +1085,9 @@ def load_units(names: list[str], registry_url: str | None) -> list[Unit]:
         elif path.exists():
             found = [(path, path.with_name(path.stem + "_spikes.h5"))]
         else:
-            pprox_path = nbank.find_resource(name, registry_url=registry_url)
+            pprox_path = find_local(name, registry_url)
             try:
-                waveforms = nbank.find_resource(
-                    f"{name}_spikes", registry_url=registry_url
-                )
+                waveforms = find_local(f"{name}_spikes", registry_url)
             except FileNotFoundError:
                 waveforms = None
             found = [(pprox_path, waveforms)]
@@ -1204,6 +1214,25 @@ def group_units(
     return groups, unmatched
 
 
+def local_copy(record: dict) -> Path | None:
+    """The path of a resource in a neurobank archive on this host, from its
+    registry record, or None. Copies elsewhere (other hosts, http, tape) are
+    not used: the audit scripts never download."""
+    from nbank.registry import local_schemes
+    from nbank.util import parse_location
+
+    for location in record.get("locations", []):
+        if location.get("scheme") not in local_schemes():
+            continue
+        try:
+            resource = parse_location(location)
+        except (KeyError, ValueError):
+            continue
+        if resource is not None:
+            return resource.path
+    return None
+
+
 def already_audited(report: Path, units: list[str]) -> bool:
     """True if report is an audit of exactly these units"""
     try:
@@ -1256,6 +1285,12 @@ def find_units_script(argv=None):
         help="only the recordings listed in this file, one id per line ('-' for "
         "standard input, e.g. piped from nbank search)",
     )
+    which.add_argument(
+        "--all",
+        action="store_true",
+        help="every unit in the registry (slow: fetches every pprox and waveform "
+        "record)",
+    )
     p.add_argument(
         "--reports",
         type=Path,
@@ -1274,11 +1309,20 @@ def find_units_script(argv=None):
         help="write a control file of waveform files without a pprox here, in the "
         "same format (for regenerating the pprox files)",
     )
+    p.add_argument(
+        "--unavailable",
+        type=Path,
+        help="write a control file of the recordings skipped because their ARF "
+        "files aren't in a neurobank archive on this host (e.g. they are in cold "
+        "storage) here, in the same format",
+    )
     p.add_argument("--pprox-dtype", default=PPROX_DTYPE, help="default: %(default)s")
     p.add_argument(
         "--waveforms-dtype", default=WAVEFORMS_DTYPE, help="default: %(default)s"
     )
     args = p.parse_args(argv)
+    if args.name is None and args.recordings is None and not args.all:
+        p.error("give recordings (a file, or '-'), --name, or --all")
 
     setup_log(args.debug)
     if args.recordings is not None:
@@ -1310,8 +1354,8 @@ def find_units_script(argv=None):
             for rec in recordings:
                 if rec not in groups:
                     log.info("  - %s: no units found", rec)
-        registered = {
-            r["name"] for r in nbank_core.describe_many(args.registry_url, *groups)
+        records = {
+            r["name"]: r for r in nbank_core.describe_many(args.registry_url, *groups)
         }
     except OSError as err:
         log.error("find-kilo-units: %s", err)
@@ -1319,16 +1363,21 @@ def find_units_script(argv=None):
 
     for name in unmatched:
         log.info("  - %s: name doesn't match <recording>_c<N>; skipped", name)
-    for rec in sorted(set(groups) - registered):
+    for rec in sorted(set(groups) - set(records)):
         log.info("  - %s: recording not in the registry; skipped", rec)
         del groups[rec]
-    to_audit, orphans, skipped = {}, {}, 0
+    to_audit, orphans, unavailable, skipped = {}, {}, {}, 0
     for rec, group in groups.items():
         for name in group["no_waveforms"]:
             log.debug("  - %s: no waveform file", name)
+        # orphans don't need the ARF file (their trials come from other units)
         if group["orphans"]:
             orphans[rec] = group["orphans"]
         if not group["units"]:
+            continue
+        if local_copy(records[rec]) is None:
+            log.debug("  - %s: recording not in an archive on this host; skipped", rec)
+            unavailable[rec] = group["units"]
             continue
         if args.reports and already_audited(
             args.reports / f"{rec}.json", group["units"]
@@ -1342,6 +1391,19 @@ def find_units_script(argv=None):
         sum(map(len, to_audit.values())),
         skipped,
     )
+    if unavailable:
+        log.info(
+            "- %d recordings (%d units) skipped: their ARF files aren't in a "
+            "neurobank archive on this host%s",
+            len(unavailable),
+            sum(map(len, unavailable.values())),
+            "" if args.unavailable else " (list them with --unavailable)",
+        )
+        if not to_audit and not skipped:
+            log.warning(
+                "- none of the recordings is in a neurobank archive on this host; "
+                "run find-kilo-units (and the audits) on the archive host"
+            )
     log.info(
         "- %d waveform files without a pprox, in %d recordings",
         sum(map(len, orphans.values())),
@@ -1350,6 +1412,8 @@ def find_units_script(argv=None):
     write_control(args.output, to_audit)
     if args.orphans is not None:
         write_control(args.orphans, orphans)
+    if args.unavailable is not None:
+        write_control(args.unavailable, unavailable)
 
 
 # --- collection
