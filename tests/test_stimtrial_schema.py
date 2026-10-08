@@ -1,6 +1,6 @@
 # -*- mode: python -*-
 """The pprox files group-kilo-spikes writes conform to the published stimtrial
-schema (tests/data/schemas)."""
+schema (bundled in dlab/schemas)."""
 
 import copy
 import json
@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 from jsonschema import ValidationError
 from jsonschema.validators import validator_for
-from stimtrial_schema import SCHEMAS, validate
+
+from dlab.pprox import SCHEMAS, validate
 
 DATA = Path(__file__).parent / "data"
 

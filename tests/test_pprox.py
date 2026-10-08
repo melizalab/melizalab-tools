@@ -380,12 +380,45 @@ def test_aggregate_events_empty_collection():
 
 
 def test_unimplemented_stubs_raise():
-    """validate and combine_recordings are not implemented yet, and say so
-    rather than silently doing nothing."""
-    with pytest.raises(NotImplementedError):
-        pprox.validate(pprox.empty())
+    """combine_recordings is not implemented yet, and says so rather than
+    silently doing nothing."""
     with pytest.raises(NotImplementedError):
         pprox.combine_recordings()
+
+
+def test_validate():
+    """Collections are validated against the schema in their $schema: an empty
+    pprox collection is valid, but stimtrial requires each trial's interval and
+    stimulus."""
+    from jsonschema import ValidationError
+
+    pprox.validate(pprox.empty())
+    trial = {"events": [0.1], "offset": 1.0}
+    pprox.validate(pprox.from_trials([trial]))
+    stimtrial = pprox.from_trials([trial], schema=pprox._stimtrial_schema)
+    with pytest.raises(ValidationError):
+        pprox.validate(stimtrial)
+
+
+def test_validation_errors():
+    """validation_errors lists every problem, in document order."""
+    doc = pprox.from_trials(
+        [{"events": [0.1], "interval": [0, 1]}, {"events": ["x"]}],
+        schema=pprox._stimtrial_schema,
+    )
+    errors = pprox.validation_errors(doc)
+    assert [list(e.absolute_path)[:2] for e in errors] == [
+        ["pprox", 0],
+        ["pprox", 1],
+        ["pprox", 1],
+        ["pprox", 1],
+    ]
+    assert pprox.validation_errors(pprox.empty()) == []
+
+
+def test_validate_unknown_schema():
+    with pytest.raises(ValueError, match="unknown schema"):
+        pprox.validate({"$schema": "https://example.org/other.json", "pprox": []})
 
 
 # --- split_trial, with hand-computed expectations

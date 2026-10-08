@@ -213,9 +213,8 @@ def test_p397_regenerated_exactly(tmp_path):
 def test_regenerated_passes_audit_and_schema(output):
     """A regenerated pprox, with its siblings, passes the audit, and conforms
     to the stimtrial schema."""
-    from stimtrial_schema import validate
-
     from dlab import kilo_audit
+    from dlab.pprox import validate
 
     new = regenerate(output)
     shutil.copy(new / f"{UNIT}.pprox", output)

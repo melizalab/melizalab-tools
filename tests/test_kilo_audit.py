@@ -197,7 +197,36 @@ def test_missing_required_field(output):
     """A trial without a field stimtrial requires fails, and isn't checked
     further."""
     edit_pprox(output, lambda pp: pp["pprox"][0].pop("stimulus"))
-    assert checks(unit_report(audit(output))) == [("pprox-fields", "fail", [0])]
+    assert checks(unit_report(audit(output))) == [
+        ("schema", "warn", [0]),
+        ("pprox-fields", "fail", [0]),
+    ]
+
+
+def test_schema_violation(output):
+    """A pprox that doesn't conform to its schema is a warning, listing the
+    trials and the first few problems."""
+
+    def bad(pp):
+        pp["pprox"][1]["events"][0] = "x"
+        pp["pprox"][3]["stimulus"]["interval"] = "later"
+
+    edit_pprox(output, bad)
+    unit = unit_report(audit(output))
+    schema = [f for f in unit["findings"] if f["check"] == "schema"]
+    assert [(f["severity"], f["trials"]) for f in schema] == [("warn", [1, 3])]
+    assert "pprox[1].events[0]: 'x' is not of type 'number'" in schema[0]["message"]
+    # the unusable trials fail the unit, rather than crashing the audit
+    assert ("pprox-fields", "fail", [1, 3]) in checks(unit)
+
+
+def test_schema_unknown_or_missing(output):
+    """A pprox with an unknown $schema, or none, is noted but not validated."""
+    edit_pprox(output, lambda pp: pp.update({"$schema": "https://example.org/x.json"}))
+    assert checks(unit_report(audit(output))) == [("schema", "info", None)]
+    edit_pprox(output, lambda pp: pp.pop("$schema"))
+    (f,) = unit_report(audit(output))["findings"]
+    assert f["check"] == "schema" and "no $schema" in f["message"]
 
 
 def test_no_waveform_file(output):
@@ -974,6 +1003,7 @@ def test_e36_aux_pulses_clean():
             fp, finder, "ADC3", prepad=0.5, oeaudio_log=None, aux={"led": "ADC4"}
         )
     pprox = {
+        "$schema": "https://meliza.org/spec:2/stimtrial.json#",
         "recording": "https://registry/resources/E36_5_1/",
         "aux_tracks": {"led": {"channel": "ADC4", "stream": "condition"}},
         "pprox": list(

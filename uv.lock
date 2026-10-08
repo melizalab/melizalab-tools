@@ -406,6 +406,7 @@ dependencies = [
     { name = "appdirs" },
     { name = "arf" },
     { name = "ewave" },
+    { name = "jsonschema" },
     { name = "libtfr" },
     { name = "neurobank" },
     { name = "pandas" },
@@ -423,10 +424,8 @@ audio = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "jsonschema" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "referencing" },
     { name = "ruff" },
 ]
 
@@ -435,6 +434,7 @@ requires-dist = [
     { name = "appdirs", specifier = ">=1.4.4" },
     { name = "arf", specifier = ">=2.7.2" },
     { name = "ewave", specifier = ">=1.0.10" },
+    { name = "jsonschema", specifier = ">=4.18" },
     { name = "libtfr", specifier = ">=2.1.9" },
     { name = "neurobank", specifier = ">=0.12,<0.13" },
     { name = "pandas", specifier = ">=2.3.1" },
@@ -448,10 +448,8 @@ provides-extras = ["audio"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "jsonschema", specifier = ">=4.18" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
-    { name = "referencing", specifier = ">=0.37.0" },
     { name = "ruff", specifier = ">=0.14.3" },
 ]
 

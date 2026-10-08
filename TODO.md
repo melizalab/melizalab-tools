@@ -219,9 +219,11 @@ recordings, which are out of scope).
   their channel (`aux-pulses`), and the channel's pulses against the stream
   in `aux_tracks` (`aux-stream`; `kilo.match_aux_pulses`, shared with
   group-kilo-spikes). Clean on all 650 E36 LED pulses.
+- [x] audit-kilo-spikes schema check (`schema`): each pprox against the
+  schema in its `$schema`, using copies of the published schemas bundled in
+  dlab/schemas (`pprox.validate`, `pprox.validation_errors`; jsonschema is now
+  a runtime dependency).
 - [ ] audit-kilo-spikes, still to do:
-  - schema validation against the published stimtrial schema (jsonschema is
-    only a dev dependency).
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
     or found by trying channels for older files) and compare per trial.
 - [x] Selection script, `find-kilo-units`: searches the registry for
@@ -259,8 +261,9 @@ recordings, which are out of scope).
   pandas 3.0.6. Rewritten without augmented assignment anyway.
 - [x] `aggregate_events` on an empty collection raised `ValueError`; now
   returns an empty array.
-- [ ] `validate` and `combine_recordings` are not implemented; they now raise
-  `NotImplementedError` (they were silent `pass` stubs). Implement if needed.
+- [x] `validate` is implemented, against the bundled schemas (dlab/schemas).
+- [ ] `combine_recordings` is not implemented; it raises `NotImplementedError`
+  (it was a silent `pass` stub). Implement if needed.
 
 ## spikes.py
 

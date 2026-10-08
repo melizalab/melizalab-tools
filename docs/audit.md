@@ -252,6 +252,7 @@ numbers are indexes into the pprox's `pprox` array.
 | [`registry`](#registry)                                         | warn       | yes       | register the recording, or check its id                 |
 | [`metadata-arf`](#metadata-arf)                                 | warn       | yes       | correct the registry metadata                           |
 | [`metadata-name`](#metadata-name)                               | warn       | yes       | check which recording the file is                       |
+| [`schema`](#schema)                                             | warn, info | sometimes | exclude the listed trials; regenerate the pprox         |
 | [`pprox-fields`](#pprox-fields)                                 | fail       | sometimes | regenerate the pprox from its waveform file             |
 | [`recording-name`](#recording-name)                             | warn, info | yes       | registry metadata, or audit against the right recording |
 | [`trial-order`](#trial-order)                                   | warn       | yes       | sort trials when reading                                |
@@ -366,13 +367,30 @@ metadata, and note it on the units.
 
 ### Findings about a unit: the pprox file
 
+#### `schema`
+
+**Severity:** warn (trials listed), or info if the pprox has no `$schema`, or
+one that isn't pprox or stimtrial
+
+**Problem:** The pprox doesn't conform to the schema named in its `$schema`
+(validated against copies of the published
+[pprox](https://meliza.org/spec:2/pprox.json) and
+[stimtrial](https://meliza.org/spec:2/stimtrial.json) schemas bundled with
+melizalab-tools). The message gives the number of violations and the first
+few, with their place in the file (e.g. `pprox[1].events[0]: 'x' is not of
+type 'number'`). Tools that rely on the schema may fail on the file. As info:
+the pprox isn't validated, because it names no schema or an unknown one.
+
+**Fixable:** sometimes. Exclude the listed trials. If a trial is unusable,
+`pprox-fields` is also reported; see there.
+
 #### `pprox-fields`
 
 **Severity:** fail
 
 **Problem:** Some trials lack a field that stimtrial requires (`events`,
-`offset`, `interval`, or `stimulus` with `name` and `interval`), and the unit
-isn't checked further. Possible causes are an old format, another pipeline, or
+`offset`, `interval`, or `stimulus` with `name` and `interval`), or have
+non-numeric times, and the unit isn't checked further. Possible causes are an old format, another pipeline, or
 a truncated or edited file.
 
 **Fixable:** sometimes. If the waveform file and another unit's pprox from the
@@ -702,6 +720,5 @@ trials' pulses on the channel before trusting them.
 
 These checks are planned; see `TODO.md`.
 
-- Validation against the published stimtrial schema.
 - Re-detecting the onsets from the sync track (`--resync`).
 - Detecting stimulus onsets when the sync track is missing by cross-correlating an audio copy with the stimuli.

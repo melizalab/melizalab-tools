@@ -57,7 +57,7 @@ import h5py as h5
 import numpy as np
 from nbank import core as nbank_core
 
-from dlab import __version__, kilo
+from dlab import __version__, kilo, pprox
 from dlab import neurobank as nbank
 from dlab.util import setup_log
 
@@ -125,25 +125,43 @@ def old_sync_version(processed_by: list[str]) -> bool:
 # --- checks on a pprox alone
 
 
+def _numbers(value, n: int | None = None) -> bool:
+    """True if value is a list of n (or any number of) numbers"""
+    return (
+        isinstance(value, list | tuple)
+        and (n is None or len(value) == n)
+        and all(isinstance(x, int | float) and not isinstance(x, bool) for x in value)
+    )
+
+
+def _usable_trial(t) -> bool:
+    """True if a trial has the fields stimtrial requires, with numeric times,
+    so that the other checks can use it"""
+    return (
+        isinstance(t, dict)
+        and _numbers(t.get("events"))
+        and _numbers([t.get("offset")], 1)
+        and _numbers(t.get("interval"), 2)
+        and isinstance(t.get("stimulus"), dict)
+        and "name" in t["stimulus"]
+        and _numbers(t["stimulus"].get("interval"), 2)
+    )
+
+
 def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
     """Checks the structure of a unit's pprox: the fields stimtrial requires,
     trial order, events within their trials, and consistency between the
     trial times and the recording sample ranges."""
     out = []
     trials = unit.trials
-    missing = [
-        i
-        for i, t in enumerate(trials)
-        if not {"events", "offset", "interval", "stimulus"} <= t.keys()
-        or not {"name", "interval"} <= t["stimulus"].keys()
-    ]
+    missing = [i for i, t in enumerate(trials) if not _usable_trial(t)]
     if missing:
         out.append(
             finding(
                 "pprox-fields",
                 "fail",
                 "trials without the events, offset, interval or stimulus that "
-                "stimtrial requires",
+                "stimtrial requires (or with non-numeric times)",
                 missing,
             )
         )
@@ -218,6 +236,48 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
             )
         )
     return out
+
+
+def _json_path(path) -> str:
+    """A jsonschema error path as e.g. pprox[3].interval"""
+    out = ""
+    for part in path:
+        out += f"[{part}]" if isinstance(part, int) else f".{part}" if out else part
+    return out or "(top level)"
+
+
+def check_schema(unit: Unit, max_errors: int = 3) -> list[dict]:
+    """Validates a unit's pprox against the schema named in its $schema, using
+    the bundled copies of the published pprox and stimtrial schemas."""
+    schema = unit.pprox.get("$schema")
+    if schema is None:
+        return [finding("schema", "info", "the pprox has no $schema; not validated")]
+    try:
+        errors = pprox.validation_errors(unit.pprox)
+    except ValueError:
+        return [finding("schema", "info", f"unknown $schema {schema}; not validated")]
+    if not errors:
+        return []
+    described = []
+    for err in errors[:max_errors]:
+        message = err.message if len(err.message) <= 100 else err.message[:97] + "..."
+        described.append(f"{_json_path(err.absolute_path)}: {message}")
+    more = f" and {len(errors) - max_errors} more" if len(errors) > max_errors else ""
+    trials = sorted(
+        {
+            e.absolute_path[1]
+            for e in errors
+            if len(e.absolute_path) > 1 and e.absolute_path[0] == "pprox"
+        }
+    )
+    return [
+        finding(
+            "schema",
+            "warn",
+            f"{len(errors)} violation(s) of {schema}: " + "; ".join(described) + more,
+            trials or None,
+        )
+    ]
 
 
 # --- pprox vs waveform file
@@ -950,6 +1010,8 @@ def audit_recording(
                 entry, unit.pprox.get("sync_track")
             )
             unit.findings.extend(check_recording_name(unit, recording))
+            # the schema check is safe on any input, so it runs first
+            unit.findings.extend(check_schema(unit))
             unit.findings.extend(check_pprox(unit, sampling_rate))
             if worst(unit.findings) == "fail":
                 continue
