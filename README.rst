@@ -47,6 +47,10 @@ console scripts
    file, and each other, and write a JSON report. Changes nothing.
 -  ``find-kilo-units``: find the units of recordings in the registry and write
    a control file for running ``audit-kilo-spikes`` in batches.
+-  ``collect-kilo-audit``: summarize the ``audit-kilo-spikes`` reports.
+
+See `docs/audit.md <docs/audit.md>`__ for how to run the audit and what its
+findings mean.
 - ``get-songs``: extract segments from arf files, rescale, resample, save into
    wave files, and optionally deposit back into neurobank. Usually the first
    step in generating a stimulus set, keeps a nice provenance trail.

@@ -227,6 +227,11 @@ recordings, which are out of scope).
   archive host, where the ARF files are local. Since units are grouped by
   name, the audit checks that each pprox names the recording
   (`recording-name`).
+- [x] `collect-kilo-audit REPORTS...`: summarizes the reports (recordings and
+  units by status, findings by check, units by version, and the recordings at
+  or above `--level`, worst first). `--tsv` writes one row per finding;
+  `--control` lists recordings in the control file without a report (the
+  audit couldn't run).
 
 ## pprox.py
 

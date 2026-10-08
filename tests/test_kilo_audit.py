@@ -472,3 +472,165 @@ def test_httpx_messages_suppressed(fake_registry, capsys):
 
     kilo_audit.find_units_script(["-r", "https://registry/", "--name", "B_1"])
     assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+
+
+# --- collection
+
+
+def make_report(recording, *units, findings=()):
+    """A minimal report; units are (name, version, [(check, severity), ...])"""
+    unit_reports = [
+        {
+            "name": name,
+            "processed_by": [version],
+            "status": kilo_audit.worst({"severity": sev} for _, sev in unit_findings),
+            "findings": [
+                kilo_audit.finding(check, sev, f"{check} message", [1, 2])
+                for check, sev in unit_findings
+            ],
+        }
+        for name, version, unit_findings in units
+    ]
+    rec_findings = [kilo_audit.finding(c, s, f"{c} message") for c, s in findings]
+    return {
+        "recording": recording,
+        "status": kilo_audit.worst(
+            [*rec_findings, *(f for u in unit_reports for f in u["findings"])]
+        ),
+        "findings": rec_findings,
+        "units": unit_reports,
+    }
+
+
+OLD, NEW = "group-kilo-spikes 2026.06.22", "group-kilo-spikes 2026.10.07"
+REPORTS = [
+    make_report("A_1", ("A_1_c1", NEW, []), ("A_1_c2", NEW, [])),
+    make_report(
+        "B_1",
+        ("B_1_c1", OLD, [("sync-lag", "warn")]),
+        (
+            "B_1_c2",
+            OLD,
+            [("sync-lag", "warn"), ("waveforms-before-first-trial", "info")],
+        ),
+    ),
+    make_report(
+        "C_1",
+        ("C_1_c1", NEW, [("stimulus-labels", "fail")]),
+        findings=[("trial-tables", "warn")],
+    ),
+]
+
+
+def write_reports(directory, reports=REPORTS):
+    directory.mkdir(exist_ok=True)
+    for report in reports:
+        (directory / f"{report['recording']}.json").write_text(json.dumps(report))
+    return directory
+
+
+def test_load_reports(tmp_path):
+    """Reports are read from directories and files and sorted by recording;
+    unreadable files and other JSON are listed, not fatal."""
+    reports = write_reports(tmp_path / "reports", REPORTS[1:])
+    (reports / "broken.json").write_text("{")
+    (reports / "other.json").write_text('{"pprox": []}')
+    single = tmp_path / "A_1.json"
+    single.write_text(json.dumps(REPORTS[0]))
+    loaded, errors = kilo_audit.load_reports([reports, single])
+    assert [r["recording"] for r in loaded] == ["A_1", "B_1", "C_1"]
+    assert [Path(e.split(":")[0]).name for e in errors] == ["broken.json", "other.json"]
+
+
+def test_summarize():
+    """Counts recordings and units by status, findings by check, and units by
+    version, and lists the recordings at or above the level, worst first."""
+    text = kilo_audit.summarize(REPORTS)
+    lines = text.splitlines()
+    assert lines[0] == "3 recordings, 5 units"
+    status = {line.split()[0]: line.split()[1:] for line in lines[3:7]}
+    assert status == {
+        "ok": ["1", "2"],
+        "info": ["0", "0"],
+        "warn": ["1", "2"],
+        "fail": ["1", "1"],
+    }
+    checks = [line.split() for line in lines if line.startswith(("sync-lag", "trial-"))]
+    # the recording-level finding counts the recording, but no units
+    assert checks == [
+        ["sync-lag", "warn", "1", "2"],
+        ["trial-tables", "warn", "1", "0"],
+    ]
+    versions = {
+        line.rsplit(None, 4)[0]: line.split()[-4:]
+        for line in lines
+        if line.startswith("group-kilo-spikes")
+    }
+    assert versions == {OLD: ["0", "0", "2", "0"], NEW: ["2", "0", "0", "1"]}
+    flagged = lines[lines.index("recordings with warn or fail:") + 1 :]
+    assert [line.split()[:2] for line in flagged] == [["C_1", "fail"], ["B_1", "warn"]]
+    assert flagged[0].endswith("stimulus-labels (fail) x1, trial-tables (warn)")
+    assert flagged[1].endswith("sync-lag (warn) x2")
+
+
+def test_summarize_level():
+    """--level fail lists only failing recordings; info findings are never
+    listed at the default level."""
+    text = kilo_audit.summarize(REPORTS, level="fail")
+    flagged = text.splitlines()[text.splitlines().index("recordings with fail:") + 1 :]
+    assert [line.split()[0] for line in flagged] == ["C_1"]
+    assert "waveforms-before-first-trial (info)" not in kilo_audit.summarize(REPORTS)
+
+
+def test_write_findings(tmp_path):
+    """One row per finding; recording-level findings have no unit or version."""
+    out = tmp_path / "findings.tsv"
+    kilo_audit.write_findings(out, REPORTS)
+    rows = [line.split("\t") for line in out.read_text().splitlines()]
+    assert rows[0] == [
+        "recording",
+        "unit",
+        "version",
+        "check",
+        "severity",
+        "trials",
+        "message",
+    ]
+    assert len(rows) == 1 + 5
+    assert rows[1] == [
+        "B_1",
+        "B_1_c1",
+        OLD,
+        "sync-lag",
+        "warn",
+        "1,2",
+        "sync-lag message",
+    ]
+    assert ["C_1", "", "", "trial-tables", "warn", "", "trial-tables message"] in rows
+
+
+def test_collect_script(tmp_path, capsys, caplog):
+    """The summary goes to standard output; with --control, recordings without a
+    report are logged."""
+    reports = write_reports(tmp_path / "reports")
+    control = tmp_path / "audit.tsv"
+    control.write_text("A_1\tA_1_c1\nD_1\tD_1_c1\n")
+    with caplog.at_level("WARNING", logger="dlab"):
+        kilo_audit.collect_script(
+            ["--control", str(control), "--tsv", str(tmp_path / "f.tsv"), str(reports)]
+        )
+    assert capsys.readouterr().out.startswith("3 recordings, 5 units\n")
+    assert "1 of 2 recordings in" in caplog.text and "D_1" in caplog.text
+    assert (tmp_path / "f.tsv").exists()
+
+
+def test_every_check_is_documented():
+    """docs/audit.md has a dictionary entry (and a table row) for each check
+    the audit can report, and none for checks it doesn't."""
+    import re
+
+    source = Path(kilo_audit.__file__).read_text()
+    checks = set(re.findall(r'finding\(\s*"([a-z-]+)"', source))
+    doc = (Path(__file__).parent.parent / "docs" / "audit.md").read_text()
+    assert set(re.findall(r"^#### `([a-z-]+)`", doc, re.M)) == checks
+    assert set(re.findall(r"^\| \[`([a-z-]+)`\]", doc, re.M)) == checks

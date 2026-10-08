@@ -34,6 +34,10 @@ The recordings can also be listed in a file, or piped from a custom search:
 
     nbank search -d <arf dtype> -k <key>=<value> | find-kilo-units - -o audit.tsv
 
+collect-kilo-audit summarizes the reports:
+
+    collect-kilo-audit --control audit.tsv --tsv findings.tsv reports
+
 Units are grouped by name, as group-kilo-spikes names them (<recording>_c<N>,
 with waveform files <recording>_c<N>_spikes), so the audit checks that each
 pprox names the same recording.
@@ -818,6 +822,189 @@ def find_units_script(argv=None):
     write_control(args.output, to_audit)
     if args.orphans is not None:
         write_control(args.orphans, orphans)
+
+
+# --- collection
+
+
+def load_reports(paths: Iterable[Path]) -> tuple[list[dict], list[str]]:
+    """Loads audit reports from files and directories of them (*.json).
+    Returns the reports, sorted by recording, and a description of each file
+    that couldn't be read."""
+    reports, errors = [], []
+    for path in paths:
+        files = sorted(path.glob("*.json")) if path.is_dir() else [path]
+        for file in files:
+            try:
+                report = json.loads(file.read_text())
+                if not {"recording", "status", "units"} <= report.keys():
+                    raise ValueError("not an audit-kilo-spikes report")
+            except (OSError, ValueError, AttributeError) as err:
+                errors.append(f"{file}: {err}")
+                continue
+            reports.append(report)
+    return sorted(reports, key=lambda r: r["recording"]), errors
+
+
+def unit_version(unit: dict) -> str:
+    return unit["processed_by"][0] if unit.get("processed_by") else "unknown"
+
+
+def report_findings(reports: list[dict]) -> Iterable[dict]:
+    """Yields each finding in the reports as a flat row (unit is None for
+    findings about the recording as a whole)."""
+    for report in reports:
+        for f in report["findings"]:
+            yield {"recording": report["recording"], "unit": None, "version": None, **f}
+        for unit in report["units"]:
+            for f in unit["findings"]:
+                yield {
+                    "recording": report["recording"],
+                    "unit": unit["name"],
+                    "version": unit_version(unit),
+                    **f,
+                }
+
+
+def summarize(reports: list[dict], level: str = "warn") -> str:
+    """A text summary of audit reports: recordings and units by status,
+    findings by check, units by version, and the recordings with findings at or
+    above level."""
+    lines = []
+    units = [u for r in reports for u in r["units"]]
+    lines.append(f"{len(reports)} recordings, {len(units)} units")
+    lines.append("")
+    lines.append(f"{'status':<10}{'recordings':>12}{'units':>8}")
+    for sev in SEVERITIES:
+        n_rec = sum(r["status"] == sev for r in reports)
+        n_unit = sum(u["status"] == sev for u in units)
+        lines.append(f"{sev:<10}{n_rec:>12}{n_unit:>8}")
+
+    rows = list(report_findings(reports))
+    checks: dict[tuple[str, str], tuple[set, set]] = {}
+    for row in rows:
+        recs, unit_names = checks.setdefault(
+            (row["check"], row["severity"]), (set(), set())
+        )
+        recs.add(row["recording"])
+        if row["unit"] is not None:
+            unit_names.add((row["recording"], row["unit"]))
+    if checks:
+        lines.append("")
+        lines.append(f"{'check':<30}{'severity':<10}{'recordings':>12}{'units':>8}")
+        for (check, sev), (recs, unit_names) in sorted(
+            checks.items(), key=lambda kv: (-SEVERITIES.index(kv[0][1]), kv[0][0])
+        ):
+            lines.append(f"{check:<30}{sev:<10}{len(recs):>12}{len(unit_names):>8}")
+
+    versions: dict[str, dict[str, int]] = {}
+    for unit in units:
+        counts = versions.setdefault(unit_version(unit), dict.fromkeys(SEVERITIES, 0))
+        counts[unit["status"]] += 1
+    if versions:
+        lines.append("")
+        lines.append(f"{'version':<40}" + "".join(f"{s:>7}" for s in SEVERITIES))
+        for version, counts in sorted(versions.items()):
+            lines.append(
+                f"{version:<40}" + "".join(f"{counts[s]:>7}" for s in SEVERITIES)
+            )
+
+    # worst first, then by recording
+    flagged = sorted(
+        (
+            r
+            for r in reports
+            if SEVERITIES.index(r["status"]) >= SEVERITIES.index(level)
+        ),
+        key=lambda r: (-SEVERITIES.index(r["status"]), r["recording"]),
+    )
+    if flagged:
+        lines.append("")
+        lines.append(
+            f"recordings with {' or '.join(SEVERITIES[SEVERITIES.index(level) :])}:"
+        )
+        for report in flagged:
+            # each check at or above level, with the number of units it was
+            # found in (none for a finding about the recording as a whole)
+            found: dict[str, int] = {}
+            for row in report_findings([report]):
+                if SEVERITIES.index(row["severity"]) >= SEVERITIES.index(level):
+                    key = f"{row['check']} ({row['severity']})"
+                    found[key] = found.get(key, 0) + (row["unit"] is not None)
+            described = ", ".join(
+                f"{check} x{n}" if n else check for check, n in sorted(found.items())
+            )
+            lines.append(f"  {report['recording']:<20}{report['status']:<6}{described}")
+    return "\n".join(lines) + "\n"
+
+
+def write_findings(path: Path, reports: list[dict]) -> None:
+    """Writes every finding as a tab-separated row: recording, unit (empty for
+    the recording as a whole), version, check, severity, trials
+    (comma-separated), message."""
+    columns = ("recording", "unit", "version", "check", "severity", "trials", "message")
+    with open(path, "w") as fp:
+        fp.write("\t".join(columns) + "\n")
+        for row in report_findings(reports):
+            row["trials"] = ",".join(map(str, row.get("trials", [])))
+            fp.write(
+                "\t".join("" if row.get(c) is None else str(row[c]) for c in columns)
+                + "\n"
+            )
+
+
+def collect_script(argv=None):
+    p = argparse.ArgumentParser(
+        prog="collect-kilo-audit",
+        description="Summarize the reports written by audit-kilo-spikes.",
+    )
+    p.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    p.add_argument(
+        "--level",
+        choices=SEVERITIES[1:],
+        default="warn",
+        help="list the recordings with findings at or above this level "
+        "(default: %(default)s)",
+    )
+    p.add_argument(
+        "--tsv",
+        type=Path,
+        help="write every finding to this file, one tab-separated row each",
+    )
+    p.add_argument(
+        "--control",
+        type=Path,
+        help="the control file the audits were run from; recordings in it without "
+        "a report (the audit couldn't run) are listed",
+    )
+    p.add_argument(
+        "reports", type=Path, nargs="+", help="report files or directories of them"
+    )
+    args = p.parse_args(argv)
+    setup_log(args.debug)
+
+    reports, errors = load_reports(args.reports)
+    for error in errors:
+        log.warning("- unable to read %s", error)
+    if args.control is not None:
+        with open(args.control) as fp:
+            expected = read_recordings(fp)
+        done = {r["recording"] for r in reports}
+        missing = [rec for rec in expected if rec not in done]
+        if missing:
+            log.warning(
+                "- %d of %d recordings in %s have no report: %s",
+                len(missing),
+                len(expected),
+                args.control,
+                ", ".join(missing),
+            )
+    sys.stdout.write(summarize(reports, args.level))
+    if args.tsv is not None:
+        write_findings(args.tsv, reports)
 
 
 def _trials(f: dict, n: int = 10) -> str:
