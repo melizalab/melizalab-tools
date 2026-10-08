@@ -525,14 +525,47 @@ def test_read_recordings():
 
 def test_find_units_for_listed_recordings(fake_registry, tmp_path, capsys, caplog):
     """With a file of recordings, only their units are found, though a name
-    search for A_1 also returns A_10's; a recording without units is logged."""
+    search for A_1 also returns A_10's. A recording without units (never
+    sorted) whose ARF file isn't here (e.g. in cold storage) is harmless, and
+    only shown with --debug."""
     listed = tmp_path / "recordings.txt"
     listed.write_text("A_1\nC_3\n")
     with caplog.at_level("INFO", logger="dlab"):
         kilo_audit.find_units_script(["-r", "https://registry/", str(listed)])
     assert capsys.readouterr().out == "A_1\tA_1_c1,A_1_c2\n"
     assert {q["name"] for q in fake_registry} == {"A_1", "C_3"}
-    assert "C_3: no units found" in caplog.text
+    assert "C_3" not in caplog.text and "no units" not in caplog.text
+    caplog.clear()
+    with caplog.at_level("DEBUG", logger="dlab"):
+        kilo_audit.find_units_script(["-r", "https://registry/", str(listed)])
+    assert "C_3: no units (no locations in the registry)" in caplog.text
+
+
+def test_find_units_notes_unsorted_recordings_here(
+    fake_registry, monkeypatch, tmp_path, caplog
+):
+    """A recording without units whose ARF file is in the archive here (taking
+    up space) is counted, and listed with --debug."""
+    root = local_archive(tmp_path / "here", "A_1", "C_3")
+    monkeypatch.setattr(
+        kilo_audit,
+        "fetch_locations",
+        lambda url, names: {n: [archived(n, root)] for n in names},
+    )
+    listed = tmp_path / "recordings.txt"
+    listed.write_text("A_1\nC_3\n")
+    with caplog.at_level("INFO", logger="dlab"):
+        kilo_audit.find_units_script(["-r", "https://registry/", str(listed)])
+    assert (
+        "1 of the recordings have no units, but their ARF files are in the "
+        "archive here (listed with --debug)"
+    ) in caplog.text
+    caplog.clear()
+    with caplog.at_level("DEBUG", logger="dlab"):
+        kilo_audit.find_units_script(
+            ["-r", "https://registry/", "--debug", str(listed)]
+        )
+    assert "C_3: no units (ARF file in the archive here)" in caplog.text
 
 
 def test_find_units_from_stdin(fake_registry, monkeypatch, capsys):
@@ -561,6 +594,17 @@ def test_local_copy(tmp_path):
     assert kilo_audit.local_copy(["neurobank://archive/A_1"]) is None
 
 
+def test_unavailable_reason(tmp_path):
+    tape = {"scheme": "tape", "root": "T1:4", "resource_name": "A_1"}
+    web = {"scheme": "https", "root": "https://x/", "resource_name": "A_1"}
+    elsewhere = archived("A_1", tmp_path / "not_mounted")
+    assert kilo_audit.unavailable_reason([tape, web]) == "only on https, tape"
+    assert kilo_audit.unavailable_reason([tape, elsewhere]) == (
+        "in an archive that isn't on this host"
+    )
+    assert kilo_audit.unavailable_reason([]) == "no locations in the registry"
+
+
 def test_fetch_locations(monkeypatch):
     """Locations come from the registry's bulk locations endpoint, which gives
     them as dicts (the resource records only have strings)."""
@@ -578,7 +622,7 @@ def test_fetch_locations(monkeypatch):
 
 
 def test_find_units_skips_recordings_not_on_this_host(
-    fake_registry, monkeypatch, tmp_path
+    fake_registry, monkeypatch, tmp_path, caplog
 ):
     """Recordings whose ARF files aren't in a neurobank archive on this host
     (e.g. in cold storage) can't be audited here, so they go in the
@@ -596,12 +640,17 @@ def test_find_units_skips_recordings_not_on_this_host(
         lambda url, names: {n: locations[n] for n in names if n in locations},
     )
     control, unavailable, orphans = (tmp_path / n for n in ("a.tsv", "u.tsv", "o.tsv"))
-    kilo_audit.find_units_script(
-        [
-            *("-r", "https://registry/", "--all", "-o", str(control)),
-            *("--unavailable", str(unavailable), "--orphans", str(orphans)),
-        ]
-    )
+    with caplog.at_level("INFO", logger="dlab"):
+        kilo_audit.find_units_script(
+            [
+                *("-r", "https://registry/", "--all", "-o", str(control)),
+                *("--unavailable", str(unavailable), "--orphans", str(orphans)),
+            ]
+        )
+    # the log says why, by count
+    assert "2 recordings (2 units) skipped" in caplog.text
+    assert "  - 1 only on tape" in caplog.text
+    assert "  - 1 in an archive that isn't on this host" in caplog.text
     assert control.read_text() == "A_1\tA_1_c1,A_1_c2\n"
     assert unavailable.read_text() == "A_10\tA_10_c1\nB_1\tB_1_c5\n"
     assert orphans.read_text() == "B_1\tB_1_c7_spikes\n"

@@ -1232,6 +1232,19 @@ def fetch_locations(registry_url: str, names: Iterable[str]) -> dict[str, list]:
         }
 
 
+def unavailable_reason(locations: list) -> str:
+    """Why a resource isn't in a neurobank archive on this host, from its
+    locations (see fetch_locations)"""
+    from nbank.registry import local_schemes
+
+    schemes = {loc.get("scheme") for loc in locations if isinstance(loc, dict)}
+    if not schemes:
+        return "no locations in the registry"
+    if schemes & set(local_schemes()):
+        return "in an archive that isn't on this host"
+    return "only on " + ", ".join(sorted(map(str, schemes)))
+
+
 def local_copy(locations: list) -> Path | None:
     """The path of a resource in a neurobank archive on this host, given its
     locations (see fetch_locations), or None. Copies elsewhere (other hosts,
@@ -1368,26 +1381,57 @@ def find_units_script(argv=None):
         groups, unmatched = group_units(
             names(args.pprox_dtype), names(args.waveforms_dtype)
         )
+        no_units = []
         if recordings is not None:
             groups = {rec: groups[rec] for rec in recordings if rec in groups}
             unmatched = []
-            for rec in recordings:
-                if rec not in groups:
-                    log.info("  - %s: no units found", rec)
+            # e.g. deposited before sorting showed there were no good units
+            no_units = [rec for rec in recordings if rec not in groups]
         records = {
             r["name"]: r for r in nbank_core.describe_many(args.registry_url, *groups)
         }
-        locations = fetch_locations(args.registry_url, records)
+        locations = fetch_locations(args.registry_url, [*records, *no_units])
     except (OSError, httpx.HTTPError) as err:
         log.error("find-kilo-units: %s", err)
         sys.exit(1)
 
+    # recordings without units are harmless; only those still in the archive here
+    # (taking up space) are worth mentioning
+    no_units_here = [r for r in no_units if local_copy(locations.get(r, []))]
+    if no_units_here:
+        log.info(
+            "- %d of the recordings have no units, but their ARF files are in the "
+            "archive here%s",
+            len(no_units_here),
+            "" if args.debug else " (listed with --debug)",
+        )
+    for rec in no_units:
+        where = (
+            "ARF file in the archive here"
+            if rec in no_units_here
+            else unavailable_reason(locations.get(rec, []))
+        )
+        log.debug("  - %s: no units (%s)", rec, where)
+    if unmatched:
+        log.info(
+            "- %d resources skipped: names don't match <recording>_c<N>%s",
+            len(unmatched),
+            "" if args.debug else " (listed with --debug)",
+        )
     for name in unmatched:
-        log.info("  - %s: name doesn't match <recording>_c<N>; skipped", name)
-    for rec in sorted(set(groups) - set(records)):
-        log.info("  - %s: recording not in the registry; skipped", rec)
+        log.debug("  - %s: name doesn't match <recording>_c<N>", name)
+    unregistered = sorted(set(groups) - set(records))
+    if unregistered:
+        log.info(
+            "- %d recordings skipped: not in the registry%s",
+            len(unregistered),
+            "" if args.debug else " (listed with --debug)",
+        )
+    for rec in unregistered:
+        log.debug("  - %s: recording not in the registry", rec)
         del groups[rec]
     to_audit, orphans, unavailable, skipped = {}, {}, {}, 0
+    reasons: dict[str, int] = {}
     for rec, group in groups.items():
         for name in group["no_waveforms"]:
             log.debug("  - %s: no waveform file", name)
@@ -1397,7 +1441,9 @@ def find_units_script(argv=None):
         if not group["units"]:
             continue
         if local_copy(locations.get(rec, [])) is None:
-            log.debug("  - %s: recording not in an archive on this host; skipped", rec)
+            reason = unavailable_reason(locations.get(rec, []))
+            log.debug("  - %s: ARF file not on this host (%s)", rec, reason)
+            reasons[reason] = reasons.get(reason, 0) + 1
             unavailable[rec] = group["units"]
             continue
         if args.reports and already_audited(
@@ -1420,6 +1466,8 @@ def find_units_script(argv=None):
             sum(map(len, unavailable.values())),
             "" if args.unavailable else " (list them with --unavailable)",
         )
+        for reason, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+            log.info("  - %d %s", n, reason)
         if not to_audit and not skipped:
             log.warning(
                 "- none of the recordings is in a neurobank archive on this host; "
