@@ -53,10 +53,19 @@ EXAMPLES = sorted(
 # the largest change in stimulus onset accepted (s); old-style clicks move by
 # 0-2 samples, pulses (if the earlier run used them) by up to ~7.4 ms
 MAX_ONSET_SHIFT = 0.010
+# the options that determine the trials, recorded since 2026.10.07
+TRIAL_OPTIONS = {"sync_track", "prepad", "sync_thresh", "oeaudio_log"}
 # pprox fields that are known to change
-CHANGED = {"entry_metadata"}
+CHANGED = {"entry_metadata", *TRIAL_OPTIONS}
 # pprox fields written by group-kilo-spikes itself; the rest are neurobank metadata
-SCRIPT_FIELDS = {"$schema", "pprox", "recording", "processed_by", "entry_metadata"}
+SCRIPT_FIELDS = {
+    "$schema",
+    "pprox",
+    "recording",
+    "processed_by",
+    "entry_metadata",
+    *TRIAL_OPTIONS,
+}
 
 # slow: runs group-kilo-spikes on full recordings (deselected by default; run
 # with `pytest -m slow`)
@@ -148,5 +157,10 @@ def test_waveforms_match_reference(run_example):
     for ref_path in sorted(reference.glob("*_spikes.h5")):
         pprox = load(out / ref_path.name.replace("_spikes.h5", ".pprox"))
         first_trial = pprox["pprox"][0]["recording"]["start"]
-        diffs = compare_waveforms(out / ref_path.name, ref_path, ref_from=first_trial)
+        diffs = compare_waveforms(
+            out / ref_path.name,
+            ref_path,
+            ignore={"processed_by", *TRIAL_OPTIONS},
+            ref_from=first_trial,
+        )
         assert diffs == [], ref_path.name

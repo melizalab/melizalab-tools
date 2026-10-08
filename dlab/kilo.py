@@ -1090,6 +1090,13 @@ def group_spikes_script(argv=None):
         log.info("  - dropping %d spikes before the first trial", before.sum())
         events = events[~before]
 
+    # the options that determine the trials, so they can be reconstructed;
+    # written to the pprox and waveform files (flat, for hdf5 attributes)
+    trial_options = {"sync_track": args.sync, "prepad": args.prepad}
+    if args.sync_thresh is not None:
+        trial_options["sync_thresh"] = args.sync_thresh
+    if args.oeaudio_log is not None:
+        trial_options["oeaudio_log"] = args.oeaudio_log.name
     # describes the auxiliary channels; only written if there are any
     aux_tracks = {}
     if args.aux:
@@ -1184,6 +1191,7 @@ def group_spikes_script(argv=None):
             kilosort_probe_depth=clust_info["depth"],
             kilosort_n_spikes=clust_info["n_spikes"],
             entry_metadata=entry_attrs,
+            **trial_options,
             **aux_tracks,
             **resource_info["metadata"],
         )
@@ -1212,6 +1220,7 @@ def group_spikes_script(argv=None):
                     kilosort_source_channel=clust_info["ch"],
                     kilosort_probe_depth=clust_info["depth"],
                     kilosort_n_spikes=clust_info["n_spikes"],
+                    **trial_options,
                 )
 
     log.info(

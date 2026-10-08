@@ -21,6 +21,7 @@ from conftest import (
     SPIKE,
     add_entry,
     make_kilosort_dir,
+    oeaudio_log_text,
     oeaudio_messages,
 )
 
@@ -393,6 +394,35 @@ def test_aux_option(make_recording):
         [],
         [],
     ]
+
+
+def test_trial_options_recorded(make_recording):
+    """The options that determine the trials (sync track and prepad by
+    default) are recorded in the pprox and waveform files, so the trials can
+    be reconstructed."""
+    out = make_recording()()
+    pp = load_pprox(out, 1)
+    assert (pp["sync_track"], pp["prepad"]) == ("ADC3", 1.0)
+    assert "sync_thresh" not in pp and "oeaudio_log" not in pp
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert (fp.attrs["sync_track"], fp.attrs["prepad"]) == ("ADC3", 1.0)
+
+
+def test_optional_trial_options_recorded(make_recording, tmp_path):
+    """--sync-thresh and --oeaudio-log (its file name only) are recorded when
+    given."""
+    log = tmp_path / "oeaudio_20260101-120000.log"
+    log.write_text(oeaudio_log_text(oeaudio_messages(STIMULI)))
+    out = make_recording()(
+        "--prepad", "0.5", "--sync-thresh", "10000", "--oeaudio-log", str(log)
+    )
+    pp = load_pprox(out, 1)
+    assert pp["prepad"] == 0.5
+    assert pp["sync_thresh"] == 10000.0
+    assert pp["oeaudio_log"] == log.name
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert fp.attrs["sync_thresh"] == 10000.0
+        assert fp.attrs["oeaudio_log"] == log.name
 
 
 def test_aux_option_with_stream(make_recording):

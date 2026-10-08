@@ -130,7 +130,10 @@ def test_click_track_gives_same_output(tmp_path, outputs):
     out = run_excerpt(tmp_path, sync="ADC5")
     for path in sorted(GOLDEN.glob("*.pprox")):
         diffs, shifts = compare_pprox(
-            load(out / path.name), load(path), boundary_tol=1 / 30000
+            load(out / path.name),
+            load(path),
+            ignore={"processed_by", "sync_track"},
+            boundary_tol=1 / 30000,
         )
         assert diffs == [], path.name
         assert (shifts[:, 0] * 30000 >= -1.5).all() and (shifts[:, 0] <= 0).all()

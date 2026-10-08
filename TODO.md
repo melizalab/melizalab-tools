@@ -76,7 +76,7 @@ when a fix makes one pass.
   (`{"name", "interval"}` relative to stimulus onset, assigned to the trial
   where they start, unclipped) and the channel in `aux_tracks`. On E36 this
   matches klopto's `opto` field on all 1300 trials, to within one sample.
-- [ ] Publish the specifications from melizalab/lab_specs (branch
+- [x] Publish the specifications from melizalab/lab_specs (branch
   aux-and-2020-12): pprox 1.0 as published (interval optional; schema in JSON
   Schema 2020-12, with fixes that don't change which documents are valid) and
   stimtrial 1.0 (requires `interval` and `stimulus`; optional `aux` and
@@ -98,7 +98,7 @@ when a fix makes one pass.
 - [ ] Existing klopto outputs (e.g. E36's) have placeholder `led_start` /
   `led_end` values in trials without the LED (sample 0 relative to the
   stimulus, e.g. -3.27 s); analyses must use `led` first.
-- [ ] Compare the end-to-end output of `group-kilo-spikes` (pprox and waveform
+- [x] Compare the end-to-end output of `group-kilo-spikes` (pprox and waveform
   files) against known-good results (`test_group_spikes_examples.py`):
   - P397_1_1 (oeaudio-present, clicks on ADC3, `--oeaudio-log`; reference from
     version 2026.06.22): all 99 reference pprox files match apart from onsets
@@ -135,12 +135,9 @@ when a fix makes one pass.
   Needs: how the kilosort input (temp_wh.dat) is assembled from several
   entries (order, and any gaps between them).
 
-- [ ] A script that checks an ARF file against the pprox files sorted from it
-  for likely errors, starting with `kilo.sync_lag_outliers` (trials whose
-  onset is out of line with its start message; see `pprox_lag_outliers` in
-  test_kilo_examples.py, which flags the earlier version's end-of-pulse trials
-  in E36 and C401's drifting reference). Pulse sync has hardly been used in
-  processed recordings, so this is for spot checks rather than a big audit.
+- [x] Record the options that determine the trials (`sync_track`, `prepad`,
+  and `sync_thresh`/`oeaudio_log` when given) in the pprox and waveform files,
+  so trials can be reconstructed without the command line.
 - [ ] Rescue stimulus onsets in recordings without a sync track by
   cross-correlating the stimulus files with the ADC channel that records an
   analog copy of the audio sent to the speaker. Example: examples/C401_1_1b
@@ -157,6 +154,65 @@ when a fix makes one pass.
   overrides the automatic threshold with an absolute level, in the channel's
   units (it skips the noise check, but not the count checks). Aux channels
   always use the automatic threshold.
+
+## Audit and regeneration (planned)
+
+Goal: find likely errors in deposited data, without changing the registry. A
+re-sort or re-sync must be strongly justified, as deposited resources have
+permanent identifiers and may already have been analyzed. Registry dtypes:
+`spikes-pprox`, `spikes-hdf5` (waveforms; deposited for all but very old
+recordings, which are out of scope).
+
+- [ ] Shared function: rebuild a unit's pprox events from its `_spikes.h5`
+  times and a trial table (spikes at a trial's start go to the previous trial,
+  as in group-kilo-spikes). Checked by hand on all 306 example units (P397,
+  C401, E36 old and klopto runs): every trial's events are reproduced exactly
+  from the trial table of the unit's own pprox. Pre-trial spikes in old
+  waveform files fall outside the trials and are ignored.
+- [ ] `regenerate-pprox RECORDING --units ...`: one recording. Writes pprox
+  files for units whose pprox is missing, to a directory, for manual deposit.
+  Trial table from another pprox of the same recording and run (exact), or
+  else from the ARF with the current pipeline (needs the sync track and
+  prepad unless recorded in the waveform file; onsets may differ from the
+  original version). Metadata: `kilosort_*`, `recording` and the original
+  `processed_by` from the waveform file; cluster id from the name;
+  `entry_metadata` from the ARF; unit metadata from the registry. Adds a
+  `derived_from` field naming the waveform resource and appends its own
+  `processed_by`.
+- [ ] `audit-kilo-spikes RECORDING --units ...`: one recording; writes a JSON
+  report. Exit code 0 if the audit ran, whatever it found; non-zero only if it
+  couldn't run. Findings are graded by their effect on analyses already done:
+  info (no effect, e.g. pre-trial spikes in waveform files, onset shifts <= 3
+  samples, an old version), warn (specific trials unreliable, listed so they
+  can be excluded, e.g. a few lag outliers), fail (the unit is unreliable,
+  e.g. stimulus labels that don't match the messages, most trials out of line
+  as in C401). Only a fail would make a case for re-syncing; re-sorting is
+  out of scope. Checks:
+  - pprox alone: stimtrial schema, trials ordered and non-overlapping, events
+    within intervals, unique indexes, event total <= `kilosort_n_spikes`.
+  - pprox vs waveforms: events rebuilt from the waveform file (see above)
+    match.
+  - pprox vs registry: the pprox's unit metadata (bird, pen, site, protocol,
+    experimenter, ...) against the registry metadata for the pprox and its
+    recording. Usually the registry is wrong; reported for a case-by-case
+    decision.
+  - pprox vs ARF messages (cheap): stimulus names an in-order subsequence of
+    the start messages, at most 1% dropped, `sync_lag_outliers` (see
+    `pprox_lag_outliers` in test_kilo_examples.py, which flags E36's
+    end-of-pulse trials in the old version and C401's drift), `recording`
+    start/end consistent with offset and interval, aux pulses against their
+    stream.
+  - across units of a recording: identical trial tables and versions.
+  - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
+    or found by trying channels for older files) and compare per trial.
+  Each finding carries the unit's `processed_by` version, so known errors of
+  old versions are labeled as such.
+- [ ] Selection script (separate): queries the registry and writes a control
+  file, one line per recording (`RECORDING<TAB>UNIT,UNIT,...`), plus orphans
+  (waveform files without a pprox, for regenerate-pprox; pprox without a
+  waveform file). Run with e.g. `parallel --colsep '\t' --joblog audit.log
+  --resume -a control.tsv 'audit-kilo-spikes {1} --units {2} -o
+  reports/{1}.json'` on the archive host, where the ARF files are local.
 
 ## pprox.py
 
