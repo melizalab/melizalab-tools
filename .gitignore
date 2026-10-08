@@ -5,6 +5,7 @@
 .ipynb_checkpoints/
 build/
 attic/
-venv/
+.venv/
+.venv-linux/
 dist/
 examples/
