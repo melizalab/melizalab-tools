@@ -104,8 +104,12 @@ when a fix makes one pass.
     version 2026.06.22): all 99 reference pprox files match apart from onsets
     moving 0-3 samples earlier and 14 spikes, each within 2 samples of a trial
     boundary, moving to the adjacent trial as a result; waveforms identical.
-    But the new run writes 20 more clusters, all 'good' in a cluster_info.tsv
-    older than the reference. Were only some clusters deposited?
+    The new run writes 20 more clusters, 'good' in this copy of the sort but
+    never deposited (no pprox or waveform files in the registry). The sort
+    directory (phy's only session, 6-17 15:35-15:53) and the 6-22 version of
+    the script give no reason to leave them out, so the deposit was probably
+    made from a later copy of the sort. Accepted; test_group_spikes_examples.py
+    lists them as expected extras.
   - E36_5_1 (jpresent, pulses on ADC3, clicks on ADC5): the reference in
     output/ (from group-klopto-spikes) was made from a different sort, though
     its trial structure matches (1299 of 1300 onsets identical). Instead, the

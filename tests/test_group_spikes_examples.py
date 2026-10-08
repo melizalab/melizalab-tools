@@ -52,6 +52,8 @@ def sorting_dir(example: Path) -> Path:
 class Reference:
     output: str = "output"
     skip_trials: frozenset[int] = frozenset()
+    # clusters labeled good in the sort directory but absent from the reference
+    extra_clusters: frozenset[int] = frozenset()
 
 
 REFERENCES = {
@@ -61,6 +63,16 @@ REFERENCES = {
     # late), which also moved the ends of trials 2 and 11; its other onsets are
     # 39-294 samples late.
     "E36_5_1": Reference("output-a20b62a", frozenset({0, 2, 3, 11, 12})),
+    # 20 of the 119 good clusters in this copy of the sort were never deposited
+    # (no pprox or waveform files in the registry). Nothing in the sort
+    # directory or phy.log distinguishes them, so the deposit was probably
+    # made from a later copy of the sort; see TODO.md.
+    "P397_1_1": Reference(
+        extra_clusters=frozenset(
+            {102, 197, 198, 210, 224, 247, 273, 288, 330, 377, 429, 435, 486}
+            | {527, 563, 565, 574, 628, 650, 653}
+        )
+    ),
 }
 
 
@@ -150,7 +162,7 @@ def run_example(request, tmp_path_factory):
                 str(sorting_dir(example)),
             ]
         )
-    return out, ref_dir, ref.skip_trials
+    return out, ref_dir, ref
 
 
 def output_files(directory: Path) -> list[str]:
@@ -164,21 +176,31 @@ def output_files(directory: Path) -> list[str]:
 
 
 def test_same_files(run_example):
-    out, reference, _ = run_example
-    assert output_files(out) == output_files(reference)
+    """The same files are written as in the reference, apart from clusters
+    known to be missing from it."""
+    out, reference, ref = run_example
+    name = reference.parent.name  # the recording
+    extra = {
+        f"{name}_c{c}{suffix}"
+        for c in ref.extra_clusters
+        for suffix in (".pprox", "_spikes.h5")
+    }
+    written = output_files(out)
+    assert set(written) >= extra, "the known extra clusters are written"
+    assert sorted(set(written) - extra) == output_files(reference)
 
 
 def test_pprox_match_reference(run_example):
     """Each pprox matches its reference, apart from known changes, trials with
     known errors in the reference, and onset shifts within MAX_ONSET_SHIFT."""
-    out, reference, skip_trials = run_example
+    out, reference, ref = run_example
     for ref_path in sorted(reference.glob("*.pprox")):
         diffs, shifts = compare_pprox(
             load(out / ref_path.name),
             load(ref_path),
             ignore={"processed_by", *CHANGED},
             boundary_tol=MAX_ONSET_SHIFT,
-            skip_trials=skip_trials,
+            skip_trials=ref.skip_trials,
         )
         assert diffs == [], ref_path.name
         assert np.abs(shifts).max(initial=0) <= MAX_ONSET_SHIFT, ref_path.name
