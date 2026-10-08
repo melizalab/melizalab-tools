@@ -163,12 +163,14 @@ permanent identifiers and may already have been analyzed. Registry dtypes:
 `spikes-pprox`, `spikes-hdf5` (waveforms; deposited for all but very old
 recordings, which are out of scope).
 
-- [ ] Shared function: rebuild a unit's pprox events from its `_spikes.h5`
+- [x] Shared function: rebuild a unit's pprox events from its `_spikes.h5`
   times and a trial table (spikes at a trial's start go to the previous trial,
   as in group-kilo-spikes). Checked by hand on all 306 example units (P397,
   C401, E36 old and klopto runs): every trial's events are reproduced exactly
   from the trial table of the unit's own pprox. Pre-trial spikes in old
-  waveform files fall outside the trials and are ignored.
+  waveform files fall outside the trials and are ignored. Done as
+  `kilo.waveforms_to_events`, with `kilo.assign_spikes` for the boundary rule
+  (also used by group-kilo-spikes).
 - [ ] `regenerate-pprox RECORDING --units ...`: one recording. Writes pprox
   files for units whose pprox is missing, to a directory, for manual deposit.
   Trial table from another pprox of the same recording and run (exact), or
@@ -179,34 +181,39 @@ recordings, which are out of scope).
   `entry_metadata` from the ARF; unit metadata from the registry. Adds a
   `derived_from` field naming the waveform resource and appends its own
   `processed_by`.
-- [ ] `audit-kilo-spikes RECORDING --units ...`: one recording; writes a JSON
-  report. Exit code 0 if the audit ran, whatever it found; non-zero only if it
-  couldn't run. Findings are graded by their effect on analyses already done:
-  info (no effect, e.g. pre-trial spikes in waveform files, onset shifts <= 3
-  samples, an old version), warn (specific trials unreliable, listed so they
-  can be excluded, e.g. a few lag outliers), fail (the unit is unreliable,
-  e.g. stimulus labels that don't match the messages, most trials out of line
-  as in C401). Only a fail would make a case for re-syncing; re-sorting is
-  out of scope. Checks:
-  - pprox alone: stimtrial schema, trials ordered and non-overlapping, events
-    within intervals, unique indexes, event total <= `kilosort_n_spikes`.
-  - pprox vs waveforms: events rebuilt from the waveform file (see above)
-    match.
+- [x] `audit-kilo-spikes RECORDING --units ...` (`dlab/kilo_audit.py`): one
+  recording; writes a JSON report. Exit code 0 if the audit ran, whatever it
+  found; 1 only if it couldn't run. Findings are graded by their effect on
+  analyses already done: info (no effect, e.g. pre-trial spikes in waveform
+  files), warn (specific trials unreliable, listed so they can be excluded,
+  e.g. a few lag outliers), fail (the unit is unreliable, e.g. stimulus labels
+  that don't match the messages, most trials out of line as in C401). Checks:
+  - pprox alone: the fields stimtrial requires, trial order, unique indexes,
+    events within intervals, event total <= `kilosort_n_spikes`, trials not
+    overlapping, `recording` start/end consistent with offset and interval.
+  - pprox vs waveforms: events rebuilt from the waveform file match; the
+    waveform file names the same recording.
+  - pprox vs ARF messages (or `--oeaudio-log`): each trial's onset follows a
+    start message for its stimulus, no two trials share a message, lags are
+    consistent (`sync_lag_outliers`; noted as expected for versions before
+    2026.10.07), at most 1% of messages without a trial.
+  - across units of a recording: identical trial tables and versions.
+  Results on the examples: P397 (with its log) and E36's klopto output only
+  have pre-trial spikes; E36's old a20b62a output warns on trials 0, 3, 12 in
+  every unit; C401 fails (mislabeled trials, lag outliers in 108 of 110
+  trials, out-of-interval events in the last trial, and waveform files whose
+  `recording` is E76_1_1b, although their spikes match the pprox).
+- [ ] audit-kilo-spikes, still to do:
   - pprox vs registry: the pprox's unit metadata (bird, pen, site, protocol,
     experimenter, ...) against the registry metadata for the pprox and its
     recording. Usually the registry is wrong; reported for a case-by-case
     decision.
-  - pprox vs ARF messages (cheap): stimulus names an in-order subsequence of
-    the start messages, at most 1% dropped, `sync_lag_outliers` (see
-    `pprox_lag_outliers` in test_kilo_examples.py, which flags E36's
-    end-of-pulse trials in the old version and C401's drift), `recording`
-    start/end consistent with offset and interval, aux pulses against their
-    stream.
-  - across units of a recording: identical trial tables and versions.
+  - aux pulses against their stream (needs the aux channel from the ARF).
+  - schema validation against the published stimtrial schema (jsonschema is
+    only a dev dependency).
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
     or found by trying channels for older files) and compare per trial.
-  Each finding carries the unit's `processed_by` version, so known errors of
-  old versions are labeled as such.
+  - which neurobank id the waveform file has: assumed `<pprox id>_spikes`.
 - [ ] Selection script (separate): queries the registry and writes a control
   file, one line per recording (`RECORDING<TAB>UNIT,UNIT,...`), plus orphans
   (waveform files without a pprox, for regenerate-pprox; pprox without a

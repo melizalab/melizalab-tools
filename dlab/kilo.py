@@ -799,6 +799,37 @@ def sync_lag_outliers(
     return np.flatnonzero(np.abs(lags - np.median(lags)) > tolerance)
 
 
+def assign_spikes(times: np.ndarray, trial_starts: np.ndarray) -> np.ndarray:
+    """The index of the trial each spike falls in, given the trials' start
+    samples (increasing). A spike exactly at a trial's start goes to the
+    previous trial, and spikes after the last trial's start go to the last
+    trial. Spikes before the first trial get -1."""
+    return np.searchsorted(trial_starts, times, side="left") - 1
+
+
+def waveforms_to_events(
+    times: np.ndarray, pprox_trials: list[dict], sampling_rate: float
+) -> tuple[list[np.ndarray], int]:
+    """Rebuilds the events of a unit's pprox trials from the spike times in its
+    waveform file (samples, see dlab.spikes.load_waveforms), using the trial
+    table (offset and recording.start) of a pprox from the same run. Returns
+    the events for each trial (in s from the stimulus onset, as in the pprox)
+    and the number of spikes before the first trial, which group-kilo-spikes
+    versions before 2026.10.07 kept in the waveform files but not the pprox."""
+    times = np.sort(np.asarray(times))
+    starts = np.array([trial["recording"]["start"] for trial in pprox_trials])
+    onsets = np.array(
+        [round(trial["offset"] * sampling_rate) for trial in pprox_trials]
+    )
+    trial = assign_spikes(times, starts)
+    bounds = np.searchsorted(trial, np.arange(len(pprox_trials) + 1), side="left")
+    events = [
+        (times[bounds[i] : bounds[i + 1]] - onsets[i]) / sampling_rate
+        for i in range(len(pprox_trials))
+    ]
+    return events, int((trial < 0).sum())
+
+
 def events_to_toelis(events: pd.DataFrame, sampling_rate: float):
     """Assign event_times to clusters, generating a large toelis object"""
     nevents, _ = events.shape
@@ -1082,7 +1113,7 @@ def group_spikes_script(argv=None):
 
     # this pandas magic sorts the events by cluster and trial
     log.info("- sorting events into trials:")
-    events["trial"] = trials.recording_start.searchsorted(events.time, side="left") - 1
+    events["trial"] = assign_spikes(events.time, trials.recording_start)
     # spikes before the first trial are in no trial; drop them from the waveform
     # files too, so these and the pprox files have the same spikes
     before = events.trial < 0

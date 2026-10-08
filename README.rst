@@ -42,6 +42,9 @@ console scripts
    (`stimtrial <https://meliza.org/spec:2/stimtrial/>`__ format), optionally
    recording pulses on auxiliary channels such as optogenetic stimulation
    (``--aux``).
+-  ``audit-kilo-spikes``: check the ``group-kilo-spikes`` output for one
+   recording against its waveform files, the stimulus messages in the ARF
+   file, and each other, and write a JSON report. Changes nothing.
 - ``get-songs``: extract segments from arf files, rescale, resample, save into
    wave files, and optionally deposit back into neurobank. Usually the first
    step in generating a stimulus set, keeps a nice provenance trail.
