@@ -214,8 +214,12 @@ recordings, which are out of scope).
   registry record (`metadata-registry`) and its own resources' records
   (`metadata-unit`). Registry checks only with a registry. Found: C180_1_1's
   metadata message says experimenter uac6qw, its entry attributes bple.
+- [x] audit-kilo-spikes aux checks (units processed with `--aux`): fields
+  (`aux-tracks`, `aux-fields`), the pprox pulses against those detected on
+  their channel (`aux-pulses`), and the channel's pulses against the stream
+  in `aux_tracks` (`aux-stream`; `kilo.match_aux_pulses`, shared with
+  group-kilo-spikes). Clean on all 650 E36 LED pulses.
 - [ ] audit-kilo-spikes, still to do:
-  - aux pulses against their stream (needs the aux channel from the ARF).
   - schema validation against the published stimtrial schema (jsonschema is
     only a dev dependency).
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,

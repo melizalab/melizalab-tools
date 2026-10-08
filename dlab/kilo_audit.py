@@ -416,6 +416,273 @@ def check_recording_name(unit: Unit, recording: str) -> list[dict]:
     return []
 
 
+# --- aux pulses
+
+
+def unit_aux_pulses(unit: Unit, sampling_rate: float) -> dict[str, list[tuple]]:
+    """The aux pulses in a unit's pprox, by name, as (trial, onset, offset), with
+    onset and offset in samples from the start of the recording"""
+    out: dict[str, list[tuple]] = {}
+    for i, trial in enumerate(unit.trials):
+        for pulse in trial.get("aux", []):
+            try:
+                start, end = (
+                    round((trial["offset"] + x) * sampling_rate)
+                    for x in pulse["interval"]
+                )
+                out.setdefault(pulse["name"], []).append((i, start, end))
+            except (KeyError, TypeError, ValueError):
+                continue  # reported by check_aux_fields
+    return out
+
+
+def check_aux_fields(unit: Unit) -> list[dict]:
+    """Checks the aux pulses in a unit's pprox: aux_tracks describes them, every
+    trial has an aux list, each pulse has a known name and an interval, and
+    each starts in its trial (pulses are assigned to the trial in which they
+    start)."""
+    tracks = unit.pprox.get("aux_tracks")
+    with_aux = [i for i, t in enumerate(unit.trials) if t.get("aux")]
+    if tracks is None:
+        if with_aux:
+            return [
+                finding(
+                    "aux-tracks",
+                    "warn",
+                    "trials have aux pulses, but there is no aux_tracks field "
+                    "describing their channels",
+                    with_aux,
+                )
+            ]
+        return []
+    out = []
+    no_list = [i for i, t in enumerate(unit.trials) if "aux" not in t]
+    if no_list:
+        out.append(
+            finding(
+                "aux-fields",
+                "warn",
+                "trials without an aux list (a trial without pulses should have an "
+                "empty one)",
+                no_list,
+            )
+        )
+    malformed, unknown, outside = [], set(), []
+    for i, trial in enumerate(unit.trials):
+        lo, hi = trial["interval"]
+        for pulse in trial.get("aux", []):
+            try:
+                name = pulse["name"]
+                start, end = pulse["interval"]
+            except (KeyError, TypeError, ValueError):
+                malformed.append(i)
+                continue
+            if name not in tracks:
+                unknown.add(name)
+                malformed.append(i)
+            elif end < start:
+                malformed.append(i)
+            elif not lo - 1e-6 <= start < hi + 1e-6:
+                outside.append(i)
+    if malformed:
+        names = f" (names not in aux_tracks: {', '.join(sorted(map(str, unknown)))})"
+        out.append(
+            finding(
+                "aux-fields",
+                "warn",
+                "trials with malformed aux pulses" + (names if unknown else ""),
+                sorted(set(malformed)),
+            )
+        )
+    if outside:
+        out.append(
+            finding(
+                "aux-fields",
+                "warn",
+                "trials with aux pulses that don't start in the trial",
+                sorted(set(outside)),
+            )
+        )
+    return out
+
+
+def check_aux_channel(
+    unit: Unit, name: str, channel: str, detected: np.ndarray, sampling_rate: float
+) -> list[dict]:
+    """Checks a unit's aux pulses against the pulses detected on their channel
+    (onsets and offsets, to within a sample). Pulses before the first trial
+    are not expected in the pprox."""
+    first = unit.trials[0]["recording"]["start"] if unit.trials else 0
+    starts = np.array([t["recording"]["start"] for t in unit.trials])
+    on_channel = [(int(on), int(off)) for on, off in detected if on >= first]
+    in_pprox = unit_aux_pulses(unit, sampling_rate).get(name, [])
+    channel_onsets = np.array([on for on, _ in on_channel])
+    not_on_channel, durations, matched = [], [], set()
+    for trial, on, off in in_pprox:
+        k = np.flatnonzero(np.abs(channel_onsets - on) <= 1) if on_channel else []
+        if len(k) == 0:
+            not_on_channel.append(trial)
+            continue
+        matched.add(int(k[0]))
+        if abs(on_channel[k[0]][1] - off) > 1:
+            durations.append(trial)
+    not_in_pprox = sorted(
+        {
+            int(np.searchsorted(starts, on, side="right") - 1)
+            for k, (on, _) in enumerate(on_channel)
+            if k not in matched
+        }
+    )
+    out = []
+    for trials, what in (
+        (not_on_channel, f"aux '{name}' pulses in the pprox that aren't on {channel}"),
+        (not_in_pprox, f"pulses on {channel} missing from the pprox's aux '{name}'"),
+        (durations, f"aux '{name}' pulses whose end doesn't match {channel}"),
+    ):
+        if trials:
+            out.append(
+                finding(
+                    "aux-pulses", "warn", f"trials with {what}", sorted(set(trials))
+                )
+            )
+    return out
+
+
+def check_aux_stream(
+    unit: Unit,
+    name: str,
+    stream: str,
+    detected: np.ndarray,
+    messages: list | None,
+    sampling_rate: float,
+) -> list[dict]:
+    """Checks the pulses on an aux channel against the messages on the stream
+    that drives it (see kilo.match_aux_pulses), listing the trials affected.
+    The pulse track is the ground truth: a message without a pulse (e.g. the
+    LED didn't fire) is recorded correctly in aux, but a pulse without a
+    message may be spurious."""
+    if not messages:
+        return [
+            finding(
+                "aux-stream",
+                "info",
+                f"no '{stream}' messages to check aux '{name}' against",
+            )
+        ]
+    onsets = (
+        np.sort(np.asarray(detected[:, 0], dtype=int))
+        if len(detected)
+        else np.array([], dtype=int)
+    )
+    found = kilo.match_aux_pulses(onsets, messages, sampling_rate)
+    starts = np.array([t["recording"]["start"] for t in unit.trials])
+
+    def trials_of(samples):
+        idx = np.searchsorted(starts, samples, side="right") - 1
+        return sorted({int(i) for i in idx if i >= 0})
+
+    msg_starts = np.array([m.start for m in messages])
+    out = []
+    if found["unexpected"]:
+        out.append(
+            finding(
+                "aux-stream",
+                "warn",
+                f"trials with aux '{name}' pulses outside every '{stream}' message's "
+                "window (spurious pulses?)",
+                trials_of(onsets[found["unexpected"]]),
+            )
+        )
+    if found["missing"]:
+        out.append(
+            finding(
+                "aux-stream",
+                "info",
+                f"{len(found['missing'])} of {len(messages)} '{stream}' messages have "
+                f"no '{name}' pulse (recorded as such in aux)",
+                trials_of(msg_starts[found["missing"]] + found["lag"]),
+            )
+        )
+    if found["late"]:
+        out.append(
+            finding(
+                "aux-stream",
+                "info",
+                f"trials with aux '{name}' pulses whose lag after their '{stream}' "
+                f"message differs from the median ({found['lag'] / sampling_rate:.3f} s) "
+                "by more than 0.1 s",
+                trials_of(msg_starts[found["late"]] + found["lag"]),
+            )
+        )
+    return out
+
+
+def entry_events(entry, first_sample: int) -> dict[str, list] | None:
+    """The events on every message stream of an entry (see
+    kilo.messages_to_events), in samples from the start of the recording, or
+    None if the entry has no message dataset"""
+    dset = kilo.find_message_dset(entry)
+    if dset is None:
+        return None
+    return {
+        stream: [
+            ev._replace(
+                start=ev.start - first_sample,
+                end=None if ev.end is None else ev.end - first_sample,
+            )
+            for ev in events
+        ]
+        for stream, events in kilo.messages_to_events(dset).items()
+    }
+
+
+def check_aux(unit: Unit, entry, first_sample: int, sampling_rate: float, cache: dict):
+    """Checks a unit's aux pulses: their fields, against their channels in the
+    ARF file, and against the message streams named in aux_tracks. cache holds
+    the pulses detected on each channel and the messages of each entry, which
+    are shared by the units of a recording."""
+    out = check_aux_fields(unit)
+    tracks = unit.pprox.get("aux_tracks") or {}
+    # pulses are compared by sample, which needs the trials' sample ranges
+    if not isinstance(tracks, dict) or not all("recording" in t for t in unit.trials):
+        return out
+    for name, track in tracks.items():
+        channel = track.get("channel") if isinstance(track, dict) else None
+        if channel is None:
+            out.append(
+                finding(
+                    "aux-pulses", "warn", f"aux_tracks gives no channel for '{name}'"
+                )
+            )
+            continue
+        key = (entry.name, channel)
+        if key not in cache:
+            cache[key] = (
+                kilo.detect_pulses(entry[channel][:]) if channel in entry else None
+            )
+        detected = cache[key]
+        if detected is None:
+            out.append(
+                finding(
+                    "aux-pulses",
+                    "warn",
+                    f"channel {channel} for aux '{name}' is not in the ARF file",
+                )
+            )
+            continue
+        out.extend(check_aux_channel(unit, name, channel, detected, sampling_rate))
+        stream = track.get("stream")
+        if stream:
+            key = (entry.name, "events", first_sample)
+            if key not in cache:
+                cache[key] = entry_events(entry, first_sample)
+            messages = (cache[key] or {}).get(stream)
+            out.extend(
+                check_aux_stream(unit, name, stream, detected, messages, sampling_rate)
+            )
+    return out
+
+
 # --- metadata
 
 # the metadata fields that describe a recording, as named in the registry and
@@ -661,6 +928,7 @@ def audit_recording(
         entries = [entry for _, entry in kilo.iter_entries(afp)]
         findings.extend(check_recording_metadata(entries, recording, record))
         stimuli_cache = {}
+        aux_cache = {}
         for unit in units:
             if registry_url:
                 unit_records = [
@@ -704,6 +972,10 @@ def audit_recording(
             unit.findings.extend(
                 check_messages(unit, stimuli_cache[key], sampling_rate)
             )
+            if "aux_tracks" in unit.pprox or any("aux" in t for t in unit.trials):
+                unit.findings.extend(
+                    check_aux(unit, entry, first_sample, sampling_rate, aux_cache)
+                )
     status = worst([*findings, *(f for u in units for f in u.findings)])
     return {
         "recording": recording,

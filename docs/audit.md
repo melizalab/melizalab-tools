@@ -273,6 +273,10 @@ numbers are indexes into the pprox's `pprox` array.
 | [`trials-dropped`](#trials-dropped)                             | info, warn | —         | none needed; check the sync track if many               |
 | [`metadata-registry`](#metadata-registry)                       | warn, info | yes       | correct the registry metadata                           |
 | [`metadata-unit`](#metadata-unit)                               | warn       | yes       | correct the registry metadata                           |
+| [`aux-tracks`](#aux-tracks)                                     | warn       | partly    | the channel can't be checked                            |
+| [`aux-fields`](#aux-fields)                                     | warn       | partly    | exclude the listed trials from aux analyses             |
+| [`aux-pulses`](#aux-pulses)                                     | warn       | sometimes | exclude the listed trials, or reprocess                 |
+| [`aux-stream`](#aux-stream)                                     | warn, info | —         | check the listed trials (warn)                          |
 
 "Re-sync" means rerunning `group-kilo-spikes` with the current version on the
 original sort, and depositing the output as new resources (see [Fixing
@@ -623,11 +627,81 @@ trials suggest a problem with the sync track.
 **Fixable:** nothing to fix, since the missing trials are simply absent. For a
 warning, check the sync track before trusting the rest of the unit.
 
+### Findings about a unit: aux pulses
+
+These apply only to units processed with `--aux` (see `group-kilo-spikes
+--help`): each trial lists the pulses on auxiliary channels, such as an
+optogenetic light source, in its `aux` field, and `aux_tracks` names their
+channels and, optionally, the jrelay message stream that drives them. The
+pulse track is the ground truth: `aux` should record the pulses that were
+delivered, whether or not they were commanded.
+
+#### `aux-tracks`
+
+**Severity:** warn (trials listed)
+
+**Problem:** The listed trials have aux pulses, but the pprox has no
+`aux_tracks` field naming their channels, so they can't be checked against
+the recording.
+
+**Fixable:** partly. The pulses may well be right; if the channel is known,
+note it in the unit's registry metadata.
+
+#### `aux-fields`
+
+**Severity:** warn (trials listed)
+
+**Problem:** The listed trials have no `aux` list (a trial without pulses
+should have an empty one, so that "no pulses" can be told apart from "not
+recorded"), or have pulses without a `name` and `interval`, with a name not
+in `aux_tracks`, or that don't start in the trial (each pulse belongs to the
+trial in which it starts). The file was probably made or edited by hand.
+
+**Fixable:** partly. Exclude the listed trials from analyses of the aux
+pulses.
+
+#### `aux-pulses`
+
+**Severity:** warn (trials listed)
+
+**Problem:** The pulses in the pprox don't match the pulses detected on their
+channel in the ARF file: pulses in the pprox that aren't on the channel,
+pulses on the channel that are missing from the pprox, or pulses whose end
+differs. Also reported if `aux_tracks` gives no channel, or names one that
+isn't in the ARF file. Pulses before the first trial are expected to be
+missing (group-kilo-spikes drops them).
+
+**Fixable:** sometimes. Exclude the listed trials from analyses of the aux
+pulses. If many trials are listed, rerunning group-kilo-spikes with `--aux`
+on the original sort gives the right pulses.
+
+#### `aux-stream`
+
+**Severity:** warn for pulses without a message; info for messages without a
+pulse, and for pulses out of line
+
+**Problem:** The pulses on the channel don't match the messages on the jrelay
+stream named in `aux_tracks` (e.g. `condition`). Each pulse should follow its
+message by about the same lag as the sync pulses.
+
+- *A pulse outside every message's window* (warn): a pulse nobody
+  commanded, perhaps noise on the line. It is recorded in the trial's `aux`
+  as if it were real.
+- *A message without a pulse* (info): the device didn't fire, for example
+  an LED that failed. `aux` correctly records no pulse, so analyses that use
+  `aux` are right, but the trial didn't get the intended condition.
+- *A pulse out of line* (info): its lag after the message differs from the
+  others by more than 0.1 s.
+- *No messages on the stream* (info): the recording has none to check
+  against.
+
+**Fixable:** nothing to fix in the files. For a warning, check the listed
+trials' pulses on the channel before trusting them.
+
 ## Not yet checked
 
 These checks are planned; see `TODO.md`.
 
-- Aux pulses (e.g. optogenetics) against their message stream.
 - Validation against the published stimtrial schema.
 - Re-detecting the onsets from the sync track (`--resync`).
 - Detecting stimulus onsets when the sync track is missing by cross-correlating an audio copy with the stimuli.

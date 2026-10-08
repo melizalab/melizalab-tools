@@ -543,29 +543,29 @@ def arf_to_trials(
     return trials
 
 
-def check_aux_pulses(
-    name: str,
-    pulses: list[tuple],
-    stream: str,
+def match_aux_pulses(
+    onsets: np.ndarray,
     messages: list[Stimulus],
     sampling_rate: float,
     tolerance: float = 0.1,
-) -> dict[str, list[int]]:
-    """Checks the pulses on an auxiliary channel against the messages on the
-    stream that drives it, logging a warning for each problem. Returns the
-    indices of the messages without a pulse ('missing'), the pulses outside any
-    message's window ('unexpected'), and the messages whose pulse is out of line
-    ('late').
+) -> dict:
+    """Matches the onsets of the pulses on an auxiliary channel (samples) to the
+    messages on the stream that drives it (Stimulus(name, start, end), in
+    samples from the start of the sync track).
 
-    pulses are (name, start, end) tuples and messages Stimulus(name, start,
-    end) events, in samples from the start of the sync track. Like the sync
-    pulses, each pulse follows its message by a lag (from audio buffering).
-    The first pulse after each start message, before the next one, is that
-    message's; its lag should agree with the others (see sync_lag_outliers).
-    More pulses may follow (e.g. a train) until the stop message, plus the lag.
+    Like the sync pulses, each pulse follows its message by a lag (from audio
+    buffering). The first pulse after each start message, before the next one,
+    is that message's; its lag should agree with the others (see
+    sync_lag_outliers). More pulses may follow (e.g. a train) until the stop
+    message, plus the lag, plus tolerance (s); without a stop message, until
+    the next message.
 
+    Returns a dict with the indices of the messages without a pulse
+    ('missing'), of the pulses outside any message's window ('unexpected'), and
+    of the messages whose pulse is out of line ('late'); the median lag
+    ('lag', samples); and the number of messages with a pulse ('matched').
     """
-    onsets = np.array(sorted(pulse[1] for pulse in pulses), dtype=int)
+    onsets = np.sort(np.asarray(onsets, dtype=int))
     starts = np.array([msg.start for msg in messages], dtype=int)
     nexts = np.append(starts[1:], np.iinfo(np.int64).max)
     first = np.searchsorted(onsets, starts, side="left")
@@ -580,8 +580,6 @@ def check_aux_pulses(
         else []
     )
     lag = int(np.median(lags)) if lags.size else 0
-    # the window for a message's pulses: from the message to its stop message
-    # plus the lag (or, without a stop message, the next message)
     unexpected = []
     for k, onset in enumerate(onsets):
         i = np.searchsorted(starts, onset, side="right") - 1
@@ -592,16 +590,41 @@ def check_aux_pulses(
         limit = nexts[i] if end is None else end + lag + tolerance * sampling_rate
         if onset > limit:
             unexpected.append(k)
+    return {
+        "missing": missing,
+        "unexpected": unexpected,
+        "late": late,
+        "lag": lag,
+        "matched": int(has_pulse.sum()),
+    }
+
+
+def check_aux_pulses(
+    name: str,
+    pulses: list[tuple],
+    stream: str,
+    messages: list[Stimulus],
+    sampling_rate: float,
+    tolerance: float = 0.1,
+) -> dict[str, list[int]]:
+    """Checks the pulses on an auxiliary channel against the messages on the
+    stream that drives it (see match_aux_pulses), logging a warning for each
+    problem. pulses are (name, start, end) tuples. Returns the indices of the
+    messages without a pulse ('missing'), the pulses outside any message's
+    window ('unexpected'), and the messages whose pulse is out of line
+    ('late')."""
+    onsets = np.array(sorted(pulse[1] for pulse in pulses), dtype=int)
+    found = match_aux_pulses(onsets, messages, sampling_rate, tolerance)
     log.info(
         "  - aux '%s': %d '%s' messages, %d with pulses (lag %.3f s), %d pulses",
         name,
         len(messages),
         stream,
-        int(has_pulse.sum()),
-        lag / sampling_rate,
+        found["matched"],
+        found["lag"] / sampling_rate,
         onsets.size,
     )
-    for i in missing:
+    for i in found["missing"]:
         log.warning(
             "  - WARNING: no '%s' pulse for %s message %d (%s)",
             name,
@@ -609,14 +632,14 @@ def check_aux_pulses(
             i,
             messages[i].name,
         )
-    for k in unexpected:
+    for k in found["unexpected"]:
         log.warning(
             "  - WARNING: '%s' pulse at sample %d is not in the window of any %s message",
             name,
             onsets[k],
             stream,
         )
-    for i in late:
+    for i in found["late"]:
         log.warning(
             "  - WARNING: '%s' pulse for %s message %d (%s) is out of line with the others",
             name,
@@ -624,7 +647,7 @@ def check_aux_pulses(
             i,
             messages[i].name,
         )
-    return {"missing": missing, "unexpected": unexpected, "late": late}
+    return {k: found[k] for k in ("missing", "unexpected", "late")}
 
 
 def aux_pulses(entry, aux: Mapping[str, str]) -> list[tuple]:

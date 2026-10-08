@@ -800,3 +800,189 @@ def test_c180_experimenter_disagrees():
         "experimenter: bple (ARF attributes), uac6qw (ARF metadata message)"
         in (f["message"])
     )
+
+
+# --- aux pulses
+
+
+@pytest.fixture(scope="module")
+def aux_excerpt_output(tmp_path_factory):
+    """The excerpt output with the LED channel as aux, checked against the
+    condition messages: trial 4 has the one pulse"""
+    from test_group_spikes_excerpt import run_excerpt
+
+    return run_excerpt(
+        tmp_path_factory.mktemp("audit_aux"), extra=("--aux", "led=ADC4:condition")
+    )
+
+
+@pytest.fixture
+def aux_output(aux_excerpt_output, tmp_path):
+    return shutil.copytree(aux_excerpt_output, tmp_path / "out")
+
+
+def aux_checks(report, name=UNIT):
+    return [
+        (f["check"], f["severity"], f.get("trials"))
+        for f in unit_report(report, name)["findings"]
+        if f["check"].startswith("aux")
+    ]
+
+
+def modified_arf(tmp_path, fn):
+    """A copy of the excerpt ARF with its LED channel (ADC4) changed by fn"""
+    path = shutil.copy(E36, tmp_path / "E36_5_1.arf")
+    with h5py.File(path, "r+") as fp:
+        fn(fp["entry"]["ADC4"])
+    return path
+
+
+def audit_arf(output, arf):
+    units = kilo_audit.load_units([str(output)], None)
+    return kilo_audit.audit_recording(arf, units, recording="E36_5_1")
+
+
+def test_aux_output_is_clean(aux_excerpt_output):
+    """The LED pulse in trial 4 matches ADC4 and its condition message."""
+    report = audit(aux_excerpt_output)
+    assert report["status"] == "ok"
+    assert unit_report(report)["findings"] == []
+
+
+def test_aux_without_tracks(aux_output):
+    edit_pprox(aux_output, lambda pp: pp.pop("aux_tracks"))
+    assert aux_checks(audit(aux_output)) == [("aux-tracks", "warn", [4])]
+
+
+def test_trial_without_aux_list(aux_output):
+    edit_pprox(aux_output, lambda pp: pp["pprox"][1].pop("aux"))
+    assert aux_checks(audit(aux_output)) == [("aux-fields", "warn", [1])]
+
+
+def test_aux_pulse_with_unknown_name(aux_output):
+    def rename(pp):
+        pp["pprox"][4]["aux"][0]["name"] = "ttl"
+
+    edit_pprox(aux_output, rename)
+    found = unit_report(audit(aux_output))["findings"]
+    (fields,) = [f for f in found if f["check"] == "aux-fields"]
+    assert (
+        fields["trials"] == [4] and "names not in aux_tracks: ttl" in fields["message"]
+    )
+    # and the led pulse on ADC4 is now missing from the pprox
+    assert ("aux-pulses", "warn", [4]) in aux_checks(audit(aux_output))
+
+
+def test_aux_pulse_outside_its_trial(aux_output):
+    """A pulse that doesn't start in its trial is reported (it also no longer
+    matches the channel)."""
+
+    def move(pp):
+        trial = pp["pprox"][3]
+        start = trial["interval"][1] + 0.5
+        trial["aux"].append({"name": "led", "interval": [start, start + 1.0]})
+
+    edit_pprox(aux_output, move)
+    assert ("aux-fields", "warn", [3]) in aux_checks(audit(aux_output))
+
+
+def test_aux_pulse_missing_from_pprox(aux_output):
+    edit_pprox(aux_output, lambda pp: pp["pprox"][4]["aux"].clear())
+    report = audit(aux_output)
+    (f,) = [f for f in unit_report(report)["findings"] if f["check"] == "aux-pulses"]
+    assert f["trials"] == [4] and "missing from the pprox" in f["message"]
+
+
+def test_aux_pulse_not_on_channel(aux_output):
+    """A pulse in the pprox that isn't on the channel is reported; the stream
+    check uses the channel, so it is unaffected."""
+
+    def add(pp):
+        pp["pprox"][2]["aux"].append({"name": "led", "interval": [0.0, 0.5]})
+
+    edit_pprox(aux_output, add)
+    report = audit(aux_output)
+    assert aux_checks(report) == [("aux-pulses", "warn", [2])]
+    assert "aren't on ADC4" in unit_report(report)["findings"][0]["message"]
+
+
+def test_aux_pulse_end_differs(aux_output):
+    def stretch(pp):
+        pp["pprox"][4]["aux"][0]["interval"][1] += 0.1
+
+    edit_pprox(aux_output, stretch)
+    report = audit(aux_output)
+    assert aux_checks(report) == [("aux-pulses", "warn", [4])]
+    assert "end doesn't match" in unit_report(report)["findings"][0]["message"]
+
+
+def test_aux_channel_not_in_arf(aux_output):
+    edit_pprox(aux_output, lambda pp: pp["aux_tracks"]["led"].update(channel="ADC9"))
+    assert aux_checks(audit(aux_output)) == [("aux-pulses", "warn", None)]
+
+
+def test_aux_stream_without_messages(aux_output):
+    edit_pprox(aux_output, lambda pp: pp["aux_tracks"]["led"].update(stream="channel3"))
+    assert aux_checks(audit(aux_output)) == [("aux-stream", "info", None)]
+
+
+def test_spurious_aux_pulse(aux_output, tmp_path):
+    """A pulse on the channel with no message (here added to the ARF, in trial
+    2) is a warning: it may be spurious, and it would be in the trial's aux."""
+
+    def pulse(dset):
+        trial = json.loads((aux_output / f"{UNIT}.pprox").read_text())["pprox"][2]
+        start = round(trial["offset"] * 30000)
+        dset[start : start + 15000] = dset[:].max()
+
+    arf = modified_arf(tmp_path, pulse)
+    found = aux_checks(audit_arf(aux_output, arf))
+    assert ("aux-stream", "warn", [2]) in found
+    assert ("aux-pulses", "warn", [2]) in found  # and the pprox lacks it
+
+
+def test_message_without_aux_pulse(aux_output, tmp_path):
+    """A message whose pulse never came (the LED didn't fire) is only noted:
+    the pprox, which follows the channel, records no pulse."""
+
+    def silence(dset):
+        x = dset[:]
+        for on, off in kilo.detect_pulses(x):
+            x[on - 2 : off + 2] = np.median(x)  # including the edges
+        dset[:] = x
+
+    edit_pprox(aux_output, lambda pp: pp["pprox"][4]["aux"].clear())
+    found = aux_checks(audit_arf(aux_output, modified_arf(tmp_path, silence)))
+    assert found == [("aux-stream", "info", [4])]
+
+
+@pytest.mark.slow
+def test_e36_aux_pulses_clean():
+    """The full E36 recording's 650 LED pulses, as group-kilo-spikes records
+    them (here in a unit without spikes or a waveform file), agree with ADC4
+    and the condition messages."""
+    import pandas as pd
+    from conftest import StubFinder
+    from test_group_spikes_examples import stimulus_durations
+
+    ex = EXAMPLES / "E36_5_1"
+    if not (ex / "output").exists():
+        pytest.skip("examples/E36_5_1 not present")
+    finder = StubFinder(stimulus_durations(ex / "output"))
+    with h5py.File(ex / "E36_5_1.arf", "r") as fp:
+        trials = kilo.arf_to_trials(
+            fp, finder, "ADC3", prepad=0.5, oeaudio_log=None, aux={"led": "ADC4"}
+        )
+    pprox = {
+        "recording": "https://registry/resources/E36_5_1/",
+        "aux_tracks": {"led": {"channel": "ADC4", "stream": "condition"}},
+        "pprox": list(
+            kilo.trials_to_pprox(pd.DataFrame(trials).assign(events=np.nan), 30000.0)
+        ),
+    }
+    pprox = json.loads(json.dumps(pprox, default=list))
+    unit = kilo_audit.Unit("E36_5_1_c0", Path("E36_5_1_c0.pprox"), pprox)
+    report = kilo_audit.audit_recording(ex / "E36_5_1.arf", [unit])
+    assert [f["check"] for f in unit_report(report, "E36_5_1_c0")["findings"]] == [
+        "waveforms"
+    ]
