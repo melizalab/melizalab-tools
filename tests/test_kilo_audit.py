@@ -21,6 +21,22 @@ DATA = Path(__file__).parent / "data"
 E36 = DATA / "E36_excerpt.arf"
 EXAMPLES = Path(__file__).parent.parent / "examples"
 UNIT = "E36_5_1_c52"
+REGISTRY = "https://registry/"
+E36_RECORD = json.loads((DATA / "E36_excerpt_neurobank.json").read_text())["record"]
+
+
+@pytest.fixture(autouse=True)
+def fake_records(monkeypatch):
+    """Registry records for describe_many: E36_5_1 as registered (it matches
+    the excerpt's ARF attributes and pprox files). Tests can change or add
+    records. Keeps the scripts off the network if NBANK_REGISTRY is set."""
+    records = {"E36_5_1": json.loads(json.dumps(E36_RECORD))}
+
+    def describe_many(registry_url, *ids):
+        return [records[i] for i in ids if i in records]
+
+    monkeypatch.setattr(kilo_audit.nbank_core, "describe_many", describe_many)
+    return records
 
 
 # --- shared spike assignment
@@ -634,3 +650,153 @@ def test_every_check_is_documented():
     doc = (Path(__file__).parent.parent / "docs" / "audit.md").read_text()
     assert set(re.findall(r"^#### `([a-z-]+)`", doc, re.M)) == checks
     assert set(re.findall(r"^\| \[`([a-z-]+)`\]", doc, re.M)) == checks
+
+
+# --- metadata
+
+
+def audit_with_registry(output, **kwargs):
+    units = kilo_audit.load_units([str(output)], None)
+    return kilo_audit.audit_recording(
+        E36, units, recording="E36_5_1", registry_url=REGISTRY, **kwargs
+    )
+
+
+def test_metadata_agrees(excerpt_output):
+    """The excerpt's ARF attributes, pprox files and registry record agree."""
+    report = audit_with_registry(excerpt_output)
+    assert report["status"] == "ok"
+    assert report["registry"] == REGISTRY
+
+
+def test_no_registry_no_metadata_checks(excerpt_output, fake_records):
+    """Without a registry, only the ARF is checked; the report says so."""
+    fake_records["E36_5_1"]["metadata"]["pen"] = 6
+    report = audit(excerpt_output)
+    assert report["status"] == "ok" and report["registry"] is None
+
+
+def test_registry_disagrees(excerpt_output, fake_records):
+    """A field that differs between the registry and the ARF (and the pprox
+    files, which copied it from the registry) is reported for the recording
+    and each unit."""
+    fake_records["E36_5_1"]["metadata"]["pen"] = 6
+    report = audit_with_registry(excerpt_output)
+    assert [(f["check"], f["severity"]) for f in report["findings"]] == [
+        ("metadata-arf", "warn")
+    ]
+    assert "pen: 6 (registry), 5 (ARF attributes)" in report["findings"][0]["message"]
+    for unit in report["units"]:
+        assert checks(unit) == [("metadata-registry", "warn", None)]
+        assert "pen: 5 (pprox), 6 (registry)" in unit["findings"][0]["message"]
+
+
+def test_field_only_in_registry(excerpt_output, fake_records):
+    """A field added to the registry after the units were processed is noted."""
+    fake_records["E36_5_1"]["metadata"]["hemisphere"] = "R"
+    report = audit_with_registry(excerpt_output)
+    for unit in report["units"]:
+        (f,) = unit["findings"]
+        assert (f["check"], f["severity"]) == ("metadata-registry", "info")
+        assert "hemisphere (registry only)" in f["message"]
+
+
+def test_recording_not_registered(excerpt_output, fake_records):
+    del fake_records["E36_5_1"]
+    report = audit_with_registry(excerpt_output)
+    assert [(f["check"], f["severity"]) for f in report["findings"]] == [
+        ("registry", "warn")
+    ]
+
+
+def test_unit_resource_disagrees(excerpt_output, fake_records):
+    """The registry records of a unit's own resources (pprox or waveform file)
+    are checked against the pprox, for the fields they share."""
+    fake_records[f"{UNIT}_spikes"] = {
+        "name": f"{UNIT}_spikes",
+        "metadata": {"site": 2, "note": "anything"},
+    }
+    unit = unit_report(audit_with_registry(excerpt_output))
+    assert checks(unit) == [("metadata-unit", "warn", None)]
+    assert f"site: 1 (pprox), 2 ({UNIT}_spikes)" in unit["findings"][0]["message"]
+
+
+def test_script_uses_registry(excerpt_output, e36_arf, fake_records, tmp_path):
+    fake_records["E36_5_1"]["metadata"]["site"] = 3
+    out = tmp_path / "report.json"
+    kilo_audit.script(
+        ["-r", REGISTRY, "--units", str(excerpt_output), "-o", str(out), str(e36_arf)]
+    )
+    report = json.loads(out.read_text())
+    assert [f["check"] for f in report["findings"]] == ["metadata-arf"]
+
+
+def metadata_arf(tmp_path, name, metadata=None, **attrs):
+    """An ARF file with one entry, its attributes, and a metadata message"""
+    import arf
+    from conftest import add_entry, oeaudio_messages
+
+    path = tmp_path / "meta.arf"
+    with arf.open_file(path, "w") as fp:
+        add_entry(
+            fp,
+            name,
+            1000.0,
+            nsamples=1000,
+            messages=oeaudio_messages([], metadata=metadata),
+            **attrs,
+        )
+    return path
+
+
+def recording_checks(path, recording, record=None):
+    with h5py.File(path, "r") as fp:
+        entries = [e for _, e in kilo.iter_entries(fp)]
+        return kilo_audit.check_recording_metadata(entries, recording, record)
+
+
+def test_arf_disagrees_with_itself(tmp_path):
+    """The ARF attributes and the metadata message are compared even without a
+    registry; the message's 'experiment' is the protocol."""
+    path = metadata_arf(
+        tmp_path,
+        "C1_2026-01-01_10-00-00_main",
+        metadata={"animal": "C1", "experimenter": "someone", "experiment": "main"},
+        experimenter="other",
+        protocol="main",
+        pen="1",
+    )
+    (f,) = recording_checks(path, "C1_1_1")
+    assert f["check"] == "metadata-arf"
+    assert f["message"] == (
+        "the ARF file disagrees with itself: "
+        "experimenter: other (ARF attributes), someone (ARF metadata message)"
+    )
+
+
+def test_bird_named_in_arf(tmp_path):
+    """The bird in the entry name and the metadata message must match the
+    recording's id."""
+    path = metadata_arf(
+        tmp_path, "E79_2026-06-23_12-33-22_chorus", metadata={"animal": "E79"}
+    )
+    assert recording_checks(path, "E79_1_1b") == []
+    found = recording_checks(path, "C180_1_1")
+    assert [f["message"] for f in found] == [
+        "the ARF metadata message is for bird E79, but the recording is C180_1_1",
+        "the ARF entry name is for bird E79, but the recording is C180_1_1",
+    ]
+
+
+@pytest.mark.slow
+def test_c180_experimenter_disagrees():
+    """C180's metadata message and entry attributes name different
+    experimenters."""
+    path = EXAMPLES / "C180_1_1.arf"
+    if not path.exists():
+        pytest.skip("examples/C180_1_1.arf not present")
+    (f,) = recording_checks(path, "C180_1_1")
+    assert (
+        "experimenter: bple (ARF attributes), uac6qw (ARF metadata message)"
+        in (f["message"])
+    )

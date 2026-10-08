@@ -201,11 +201,15 @@ recordings, which are out of scope).
   every unit; C401 fails (mislabeled trials, lag outliers in 108 of 110
   trials, out-of-interval events in the last trial, and waveform files whose
   `recording` is E76_1_1b, although their spikes match the pprox).
+- [x] audit-kilo-spikes metadata checks: the recording metadata (bird, pen,
+  site, hemisphere, protocol, experimenter) in the registry, the ARF entry
+  attributes (arfx-oephys >= 2.8.0) and oeaudio-present's metadata message
+  are compared (`metadata-arf`); the bird in the message or entry name against
+  the recording id (`metadata-name`); each pprox against the recording's
+  registry record (`metadata-registry`) and its own resources' records
+  (`metadata-unit`). Registry checks only with a registry. Found: C180_1_1's
+  metadata message says experimenter uac6qw, its entry attributes bple.
 - [ ] audit-kilo-spikes, still to do:
-  - pprox vs registry: the pprox's unit metadata (bird, pen, site, protocol,
-    experimenter, ...) against the registry metadata for the pprox and its
-    recording. Usually the registry is wrong; reported for a case-by-case
-    decision.
   - aux pulses against their stream (needs the aux channel from the ARF).
   - schema validation against the published stimtrial schema (jsonschema is
     only a dev dependency).

@@ -416,6 +416,163 @@ def check_recording_name(unit: Unit, recording: str) -> list[dict]:
     return []
 
 
+# --- metadata
+
+# the metadata fields that describe a recording, as named in the registry and
+# the ARF entry attributes (arfx-oephys 2.8.0 and later)
+METADATA_FIELDS = ("bird", "pen", "site", "hemisphere", "protocol", "experimenter")
+# oeaudio-present's metadata message names some of them differently
+MESSAGE_FIELDS = {"experiment": "protocol"}
+# a bird's short name before the date in an entry name, e.g. "E79" in
+# "..._E79_2026-06-23_12-33-22_chorus_Record Node..."
+_re_entry_animal = re.compile(r"(?:^|[_/])([A-Za-z]+\d+)_\d{4}-\d{2}-\d{2}_")
+
+
+def _same(a, b) -> bool:
+    # the ARF stores all values as strings
+    return str(a).strip() == str(b).strip()
+
+
+def entry_metadata_sources(entry, label: str) -> dict[str, dict]:
+    """The metadata recorded in an ARF entry, by source: its attributes, and
+    the metadata message from oeaudio-present (if any)"""
+    attrs = {
+        k: _plain_attr(entry.attrs[k]) for k in METADATA_FIELDS if k in entry.attrs
+    }
+    message = {
+        MESSAGE_FIELDS.get(k, k): v
+        for k, v in kilo.entry_to_metadata(entry).items()
+        if MESSAGE_FIELDS.get(k, k) in METADATA_FIELDS
+    }
+    return {f"{label} attributes": attrs, f"{label} metadata message": message}
+
+
+def _plain_attr(value):
+    return value.decode() if isinstance(value, bytes) else value
+
+
+def disagreements(sources: dict[str, dict]) -> list[str]:
+    """For each field with different values in different sources, a
+    description of the values and their sources"""
+    out = []
+    fields = sorted({k for values in sources.values() for k in values})
+    for field_ in fields:
+        found = [
+            (src, values[field_]) for src, values in sources.items() if field_ in values
+        ]
+        if any(not _same(found[0][1], v) for _, v in found[1:]):
+            described = ", ".join(f"{v} ({src})" for src, v in found)
+            out.append(f"{field_}: {described}")
+    return out
+
+
+def check_recording_metadata(
+    entries, recording: str, record: dict | None
+) -> list[dict]:
+    """Checks the metadata in the ARF file against itself and the recording's
+    registry record (if given), and the bird named in the ARF file against the
+    recording's id."""
+    out = []
+    sources = {}
+    if record is not None:
+        sources["registry"] = {
+            k: v for k, v in record.get("metadata", {}).items() if k in METADATA_FIELDS
+        }
+    for i, entry in enumerate(entries):
+        label = "ARF" if len(entries) == 1 else f"entry {i}"
+        sources.update(entry_metadata_sources(entry, label))
+    mismatched = disagreements(sources)
+    if mismatched:
+        out.append(
+            finding(
+                "metadata-arf",
+                "warn",
+                "the ARF file and the registry disagree: " + "; ".join(mismatched)
+                if record is not None
+                else "the ARF file disagrees with itself: " + "; ".join(mismatched),
+            )
+        )
+    bird = recording.split("_", 1)[0]
+    for entry in entries:
+        names = []
+        animal = kilo.entry_to_metadata(entry).get("animal")
+        if animal is not None:
+            names.append((str(animal), "metadata message"))
+        m = _re_entry_animal.search(entry.name)
+        if m is not None:
+            names.append((m.group(1), "entry name"))
+        for name, source in names:
+            if name != bird:
+                out.append(
+                    finding(
+                        "metadata-name",
+                        "warn",
+                        f"the ARF {source} is for bird {name}, but the recording "
+                        f"is {recording}",
+                    )
+                )
+    return out
+
+
+def check_unit_metadata(
+    unit: Unit, record: dict | None, unit_records: list[dict]
+) -> list[dict]:
+    """Checks a unit's pprox against the recording's current registry record,
+    and against the registry records of the unit's own resources (pprox and
+    waveform file)."""
+    out = []
+    if record is not None:
+        registry = record.get("metadata", {})
+        keys = set(registry) | {k for k in METADATA_FIELDS if k in unit.pprox}
+        differ = [
+            f"{k}: {unit.pprox[k]} (pprox), {registry[k]} (registry)"
+            for k in sorted(keys)
+            if k in registry
+            and k in unit.pprox
+            and not _same(unit.pprox[k], registry[k])
+        ]
+        if differ:
+            out.append(
+                finding(
+                    "metadata-registry",
+                    "warn",
+                    "the pprox and the recording's registry record disagree: "
+                    + "; ".join(differ),
+                )
+            )
+        one_side = [
+            f"{k} ({'registry' if k in registry else 'pprox'} only)"
+            for k in sorted(keys)
+            if (k in registry) != (k in unit.pprox)
+        ]
+        if one_side:
+            out.append(
+                finding(
+                    "metadata-registry",
+                    "info",
+                    "fields in only one of the pprox and the recording's registry "
+                    "record: " + ", ".join(one_side),
+                )
+            )
+    for rec in unit_records:
+        metadata = rec.get("metadata", {})
+        differ = [
+            f"{k}: {unit.pprox[k]} (pprox), {metadata[k]} ({rec['name']})"
+            for k in sorted(metadata)
+            if k in unit.pprox and not _same(unit.pprox[k], metadata[k])
+        ]
+        if differ:
+            out.append(
+                finding(
+                    "metadata-unit",
+                    "warn",
+                    "the pprox and the registry record of the unit's resource "
+                    "disagree: " + "; ".join(differ),
+                )
+            )
+    return out
+
+
 # --- across units
 
 
@@ -475,16 +632,43 @@ def audit_recording(
     units: list[Unit],
     oeaudio_log: Path | None = None,
     recording: str | None = None,
+    registry_url: str | None = None,
 ) -> dict:
     """Audits the units sorted from a recording. recording is its neurobank id
-    (by default, the name of the ARF file without its extension). Returns the
+    (by default, the name of the ARF file without its extension). Metadata are
+    checked against the registry if registry_url is given. Returns the
     report."""
     recording = recording or Path(arf_path).stem
     findings = check_units(units)
+    records = {}
+    if registry_url:
+        ids = [
+            recording,
+            *(u.name for u in units),
+            *(f"{u.name}_spikes" for u in units),
+        ]
+        records = {r["name"]: r for r in nbank_core.describe_many(registry_url, *ids)}
+        if recording not in records:
+            findings.append(
+                finding(
+                    "registry",
+                    "warn",
+                    f"the recording {recording} is not in the registry",
+                )
+            )
+    record = records.get(recording)
     with h5.File(arf_path, "r") as afp:
         entries = [entry for _, entry in kilo.iter_entries(afp)]
+        findings.extend(check_recording_metadata(entries, recording, record))
         stimuli_cache = {}
         for unit in units:
+            if registry_url:
+                unit_records = [
+                    records[name]
+                    for name in (unit.name, f"{unit.name}_spikes")
+                    if name in records
+                ]
+                unit.findings.extend(check_unit_metadata(unit, record, unit_records))
             entry_ids = {
                 t.get("recording", {}).get("entry", 0) for t in unit.trials
             } or {0}
@@ -525,6 +709,7 @@ def audit_recording(
         "recording": recording,
         "arf": str(arf_path),
         "audited_by": f"audit-kilo-spikes {__version__}",
+        "registry": registry_url,
         "status": status,
         "findings": findings,
         "units": [unit.report() for unit in units],
@@ -622,7 +807,9 @@ def script(argv=None):
             raise RuntimeError("no units to audit")
         log.info("- auditing %d units from %s", len(units), arf_path)
         recording = Path(args.recording).stem
-        report = audit_recording(arf_path, units, args.oeaudio_log, recording)
+        report = audit_recording(
+            arf_path, units, args.oeaudio_log, recording, args.registry_url
+        )
     except (OSError, RuntimeError, ValueError, KeyError) as err:
         log.error("audit-kilo-spikes: %s", err)
         sys.exit(1)

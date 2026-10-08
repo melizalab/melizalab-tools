@@ -78,6 +78,10 @@ parallel --colsep '\t' -a audit.tsv --joblog audit.log --resume \
 Each run writes one report, `reports/<recording>.json`. With `--joblog` and
 `--resume`, an interrupted batch can be restarted where it left off.
 
+- **Metadata:** the recording metadata are checked against the registry
+  only when one is configured (`-r`, or `NBANK_REGISTRY`). Without one, only
+  the ARF's own metadata are checked (see
+  [metadata findings](#findings-about-the-recording-metadata)).
 - **Exit status:** `audit-kilo-spikes` exits with 0 whenever the audit ran,
   whatever it found. A non-zero exit, shown in `audit.log`, means the audit
   couldn't run, for example because a file was missing or unreadable.
@@ -109,6 +113,8 @@ Each report is a JSON object with these fields:
 - `recording`: the recording's neurobank id.
 - `arf`: the path of the ARF file that was used.
 - `audited_by`: the script and its version.
+- `registry`: the registry the metadata were checked against, or `null` if
+  none was configured (only the ARF's metadata were checked).
 - `status`: the worst finding for the recording.
 - `findings`: findings about the recording as a whole.
 - `units`: one object for each unit, with:
@@ -243,6 +249,9 @@ numbers are indexes into the pprox's `pprox` array.
 |-----------------------------------------------------------------|------------|-----------|---------------------------------------------------------|
 | [`trial-tables`](#trial-tables)                                 | warn       | yes       | use the units of one run                                |
 | [`versions`](#versions)                                         | info       | —         | none needed                                             |
+| [`registry`](#registry)                                         | warn       | yes       | register the recording, or check its id                 |
+| [`metadata-arf`](#metadata-arf)                                 | warn       | yes       | correct the registry metadata                           |
+| [`metadata-name`](#metadata-name)                               | warn       | yes       | check which recording the file is                       |
 | [`pprox-fields`](#pprox-fields)                                 | fail       | sometimes | regenerate the pprox from its waveform file             |
 | [`recording-name`](#recording-name)                             | warn, info | yes       | registry metadata, or audit against the right recording |
 | [`trial-order`](#trial-order)                                   | warn       | yes       | sort trials when reading                                |
@@ -262,6 +271,8 @@ numbers are indexes into the pprox's `pprox` array.
 | [`messages-shared`](#messages-shared)                           | fail       | sometimes | re-sync                                                 |
 | [`sync-lag`](#sync-lag)                                         | warn, fail | yes       | exclude trials (warn), re-sync (fail)                   |
 | [`trials-dropped`](#trials-dropped)                             | info, warn | —         | none needed; check the sync track if many               |
+| [`metadata-registry`](#metadata-registry)                       | warn, info | yes       | correct the registry metadata                           |
+| [`metadata-unit`](#metadata-unit)                               | warn       | yes       | correct the registry metadata                           |
 
 "Re-sync" means rerunning `group-kilo-spikes` with the current version on the
 original sort, and depositing the output as new resources (see [Fixing
@@ -292,6 +303,62 @@ exists.
 harmless, but check whether `trial-tables` was also reported.
 
 **Fixable:** nothing to fix on its own.
+
+### Findings about the recording: metadata
+
+These need a registry (`-r`, or `NBANK_REGISTRY`), except where noted. The
+audit compares the metadata fields that describe a recording: `bird`, `pen`,
+`site`, `hemisphere`, `protocol` and `experimenter`. They are kept in several
+places:
+
+- **The recording's registry record:** the current values.
+- **The ARF entry attributes:** written by arfx-oephys 2.8.0 and later.
+- **oeaudio-present's metadata message:** in the ARF file. It calls the
+  protocol `experiment`, and also names the bird (`animal`).
+- **Each pprox:** a copy of the registry record, made when the unit was
+  processed.
+
+None of these is automatically right: usually the registry is wrong, but
+check each case. These findings don't affect spike times, but they do affect
+analyses that select or group units by these fields.
+
+#### `registry`
+
+**Severity:** warn
+
+**Problem:** The recording isn't in the registry, so the metadata couldn't be
+checked against it. Either the recording id is wrong (the ARF file is named
+after something other than its id), or the recording was never registered.
+
+**Fixable:** yes. Audit with the right id, or register the recording.
+
+#### `metadata-arf`
+
+**Severity:** warn
+
+**Problem:** The ARF file and the registry disagree on a field, or, without a
+registry (or for a field the registry lacks), the ARF's entry attributes and
+metadata message disagree with each other. The message lists each value and
+its source. For example, C180_1_1's metadata message gives experimenter
+`uac6qw`, but its entry attributes give `bple`.
+
+**Fixable:** yes. Decide which value is right. If it's the ARF's, correct the
+registry with `nbank modify -k FIELD=VALUE <recording>`. The ARF file itself
+is never edited. If the registry is right, note the error in the recording's
+registry metadata.
+
+#### `metadata-name`
+
+**Severity:** warn (checked without a registry too)
+
+**Problem:** The bird named in the ARF file, in the metadata message
+(`animal`) or the entry name (e.g. `E79_2026-06-23_...`), isn't the bird in
+the recording's id (e.g. `C180_1_1`). Either the ARF file was deposited under
+the wrong id, or it was named wrongly when it was recorded.
+
+**Fixable:** yes, once the right recording is known. If the id is wrong, every
+unit sorted from the file carries the wrong recording. Correct the registry
+metadata, and note it on the units.
 
 ### Findings about a unit: the pprox file
 
@@ -447,6 +514,31 @@ pprox. This has no effect on analyses.
 
 **Fixable:** nothing to fix.
 
+### Findings about a unit: metadata
+
+#### `metadata-registry`
+
+**Severity:** warn, or info for a field in only one of the two
+
+**Problem:** The pprox's copy of the recording metadata disagrees with the
+recording's current registry record. Usually the registry was corrected after
+the unit was processed, or the registry is wrong. As info: a field is in only
+one of the two, typically one added to the registry later.
+
+**Fixable:** yes. If the registry is right, analyses should take these fields
+from the registry rather than the pprox; reprocessing isn't needed. If the
+registry is wrong, correct it with `nbank modify`.
+
+#### `metadata-unit`
+
+**Severity:** warn
+
+**Problem:** The registry record of the unit's own pprox or waveform resource
+has a field that disagrees with the pprox. Only fields in both are compared.
+
+**Fixable:** yes. Correct the unit resource's registry metadata with
+`nbank modify`.
+
 ### Findings about a unit: the stimulus messages
 
 These compare each trial's onset (its sync event) with the start message that
@@ -535,8 +627,6 @@ warning, check the sync track before trusting the rest of the unit.
 
 These checks are planned; see `TODO.md`.
 
-- The pprox's unit metadata (bird, site, protocol, experimenter, …) against
-  the registry.
 - Aux pulses (e.g. optogenetics) against their message stream.
 - Validation against the published stimtrial schema.
 - Re-detecting the onsets from the sync track (`--resync`).
