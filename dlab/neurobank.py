@@ -213,10 +213,10 @@ def main(argv=None):
     """Locate neurobank resources from the command line (python -m dlab.neurobank)"""
     import argparse
 
-    from dlab.util import setup_log
+    from dlab.util import add_log_arguments, setup_log
 
     p = argparse.ArgumentParser(description="locate neurobank resources ")
-    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    add_log_arguments(p)
     add_registry_argument(p)
     p.add_argument(
         "-b",
@@ -231,7 +231,7 @@ def main(argv=None):
     )
     p.add_argument("id", help="identifier(s) of the resource(s) to locate", nargs="*")
     args = p.parse_args(argv)
-    setup_log(args.debug)
+    setup_log(args.debug, args.debug_http)
 
     if args.clear_cache:
         # the cache is organized by the host of each resource's archive, which

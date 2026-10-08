@@ -7,15 +7,35 @@ from functools import singledispatch
 
 import numpy as np
 
+# the HTTP libraries used to talk to the registry, which log every request
+HTTP_LOGGERS = ("httpx", "httpcore")
 
-def setup_log(debug=False):
-    """Configure logging for a script: info messages (or debug, if debug is
-    True) to stderr, without httpx's info messages."""
-    logging.basicConfig(
-        format="%(message)s", level=logging.DEBUG if debug else logging.INFO
+
+def add_log_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the --debug and --debug-http options to a script's parser (see
+    setup_log)"""
+    parser.add_argument(
+        "--debug", help="show verbose log messages", action="store_true"
     )
-    # suppress info messages from httpx
-    logging.getLogger("httpx").setLevel(logging.DEBUG if debug else logging.WARNING)
+    parser.add_argument(
+        "--debug-http",
+        help="also show the HTTP requests to the registry and archives",
+        action="store_true",
+    )
+
+
+def setup_log(debug=False, debug_http=False):
+    """Configure logging for a script: info messages (or debug, if debug is
+    True) to stderr. The HTTP libraries only log warnings, unless debug_http is
+    True (which implies debug)."""
+    logging.basicConfig(
+        format="%(message)s",
+        level=logging.DEBUG if debug or debug_http else logging.INFO,
+    )
+    for name in HTTP_LOGGERS:
+        logging.getLogger(name).setLevel(
+            logging.DEBUG if debug_http else logging.WARNING
+        )
 
 
 class ParseKeyVal(argparse.Action):

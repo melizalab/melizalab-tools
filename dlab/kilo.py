@@ -921,7 +921,7 @@ def group_spikes_script(argv=None):
     import os
 
     from dlab import __version__
-    from dlab.util import ParseKeyVal, json_serializable, setup_log
+    from dlab.util import ParseKeyVal, add_log_arguments, json_serializable, setup_log
 
     version = SCRIPT_VERSION
 
@@ -935,7 +935,7 @@ def group_spikes_script(argv=None):
         action="version",
         version=f"%(prog)s {version} (melizalab-tools {__version__})",
     )
-    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    add_log_arguments(p)
     nbank.add_registry_argument(p)
     p.add_argument(
         "--dry-run",
@@ -1040,7 +1040,7 @@ def group_spikes_script(argv=None):
         " 'cluster_info.tsv', and 'temp_wh.dat'",
     )
     args = p.parse_args(argv)
-    setup_log(args.debug)
+    setup_log(args.debug, args.debug_http)
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     log.info("- %s version %s", p.prog, version)
 

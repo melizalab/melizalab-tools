@@ -65,11 +65,25 @@ def test_json_serializable():
     assert util.json_serializable(Path("/a/b")) == "/a/b"
 
 
-def test_setup_log_quiets_httpx():
-    """httpx info messages are suppressed unless debugging."""
+def test_setup_log_quiets_http_libraries():
+    """The HTTP libraries (httpx, httpcore) only log warnings, even with
+    debug, unless debug_http is set."""
     import logging
 
-    util.setup_log(False)
-    assert logging.getLogger("httpx").level == logging.WARNING
-    util.setup_log(True)
-    assert logging.getLogger("httpx").level == logging.DEBUG
+    for debug in (False, True):
+        util.setup_log(debug)
+        for name in ("httpx", "httpcore"):
+            assert logging.getLogger(name).level == logging.WARNING, (name, debug)
+    util.setup_log(False, debug_http=True)
+    for name in ("httpx", "httpcore"):
+        assert logging.getLogger(name).level == logging.DEBUG
+
+
+def test_add_log_arguments():
+    import argparse
+
+    p = argparse.ArgumentParser()
+    util.add_log_arguments(p)
+    args = p.parse_args(["--debug-http"])
+    assert args.debug_http and not args.debug
+    assert p.parse_args([]).debug is False

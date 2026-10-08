@@ -44,7 +44,7 @@ import pandas as pd
 from dlab import __version__, kilo, pprox
 from dlab import neurobank as nbank
 from dlab.kilo_audit import PPROX_DTYPE, _re_unit, find_local, nbank_core, trials_key
-from dlab.util import json_serializable, setup_log
+from dlab.util import add_log_arguments, json_serializable, setup_log
 
 log = logging.getLogger("dlab")
 
@@ -329,7 +329,7 @@ def script(argv=None):
     p.add_argument(
         "-v", "--version", action="version", version=f"%(prog)s {__version__}"
     )
-    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    add_log_arguments(p)
     nbank.add_registry_argument(p)
     p.add_argument(
         "--units",
@@ -370,7 +370,7 @@ def script(argv=None):
     )
     p.add_argument("recording", help="the recording: neurobank id or ARF file")
     args = p.parse_args(argv)
-    setup_log(args.debug)
+    setup_log(args.debug, args.debug_http)
 
     recording = Path(args.recording).stem
     try:

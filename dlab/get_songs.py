@@ -72,7 +72,7 @@ def script(argv=None):
     import yaml
 
     from dlab import __version__
-    from dlab.util import setup_log
+    from dlab.util import add_log_arguments, setup_log
 
     script_version = SCRIPT_VERSION
 
@@ -81,7 +81,7 @@ def script(argv=None):
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    add_log_arguments(p)
     p.add_argument(
         "-v",
         "--version",
@@ -125,7 +125,7 @@ def script(argv=None):
     )
     p.add_argument("songs", type=Path, help="YAML file with songs to extract")
     args = p.parse_args(argv)
-    setup_log(args.debug)
+    setup_log(args.debug, args.debug_http)
 
     with open(args.songs) as fp:
         songs = yaml.safe_load(fp)

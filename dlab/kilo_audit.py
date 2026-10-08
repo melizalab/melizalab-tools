@@ -60,7 +60,7 @@ from nbank import core as nbank_core
 
 from dlab import __version__, kilo, pprox
 from dlab import neurobank as nbank
-from dlab.util import setup_log
+from dlab.util import add_log_arguments, setup_log
 
 log = logging.getLogger("dlab")
 
@@ -1118,7 +1118,7 @@ def script(argv=None):
     p.add_argument(
         "-v", "--version", action="version", version=f"%(prog)s {__version__}"
     )
-    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    add_log_arguments(p)
     nbank.add_registry_argument(p)
     p.add_argument(
         "--oeaudio-log",
@@ -1144,7 +1144,7 @@ def script(argv=None):
     p.add_argument("recording", help="the ARF file: a path or neurobank id")
     args = p.parse_args(argv)
 
-    setup_log(args.debug)
+    setup_log(args.debug, args.debug_http)
     try:
         arf_path = locate(args.recording, args.registry_url)
         units = load_units(args.units, args.registry_url)
@@ -1304,7 +1304,7 @@ def find_units_script(argv=None):
     p.add_argument(
         "-v", "--version", action="version", version=f"%(prog)s {__version__}"
     )
-    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    add_log_arguments(p)
     nbank.add_registry_argument(p)
     which = p.add_mutually_exclusive_group()
     which.add_argument(
@@ -1357,7 +1357,7 @@ def find_units_script(argv=None):
     if args.name is None and args.recordings is None and not args.all:
         p.error("give recordings (a file, or '-'), --name, or --all")
 
-    setup_log(args.debug)
+    setup_log(args.debug, args.debug_http)
     if args.recordings is not None:
         recordings = read_recordings(args.recordings)
         log.info("- finding units for %d recordings", len(recordings))
@@ -1622,7 +1622,7 @@ def collect_script(argv=None):
     p.add_argument(
         "-v", "--version", action="version", version=f"%(prog)s {__version__}"
     )
-    p.add_argument("--debug", help="show verbose log messages", action="store_true")
+    add_log_arguments(p)
     p.add_argument(
         "--level",
         choices=SEVERITIES[1:],
@@ -1645,7 +1645,7 @@ def collect_script(argv=None):
         "reports", type=Path, nargs="+", help="report files or directories of them"
     )
     args = p.parse_args(argv)
-    setup_log(args.debug)
+    setup_log(args.debug, args.debug_http)
 
     reports, errors = load_reports(args.reports)
     for error in errors:
