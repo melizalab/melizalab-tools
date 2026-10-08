@@ -23,7 +23,15 @@ def load(path: Path) -> dict:
         return json.load(fp)
 
 
-def compare_pprox(new: dict, ref: dict, *, ignore=IGNORED, atol=1e-6, boundary_tol=0.0):
+def compare_pprox(
+    new: dict,
+    ref: dict,
+    *,
+    ignore=IGNORED,
+    atol=1e-6,
+    boundary_tol=0.0,
+    skip_trials=frozenset(),
+):
     """Compares two pprox objects from group-kilo-spikes.
 
     Returns (differences, shifts). differences is a list of descriptions of
@@ -36,6 +44,9 @@ def compare_pprox(new: dict, ref: dict, *, ignore=IGNORED, atol=1e-6, boundary_t
     adjacent trial. With boundary_tol > 0, a spike that is in a trial in one
     output but not the other is not counted as a difference if it is within
     boundary_tol (s) of that trial's start or end in either output.
+
+    Trials in skip_trials (indexes) are not compared, and have no row in
+    shifts.
     """
     diffs = []
     for key in sorted((new.keys() | ref.keys()) - ignore - {"pprox"}):
@@ -47,6 +58,8 @@ def compare_pprox(new: dict, ref: dict, *, ignore=IGNORED, atol=1e-6, boundary_t
         return diffs, np.empty((0, 3))
     shifts = []
     for i, (n, r) in enumerate(zip(new_trials, ref_trials, strict=True)):
+        if i in skip_trials:
+            continue
         bounds = np.add(n["interval"], n["offset"]) - np.add(r["interval"], r["offset"])
         shifts.append([n["offset"] - r["offset"], *bounds])
         if n["index"] != r["index"]:

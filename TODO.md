@@ -114,8 +114,9 @@ when a fix makes one pass.
     the pulses. Same 66 clusters; waveforms identical; spike assignment
     identical except in the trials around 3 stimuli (0, 3, 12), whose pulses
     the old detector reported at their end (1.2-1.5 s late). All other old
-    onsets were 38-300 samples late (typically ~50). A one-off check: the old
-    outputs are not kept in examples/.
+    onsets were 39-294 samples late (typically ~59). The old outputs are kept
+    in examples/E36_5_1/output-a20b62a, which test_group_spikes_examples.py
+    uses as E36's reference, skipping trials 0, 2, 3, 11 and 12.
 - [x] The artifact check calls `input()` ("Press any key to continue") when
   more than half a cluster's spikes look like artifacts. Kept deliberately.
 - [x] When the recording isn't a local file, it was looked up with

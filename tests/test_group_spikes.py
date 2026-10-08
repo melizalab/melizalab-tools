@@ -381,6 +381,9 @@ def test_compare_spike_at_moved_boundary(make_recording, tmp_path):
     assert diffs == ["trial 0 spikes: 1 -> 2", "trial 1 spikes: 2 -> 1"]
     diffs, _ = compare_pprox(new, ref, boundary_tol=3 / SAMPLING_RATE)
     assert diffs == []
+    # trials with known errors in the reference can be left out instead
+    diffs, shifts = compare_pprox(new, ref, skip_trials={0, 1})
+    assert diffs == [] and shifts.shape == (1, 3)
 
 
 def test_aux_option(make_recording):
