@@ -22,9 +22,7 @@ Running the audit on a collection of recordings proceeds in three steps, each wi
   release 2026.10.07).
 - Read access to the registry. Give it with `-r URL`, or set the
   `NBANK_REGISTRY` environment variable.
-- Local access to the neurobank archive with the resources. The scripts only
-  read resources from archives on the machine they run on (and the local
-  cache). They never download, so run them on the archive host.
+- Local access to the archive with the resources.
 - GNU parallel, for batch runs.
 
 ## 1. Find the units
@@ -69,14 +67,13 @@ Other options:
 - `--orphans FILE` writes a second control file, in the same format, listing
   waveform files that have no pprox. These are the candidates for regenerating
   pprox files (see [Regenerating missing pprox files](#regenerating-missing-pprox-files)).
-  Recordings that aren't on this host are included, because regenerating a
-  pprox from another unit's trials doesn't need the ARF file.
-- Recordings whose ARF file isn't in a neurobank archive on this host are left
-  out of the control file, because their audits couldn't read it. These are
-  recordings in cold storage (e.g. on tape), or all of them if the archive
-  isn't mounted here, in which case the script says so. The script logs how
-  many were skipped. `--unavailable FILE` writes them to a control file in the
-  same format, to audit later from another host, or if they are brought back.
+  Recordings in cold storage are included, because regenerating a pprox from
+  another unit's trials doesn't need the ARF file.
+- Recordings whose ARF file is only in cold storage (e.g. on tape, with no
+  `neurobank` or `http(s)` location in the registry) are left out of the
+  control file, because their audits couldn't read the ARF file. The script
+  logs how many were skipped. `--cold-storage FILE` writes them to a control
+  file in the same format, to audit later if they are brought back.
 
 ## 2. Run the audits
 
@@ -503,8 +500,7 @@ many.
 **Severity:** info
 
 **Problem:** No waveform file was found. Either it was never deposited (very
-old recordings), it isn't named `<unit>_spikes`, or (for units given as
-neurobank ids) it isn't in an archive on this host. The events can't be
+old recordings), or it isn't named `<unit>_spikes`. The events can't be
 verified, and the pprox can't be regenerated.
 
 **Fixable:** nothing to fix.
