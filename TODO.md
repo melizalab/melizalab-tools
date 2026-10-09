@@ -143,6 +143,45 @@ when a fix makes one pass.
 - [x] Record the options that determine the trials (`sync_track`, `prepad`,
   and `sync_thresh`/`oeaudio_log` when given) in the pprox and waveform files,
   so trials can be reconstructed without the command line.
+- [ ] Sorting part of a recording: merge in the code the student used to sort
+  a time window (deliberate exclusions, confirmed 2026-10-09), and record the
+  window actually sorted as a top-level annotation in the pprox and waveform
+  files, with enough to replicate the exclusion from the ARF file alone: the
+  entry (or entries), the start and end in samples from the entry's first
+  sample (half-open, [start, end)) as well as in s, the open-ephys sample
+  number of the entry's first sample (so message times can be placed), how
+  the window was applied (data cut before sorting, or kilosort's
+  `tmin`/`tmax`) and the program and version that applied it. Check against
+  the student's code which of these it already knows. Deposited examples: P388_3_1 (700 s to ~4500 s) and P390_3_1 (from
+  500 s), whose trials and spikes are timed from the window's start; C110_1_1,
+  C122_1_1, P388_4_1, E82_1_1, E82_2_1, which end early and keep the
+  recording's origin. Decide whether output is timed from the recording's
+  start (consistent with the ARF; needs the spike times shifted) or the
+  window's start (with the annotation, consumers can convert). The audit and
+  regenerate-pprox `--from-arf` should then use the annotation: messages
+  outside the window are expected to have no trial, and a shifted origin is
+  not a failure (see the clock-shift item under the audit).
+- [ ] Store the other parameters that determine group-kilo-spikes output in
+  the pprox (and waveform files where they apply), so a unit can be
+  reproduced and audited without the command line. Not recorded now:
+  - `artifact_reject_thresh`, which decides which spikes are dropped as
+    artifacts, and the counts of spikes dropped (as artifacts, too close to
+    the ends of temp_wh.dat for a waveform, as duplicate times, and before
+    the first trial), so a unit's spike total can be reconciled with
+    `kilosort_n_spikes`;
+  - `waveform_pre_peak`/`waveform_post_peak` in the pprox (implicit in the
+    waveform file's shape and `peak_index`, but they also decide which
+    spikes are too close to the ends);
+  - the cluster id and its phy group (`good`, or `mua` with `--mua`), now
+    only implied by the file name and the option;
+  - the sort: the sort directory's name, `params.py` (dtype, channel count,
+    sampling rate) and the number of samples in temp_wh.dat. The sample
+    count also shows whether a window was sorted (see the item above);
+  - `--local-stim-dir`, when stimulus durations came from local files
+    instead of neurobank.
+  The trial options already recorded (`sync_track`, `prepad`, `sync_thresh`,
+  `oeaudio_log`, `aux_tracks`) stay as they are; the schema allows extra
+  top-level fields.
 - [ ] Rescue stimulus onsets in recordings without a sync track by
   cross-correlating the stimulus files with the ADC channel that records an
   analog copy of the audio sent to the speaker. Example: examples/C401_1_1b
@@ -226,6 +265,69 @@ recordings, which are out of scope).
 - [ ] audit-kilo-spikes, still to do:
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
     or found by trying channels for older files) and compare per trial.
+- Audit of the `induction` archive (2026-10-08; 170 recordings with their ARF
+  files on the VM, recorded 2026-01-06 to 2026-09-21; see
+  `audit-findings-2026-10.md`). Checked against the analog stimulus copy
+  (`stim`, or ADC2 on the 1.0.2 rig): every deposited label is right and every
+  onset within ~1 ms. The failures and warnings came from the audit, apart
+  from E36_2_1 trial 0. Audit bugs found, now fixed (tests in
+  tests/test_kilo_audit.py; the 8 recordings below re-audited as expected):
+  - [x] `sync-lag`'s fixed 0.1 s tolerance flagged the tails of message
+    jitter. In 47 recordings (open-ephys 0.5.3.1, 2026-01-06 to -12 and
+    2026-04-09 to 05-11) the lag is spread evenly over ~0.215 s (median
+    0.57-0.67 s, against 0.369 s and a 28 ms spread otherwise), probably from
+    a larger audio buffer on the presentation machine; the onsets come from
+    the clicks and are right. Every one of the 47 `sync-lag` warnings in
+    problems.txt was this. Now `kilo.sync_lag_outliers` (shared with
+    group-kilo-spikes) flags lags more than 0.1 s outside the 5th-95th
+    percentile range (`kilo.sync_lag_range`), or of the median if that range
+    is wider than 0.3 s or there are fewer than 20 lags. A range wider than
+    0.1 s is reported as `sync-lag` at info (long, variable delays on one
+    machine are worth knowing about). C165_3_1, C361_1_1, E92_4_1 and
+    P399_4_1 now have only that. `test_wide_message_jitter_is_info`,
+    `test_late_onset_with_wide_jitter`.
+  - [x] A constant clock shift was reported as mislabeling. P388_3_1 and
+    P390_3_1 were sorted from 700 s and 500 s into the recording, and
+    group-kilo-spikes 2025.09.03 timed their trials (and spikes) from the
+    start of the sort: trial i is message i+403 (i+282), with onsets exactly
+    700 s (500 s) early; labels right. Now, if the trials don't fit the
+    messages as they are, `clock_shift` looks for an offset k at which the
+    labels match (95% of trials) and the lags are consistent but far from
+    the usual 0-2 s; it is reported as `clock-shift` (warn), and the other
+    checks use the messages it pairs the trials with. Both recordings now
+    have `clock-shift` and `trials-dropped` (the messages outside the sort).
+    The sorted-window annotation (see group-kilo-spikes) would make this
+    explicit for new output. `test_clock_shift`,
+    `test_clock_shift_with_trials_before_messages`.
+  - [x] `messages-before` returned before the other message checks, so
+    P390_3_1's summary listed one trial though 2897 of 2908 trials don't
+    match their messages. Now the other checks run on the remaining trials.
+    `test_messages_before_with_other_checks`.
+  - [x] `messages-before` failed a unit for a single trial (E36_2_1 trial 0:
+    the pulse track was high when recording started, and
+    group-klopto-spikes 2026.07.15 put the onset at sample 0), with an
+    explanation that didn't fit. Now warn if at most half the trials are
+    listed, fail if more, as for `sync-lag`; the docs give both causes.
+    `test_trial_zero_at_recording_start`,
+    `test_most_trials_before_messages_fail`.
+  - [x] jpresent sent each `start` message twice in E1 (2026-08-12), so
+    `trials-dropped` warned that half the messages have no trial. The pairs
+    name the same stimulus, usually at the same sample but up to 948 samples
+    (32 ms) apart, and one pair is 30 samples out of order, which
+    `match_sync_events` would have rejected if E1 were rerun. Now
+    `messages_to_events` drops a start message for the still-open event of
+    the same name within 1500 samples (50 ms at 30 kHz), keeping the earlier
+    time, so group-kilo-spikes is fixed too. E1_1_1 now audits clean.
+    `test_duplicate_start_messages`.
+  - [x] find-kilo-units stopped with a PermissionError traceback when the
+    archive's directories weren't readable (nbank's `resolve_extension`, via
+    `local_copy`). Now `local_copy` skips the copy and `unavailable_reason`
+    says "in an archive here that this user can't read (check its
+    permissions)". `test_local_copy_unreadable_archive`.
+  - [ ] Not checked: 311 kilo recordings in cold storage (2024-01 to 2025-12;
+    group-kilo-spikes 2023.08.25, 2024.01.29, 2025.09.03). Whether the wide
+    jitter or start-trimmed sorts occur there needs their ARF files on this
+    host.
 - [x] Selection script, `find-kilo-units`: searches the registry for
   `spikes-pprox` and `spikes-hdf5` resources (optionally by `--name`
   fragment, or for the recordings listed in a file or on stdin, e.g. piped

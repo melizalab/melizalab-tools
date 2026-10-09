@@ -275,10 +275,11 @@ numbers are indexes into the pprox's `pprox` array.
 | [`waveforms-events`](#waveforms-events)                         | fail       | sometimes | regenerate the pprox from its waveform file             |
 | [`waveforms-before-first-trial`](#waveforms-before-first-trial) | info       | —         | none needed                                             |
 | [`messages`](#messages)                                         | info       | yes       | audit with `--oeaudio-log`                              |
-| [`messages-before`](#messages-before)                           | fail       | sometimes | re-sync                                                 |
+| [`clock-shift`](#clock-shift)                                   | warn       | yes       | note the shift; correct times if the ARF is needed      |
+| [`messages-before`](#messages-before)                           | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
 | [`stimulus-labels`](#stimulus-labels)                           | fail       | sometimes | re-sync                                                 |
 | [`messages-shared`](#messages-shared)                           | fail       | sometimes | re-sync                                                 |
-| [`sync-lag`](#sync-lag)                                         | warn, fail | yes       | exclude trials (warn), re-sync (fail)                   |
+| [`sync-lag`](#sync-lag)                                         | info–fail  | yes       | exclude trials (warn), re-sync (fail); none (info)      |
 | [`trials-dropped`](#trials-dropped)                             | info, warn | —         | none needed; check the sync track if many               |
 | [`metadata-registry`](#metadata-registry)                       | warn, info | yes       | correct the registry metadata                           |
 | [`metadata-unit`](#metadata-unit)                               | warn       | yes       | correct the registry metadata                           |
@@ -574,7 +575,8 @@ has a field that disagrees with the pprox. Only fields in both are compared.
 These compare each trial's onset (its sync event) with the start message that
 the presentation script sent for its stimulus. Sync events follow their
 message by a lag from audio buffering. The lag is typically 0.25–1 s,
-depending on the setup, and nearly constant within a recording.
+depending on the setup. Within a recording it varies by about 30 ms, or is
+spread evenly over about 0.2 s with a larger audio buffer.
 
 #### `messages`
 
@@ -588,16 +590,42 @@ supported yet.
 **Fixable:** yes, for missing messages. Audit again with `--oeaudio-log` and
 the log from the same session.
 
+#### `clock-shift`
+
+**Severity:** warn
+
+**Problem:** The trials don't fit the messages as they are, but do with a
+constant shift: trial *i* follows message *i*+*k* throughout, with the right
+label and consistent lags, but the onsets are far from their messages (here,
+more than 2 s after or any time before). The trials, and probably the spikes,
+are timed from another origin than the ARF file's, as when a recording was
+sorted from some time after its start (P388_3_1 from 700 s and P390_3_1 from
+500 s, processed by group-kilo-spikes 2025.09.03). The message gives *k* and
+the median time from message to onset, which is the shift plus the usual
+lag. The other message checks use the messages the shift pairs the trials
+with, so `trials-dropped` lists the messages outside the sorted part.
+
+**Fixable:** yes. Analyses locked to the stimulus are unaffected, since the
+spikes and onsets share the origin. The absolute times (`offset`,
+`recording.start` and `end`) are off relative to the ARF file, which matters
+only for analyses that refer back to it (LFP, other channels, other
+recordings); correct them by the shift there.
+
 #### `messages-before`
 
-**Severity:** fail (trials listed)
+**Severity:** warn if at most half of the trials are listed, fail if more
 
-**Problem:** The listed trials start before any stimulus message. The onsets
-are wrong (no sync signal, or the wrong channel), or the unit is from another
-recording. The other message checks are skipped.
+**Problem:** The listed trials start before any stimulus message, so their
+onsets are wrong and their labels can't be checked. The other message checks
+still run on the remaining trials.
+- A pulse track already high when the recording started was reported as an
+  onset at sample 0 by group-klopto-spikes 2026.07.15 (E36_2_1, trial 0).
+- If most trials are listed, there is no sync signal or the wrong channel was
+  used, or the unit is from another recording (a constant shift is reported
+  as `clock-shift` instead).
 
-**Fixable:** sometimes. Check `recording-name` first. If the recording is
-right, re-sync.
+**Fixable:** sometimes. For a warning, exclude the listed trials. For a
+failure, check `recording-name` first; if the recording is right, re-sync.
 
 #### `stimulus-labels`
 
@@ -629,11 +657,22 @@ event or a missing message. This usually comes with `stimulus-labels`.
 
 #### `sync-lag`
 
-**Severity:** warn if at most half of the trials are listed, fail if more
+**Severity:** warn if at most half of the trials are listed, fail if more;
+info for a wide spread of lags (no trials listed)
 
 **Problem:** The listed trials' onsets lag their start message by more than
-0.1 s more or less than the median, so spike times in those trials are
-misaligned with the stimulus.
+0.1 s outside the range of the other lags, so spike times in those trials are
+misaligned with the stimulus. The range is the 5th to 95th percentile of the
+lags (given in the message), which allows for recordings whose lags are spread
+evenly over ~0.2 s (47 recordings from 2026, e.g. C165_3_1, from a larger
+audio buffer; their onsets are right). If that range is wider than 0.3 s, or
+there are fewer than 20 trials, the median is used instead.
+
+At info, the lags are spread over more than 0.1 s (5th to 95th percentile),
+rather than the usual ~30 ms: the stimulus messages were delayed by varying
+amounts, which is worth knowing about on a single machine (e.g. an audio
+buffer set larger than needed). The onsets come from the sync track, so this
+doesn't affect the trials; `stimulus-labels` still checks the labels.
 - Versions before 2026.10.07 reported some pulse onsets at the end of the
   pulse, 1.2–1.5 s late; the message notes this case. For example, trials 0,
   3 and 12 of E36_5_1 were affected in the old run.
@@ -647,8 +686,12 @@ onsets are unreliable: re-sync if the recording has a usable sync track.
 **Severity:** info up to 1% of messages (at least one), warn above
 
 **Problem:** Some stimulus messages have no trial. A few are expected:
-`group-kilo-spikes` drops a trial whose sync event was missed. Many missing
-trials suggest a problem with the sync track.
+`group-kilo-spikes` drops a trial whose sync event was missed. A block at the
+start or end is a sort of part of the recording (deliberate in C110_1_1,
+C122_1_1, P388_4_1, E82_1_1, E82_2_1, P388_3_1 and P390_3_1). Otherwise, many
+missing trials suggest a problem with the sync track. Repeated start messages
+for the same stimulus within 50 ms (jpresent sent each one twice in E1) are
+counted once.
 
 **Fixable:** nothing to fix, since the missing trials are simply absent. For a
 warning, check the sync track before trusting the rest of the unit.

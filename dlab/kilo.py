@@ -82,7 +82,9 @@ def read_kilo_params(fname: Path) -> dict:
 _re_message = re.compile(r"(?:([A-Za-z0-9]+)_)?(start|stop) (.*)")
 
 
-def messages_to_events(dset: h5.Dataset) -> dict[str, list[Stimulus]]:
+def messages_to_events(
+    dset: h5.Dataset, duplicate_window: int = 1500
+) -> dict[str, list[Stimulus]]:
     """Parse the start and stop messages in the stimulus message dataset (see
     find_message_dset) into events, by stream.
 
@@ -97,6 +99,11 @@ def messages_to_events(dset: h5.Dataset) -> dict[str, list[Stimulus]]:
     their stem (directory and extension removed). Times are open-ephys sample
     numbers, which count from the start of acquisition.
 
+    A start message for the event that is still open on its stream, within
+    duplicate_window samples (50 ms at 30 kHz) of its start, is a duplicate and
+    is dropped, keeping the earlier time: jpresent sent every start message
+    twice in some recordings (E1), up to 32 ms apart and not always in order.
+
     """
     events: dict[str, list[Stimulus]] = {}
     for row in dset:
@@ -107,6 +114,15 @@ def messages_to_events(dset: h5.Dataset) -> dict[str, list[Stimulus]]:
         stream = events.setdefault(prefix or "stimulus", [])
         name, time = Path(name).stem, int(row["start"])
         if verb == "start":
+            last = stream[-1] if stream else None
+            if (
+                last is not None
+                and last.name == name
+                and last.end is None
+                and abs(time - last.start) <= duplicate_window
+            ):
+                stream[-1] = last._replace(start=min(last.start, time))
+                continue
             stream.append(Stimulus(name, time))
             continue
         # a stop closes the most recent open event with the same name
@@ -476,14 +492,16 @@ def arf_to_trials(
             log.info(
                 "    - sync events follow start messages by %.3f s", np.median(lags)
             )
+            lo, hi = sync_lag_range(lags)
             for i in sync_lag_outliers(starts, stim_onsets, sampling_rate):
                 log.warning(
                     "  - WARNING: sync event for stimulus %d (%s) is %.3f s after its "
-                    "start message (median %.3f s). Check the sync track.",
+                    "start message (others %.3f-%.3f s). Check the sync track.",
                     i,
                     entry_stimuli[i].name,
                     lags[i],
-                    np.median(lags),
+                    lo,
+                    hi,
                 )
 
         padding_samples = int(prepad * sampling_rate)
@@ -801,25 +819,49 @@ def match_log_stimuli(
     return matched, True
 
 
+def sync_lag_range(
+    lags: np.ndarray, max_spread: float = 0.3, min_count: int = 20
+) -> tuple[float, float]:
+    """The range of sync lags (s) taken as normal for a recording.
+
+    Each sync event follows its message by a lag that depends on the
+    presentation setup: 0.25-1 s, varying by about 30 ms within most
+    recordings, but spread evenly over about 0.2 s in some (a larger audio
+    buffer). The normal range is the 5th to 95th percentile of the lags, which
+    covers either. If that is wider than max_spread (s), the lags don't have a
+    consistent range (e.g. onsets drifting away from the messages, or many
+    wrong onsets), and the median is used, as the right lag if most trials are
+    right. The median is also used for fewer than min_count lags, whose
+    percentiles would include the outliers.
+
+    """
+    if len(lags) < min_count:
+        lo = hi = np.median(lags)
+        return float(lo), float(hi)
+    lo, hi = np.percentile(lags, [5, 95])
+    if hi - lo > max_spread:
+        lo = hi = np.median(lags)
+    return float(lo), float(hi)
+
+
 def sync_lag_outliers(
     starts: np.ndarray, onsets: np.ndarray, sampling_rate: float, tolerance: float = 0.1
 ) -> np.ndarray:
     """Returns the indices of trials whose sync lag is out of line with the rest.
 
     starts and onsets are the start-message times of matched stimuli and their
-    sync onsets, in samples. Each sync event follows its message by a lag that
-    depends on the presentation setup (0.25-1 s in the example recordings) but
-    varies little within a recording (by less than 65 ms). A lag that differs
-    from the median by more than tolerance (in s) suggests a misdetected or
+    sync onsets, in samples. A lag more than tolerance (in s) outside the
+    recording's normal range (see sync_lag_range) suggests a misdetected or
     mismatched sync event, or stimulus times that don't belong to the recording.
-    The median is taken as the right lag, so this relies on most trials being
-    right; if half or more are wrong, it flags the wrong trials.
+    This relies on most trials being right; if half or more are wrong, it flags
+    the wrong trials.
 
     """
     lags = (np.asarray(onsets) - np.asarray(starts)) / sampling_rate
     if lags.size == 0:
         return np.array([], dtype=int)
-    return np.flatnonzero(np.abs(lags - np.median(lags)) > tolerance)
+    lo, hi = sync_lag_range(lags)
+    return np.flatnonzero((lags < lo - tolerance) | (lags > hi + tolerance))
 
 
 def assign_spikes(times: np.ndarray, trial_starts: np.ndarray) -> np.ndarray:

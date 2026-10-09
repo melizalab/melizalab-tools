@@ -4,10 +4,12 @@
 Most tests audit the output of group-kilo-spikes on the E36 excerpt (see
 test_group_spikes_excerpt.py), which should be clean, after corrupting a copy
 of it in one specific way. The slow tests at the end audit the example
-recordings, whose problems are known (see TODO.md).
+recordings, whose problems are known (see TODO.md). Tests marked PINNED
+record current behavior that looks like a bug; see TODO.md.
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -385,6 +387,190 @@ def test_c401_fails():
         assert {"stimulus-labels", "sync-lag", "waveforms-recording"} <= found
 
 
+# --- message checks on synthetic trial tables (cases from the archive audit)
+
+RATE = 30000.0
+
+
+def message_unit(trials):
+    """A unit from a 2025.09.03 run whose trials are (stimulus, onset in s);
+    check_messages only uses the onsets and names"""
+    pp = {
+        "processed_by": ["group-kilo-spikes 2025.09.03"],
+        "pprox": [
+            {"index": i, "offset": onset, "stimulus": {"name": name}}
+            for i, (name, onset) in enumerate(trials)
+        ],
+    }
+    return kilo_audit.Unit("rec_c1", Path("rec_c1.pprox"), pp)
+
+
+def message_stimuli(names, starts):
+    return [
+        kilo.Stimulus(n, round(s * RATE)) for n, s in zip(names, starts, strict=True)
+    ]
+
+
+def presentation(n, seed=1, lag=(0.355, 0.383)):
+    """n stimuli in random order with the inter-onset intervals of oeaudio-present
+    (multiples of 5120 samples), and their onsets after a lag drawn from a
+    uniform range: (names, message times, onsets) in s"""
+    rng = np.random.default_rng(seed)
+    starts = 2.0 + np.cumsum(rng.integers(6, 13, n) * 5120 / RATE)
+    names = [f"s{i}" for i in rng.integers(0, 30, n)]
+    return names, starts, starts + rng.uniform(*lag, n)
+
+
+def message_checks(trials, stimuli):
+    found = kilo_audit.check_messages(message_unit(trials), stimuli, RATE)
+    return [(f["check"], f["severity"], f.get("trials")) for f in found]
+
+
+def test_tight_lags_are_clean():
+    """Onsets that follow their messages by 0.355-0.383 s, as in most
+    recordings, have no findings."""
+    names, starts, onsets = presentation(200)
+    trials = list(zip(names, onsets, strict=True))
+    assert message_checks(trials, message_stimuli(names, starts)) == []
+
+
+def test_wide_message_jitter_is_info():
+    """In 47 recordings from 2026 (e.g. C165_3_1, E92_4_1, P399_4_1), the lag
+    is spread evenly over ~0.215 s, but the onsets are right (each repeat of a
+    stimulus lines up with the others in the analog copy to 0.1 ms). Lags
+    within the spread are not outliers, though some are more than 0.1 s from
+    the median; the spread itself is noted, since delays that long and
+    variable on one machine are worth knowing about."""
+    names, starts, onsets = presentation(200, lag=(0.565, 0.780))
+    trials = list(zip(names, onsets, strict=True))
+    lags = onsets - starts
+    assert np.any(np.abs(lags - np.median(lags)) > 0.1)
+    found = kilo_audit.check_messages(
+        message_unit(trials), message_stimuli(names, starts), RATE
+    )
+    assert [(f["check"], f["severity"], f.get("trials")) for f in found] == [
+        ("sync-lag", "info", None)
+    ]
+    assert found[0]["message"].startswith("onset lags are spread over 0.5")
+
+
+def test_late_onset_with_wide_jitter():
+    """A late onset is still flagged when the lags are spread widely, against
+    the range of the others."""
+    names, starts, onsets = presentation(200, lag=(0.565, 0.780))
+    onsets[7] += 0.3  # late, but before the next message
+    trials = list(zip(names, onsets, strict=True))
+    found = kilo_audit.check_messages(
+        message_unit(trials), message_stimuli(names, starts), RATE
+    )
+    assert [(f["check"], f["severity"], f.get("trials")) for f in found] == [
+        ("sync-lag", "warn", [7]),
+        ("sync-lag", "info", None),
+    ]
+    assert "outside the range of the others (0.5" in found[0]["message"]
+
+
+def shifted_presentation(shift=100.0, skip=80):
+    """The trials of a sort that started `shift` s into the recording, timed
+    from its start (as in P388_3_1 and P390_3_1): the trials of the messages
+    from `skip` on, `shift` s early. Labels and onsets are otherwise right."""
+    names, starts, onsets = presentation(300)
+    trials = [(names[i], onsets[i] - shift) for i in range(skip, len(names))]
+    return trials, names, starts
+
+
+def test_clock_shift():
+    """P388_3_1 was sorted from 700 s into the recording, and its trials (and
+    spikes) are timed from there, so its onsets are 700 s before their
+    messages, with the right labels. The shift is reported, and the trials
+    are checked against the messages it pairs them with; only the messages
+    before the sort have no trial."""
+    trials, names, starts = shifted_presentation()
+    assert trials[0][1] > starts[0]  # no trial before the first message
+    found = kilo_audit.check_messages(
+        message_unit(trials), message_stimuli(names, starts), RATE
+    )
+    assert [(f["check"], f["severity"]) for f in found] == [
+        ("clock-shift", "warn"),
+        ("trials-dropped", "warn"),
+    ]
+    assert found[0]["message"].startswith(
+        "trial i follows message i+80, with onsets 99.6"
+    )
+    assert found[1]["message"] == "80 of 300 stimulus messages have no trial"
+
+
+def test_clock_shift_with_trials_before_messages():
+    """In P390_3_1 (shifted by 500 s), the first trials come before any
+    message; the shift is found all the same, so they aren't reported as
+    such."""
+    trials, names, starts = shifted_presentation(shift=100.0, skip=60)
+    assert trials[0][1] < starts[0]
+    found = message_checks(trials, message_stimuli(names, starts))
+    assert [c for c, _, _ in found] == ["clock-shift", "trials-dropped"]
+
+
+def test_messages_before_with_other_checks():
+    """Trials before any message don't stop the other checks: here the
+    trials after them are mislabeled as well, and there is no consistent
+    shift."""
+    names, starts, onsets = presentation(100)
+    trials = list(zip(names, onsets, strict=True))
+    trials[0] = (names[0], 0.0)
+    trials[50] = (names[49], trials[50][1])
+    found = message_checks(trials, message_stimuli(names, starts))
+    assert found == [
+        ("messages-before", "warn", [0]),
+        ("stimulus-labels", "fail", [50]),
+        ("trials-dropped", "info", None),  # trial 0's message
+    ]
+
+
+def test_trial_zero_at_recording_start():
+    """In E36_2_1 (group-klopto-spikes 2026.07.15) the pulse track was already
+    high when the recording started, so trial 0's onset is at sample 0, 3.07 s
+    early. One trial before the messages is a warning, listing it so it can be
+    excluded; its message has no trial."""
+    names, starts, onsets = presentation(100)
+    trials = list(zip(names, onsets, strict=True))
+    trials[0] = (names[0], 0.0)
+    assert message_checks(trials, message_stimuli(names, starts)) == [
+        ("messages-before", "warn", [0]),
+        ("trials-dropped", "info", None),
+    ]
+
+
+def test_most_trials_before_messages_fail():
+    """Trials before the messages in more than half the trials (and no
+    consistent shift) fail the unit."""
+    names, starts, _ = presentation(100)
+    trials = [(name, 0.01 * i) for i, name in enumerate(names)]
+    found = message_checks(trials, message_stimuli(names, starts))
+    assert found[0][:2] == ("messages-before", "fail")
+
+
+def test_duplicate_start_messages():
+    """jpresent sent each start message twice in E1 (2026-08-12), usually at
+    the same sample, up to 32 ms apart, and once out of order; the duplicates
+    are dropped when the messages are parsed, so no trials are missing."""
+    names, starts, onsets = presentation(100, lag=(0.22, 0.32))
+    trials = list(zip(names, onsets, strict=True))
+    gaps = [0] * 97 + [948, 300, -30]
+    rows = []
+    for name, start, gap in zip(names, starts, gaps, strict=True):
+        t = round(start * RATE)
+        rows += [(t, f"start {name}"), (t + gap, f"start {name}")]
+        rows.append((t + 30000, f"stop {name}"))
+    dset = np.array(
+        [(t, m.encode()) for t, m in rows], dtype=[("start", "i8"), ("message", "S64")]
+    )
+    stimuli = kilo.messages_to_stimuli(dset)
+    assert [s.start for s in stimuli] == [
+        round(s * RATE) - (s == starts[-1]) * 30 for s in starts
+    ]
+    assert message_checks(trials, stimuli) == []
+
+
 # --- selection
 
 
@@ -592,6 +778,28 @@ def test_local_copy(tmp_path):
     assert kilo_audit.local_copy([]) is None
     # locations as the resource records give them (strings) are ignored
     assert kilo_audit.local_copy(["neurobank://archive/A_1"]) is None
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root reads anything"
+)
+def test_local_copy_unreadable_archive(tmp_path):
+    """If this host's user can't read the archive's directories (as on the VM
+    before it was given the archive's group), the copy doesn't count, and the
+    reason says why, so find-kilo-units lists the recording as unavailable
+    instead of stopping."""
+    from nbank import archive
+
+    root = local_archive(tmp_path / "archive", "A_1")
+    shard = archive.resource_path(root, "A_1").parent
+    shard.chmod(0)
+    try:
+        assert kilo_audit.local_copy([archived("A_1", root)]) is None
+        assert kilo_audit.unavailable_reason([archived("A_1", root)]) == (
+            "in an archive here that this user can't read (check its permissions)"
+        )
+    finally:
+        shard.chmod(0o755)
 
 
 def test_unavailable_reason(tmp_path):
