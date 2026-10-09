@@ -103,7 +103,7 @@ Each run writes one report, `reports/<recording>.json`. With `--joblog` and
   checks that each pprox correctly references that recording.
 - **Recordings without messages:** some recordings made with open-ephys GUI
   0.6 or later don't have the stimulus messages in the ARF file. Their units
-  get a `messages` finding (info), and their trials aren't checked against
+  get a `messages-unchecked` finding (info), and their trials aren't checked against
   the stimuli. You can audit them individually with the open-ephys-audio log from the
   same session:
   ```bash
@@ -255,39 +255,39 @@ numbers are indexes into the pprox's `pprox` array.
 
 | Check                                                           | Severity   | Fixable?  | Remedy                                                  |
 |-----------------------------------------------------------------|------------|-----------|---------------------------------------------------------|
-| [`trial-tables`](#trial-tables)                                 | warn       | yes       | use the units of one run                                |
-| [`versions`](#versions)                                         | info       | —         | none needed                                             |
-| [`registry`](#registry)                                         | warn       | yes       | register the recording, or check its id                 |
-| [`metadata-arf`](#metadata-arf)                                 | warn       | yes       | correct the registry metadata                           |
-| [`metadata-name`](#metadata-name)                               | warn       | yes       | check which recording the file is                       |
-| [`schema`](#schema)                                             | warn, info | sometimes | exclude the listed trials; regenerate the pprox         |
-| [`pprox-fields`](#pprox-fields)                                 | fail       | sometimes | regenerate the pprox from its waveform file             |
-| [`recording-name`](#recording-name)                             | warn, info | yes       | registry metadata, or audit against the right recording |
-| [`trial-order`](#trial-order)                                   | warn       | yes       | sort trials when reading                                |
-| [`trial-index`](#trial-index)                                   | warn       | yes       | identify trials by offset                               |
-| [`events-in-interval`](#events-in-interval)                     | warn       | yes       | drop events outside the interval                        |
-| [`spike-count`](#spike-count)                                   | warn       | unknown   | investigate                                             |
-| [`recording-field`](#recording-field)                           | info       | —         | none needed                                             |
-| [`trial-overlap`](#trial-overlap)                               | warn       | yes       | clip trial intervals                                    |
-| [`recording-range`](#recording-range)                           | warn       | partly    | exclude the listed trials                               |
-| [`waveforms`](#waveforms)                                       | info       | —         | none needed                                             |
-| [`waveforms-recording`](#waveforms-recording)                   | fail       | yes       | registry metadata, or find the right file               |
-| [`waveforms-events`](#waveforms-events)                         | fail       | sometimes | regenerate the pprox from its waveform file             |
+| [`trial-tables-differ`](#trial-tables-differ)                   | warn       | yes       | use the units of one run                                |
+| [`versions-differ`](#versions-differ)                           | info       | —         | none needed                                             |
+| [`recording-unregistered`](#recording-unregistered)             | warn       | yes       | register the recording, or check its id                 |
+| [`metadata-arf-mismatch`](#metadata-arf-mismatch)               | warn       | yes       | correct the registry metadata                           |
+| [`metadata-bird-mismatch`](#metadata-bird-mismatch)             | warn       | yes       | check which recording the file is                       |
+| [`schema-invalid`](#schema-invalid)                             | warn, info | sometimes | exclude the listed trials; regenerate the pprox         |
+| [`stimtrial-fields-missing`](#stimtrial-fields-missing)         | fail       | sometimes | regenerate the pprox from its waveform file             |
+| [`recording-mismatch`](#recording-mismatch)                     | warn, info | yes       | registry metadata, or audit against the right recording |
+| [`trials-unordered`](#trials-unordered)                         | warn       | yes       | sort trials when reading                                |
+| [`trial-index-duplicate`](#trial-index-duplicate)               | warn       | yes       | identify trials by offset                               |
+| [`events-outside-interval`](#events-outside-interval)           | warn       | yes       | drop events outside the interval                        |
+| [`too-many-events`](#too-many-events)                           | warn       | unknown   | investigate                                             |
+| [`recording-ranges-missing`](#recording-ranges-missing)         | info       | —         | none needed                                             |
+| [`trials-overlap`](#trials-overlap)                             | warn       | yes       | clip trial intervals                                    |
+| [`recording-range-mismatch`](#recording-range-mismatch)         | warn       | partly    | exclude the listed trials                               |
+| [`waveforms-missing`](#waveforms-missing)                       | info       | —         | none needed                                             |
+| [`waveforms-recording-mismatch`](#waveforms-recording-mismatch) | fail       | yes       | registry metadata, or find the right file               |
+| [`waveforms-events-mismatch`](#waveforms-events-mismatch)       | fail       | sometimes | regenerate the pprox from its waveform file             |
 | [`waveforms-before-first-trial`](#waveforms-before-first-trial) | info       | —         | none needed                                             |
-| [`messages`](#messages)                                         | info       | yes       | audit with `--oeaudio-log`                              |
+| [`messages-unchecked`](#messages-unchecked)                     | info       | yes       | audit with `--oeaudio-log`                              |
 | [`clock-shift`](#clock-shift)                                   | warn       | yes       | note the shift; correct times if the ARF is needed      |
-| [`messages-before`](#messages-before)                           | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
-| [`stimulus-labels`](#stimulus-labels)                           | fail       | sometimes | re-sync                                                 |
-| [`messages-shared`](#messages-shared)                           | fail       | sometimes | re-sync                                                 |
-| [`stimulus-durations`](#stimulus-durations)                     | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
-| [`sync-lag`](#sync-lag)                                         | info       | —         | none needed; check the presentation setup               |
+| [`trials-before-messages`](#trials-before-messages)             | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
+| [`stimulus-mislabeled`](#stimulus-mislabeled)                   | fail       | sometimes | re-sync                                                 |
+| [`trials-share-message`](#trials-share-message)                 | fail       | sometimes | re-sync                                                 |
+| [`stimulus-duration-mismatch`](#stimulus-duration-mismatch)     | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
+| [`message-jitter`](#message-jitter)                             | info       | —         | none needed; check the presentation setup               |
 | [`trials-dropped`](#trials-dropped)                             | info, warn | —         | none needed; check the sync track if many               |
-| [`metadata-registry`](#metadata-registry)                       | warn, info | yes       | correct the registry metadata                           |
-| [`metadata-unit`](#metadata-unit)                               | warn       | yes       | correct the registry metadata                           |
-| [`aux-tracks`](#aux-tracks)                                     | warn       | partly    | the channel can't be checked                            |
-| [`aux-fields`](#aux-fields)                                     | warn       | partly    | exclude the listed trials from aux analyses             |
-| [`aux-pulses`](#aux-pulses)                                     | warn       | sometimes | exclude the listed trials, or reprocess                 |
-| [`aux-stream`](#aux-stream)                                     | warn, info | —         | check the listed trials (warn)                          |
+| [`metadata-pprox-mismatch`](#metadata-pprox-mismatch)           | warn, info | yes       | correct the registry metadata                           |
+| [`metadata-unit-mismatch`](#metadata-unit-mismatch)             | warn       | yes       | correct the registry metadata                           |
+| [`aux-tracks-missing`](#aux-tracks-missing)                     | warn       | partly    | the channel can't be checked                            |
+| [`aux-fields-invalid`](#aux-fields-invalid)                     | warn       | partly    | exclude the listed trials from aux analyses             |
+| [`aux-pulses-mismatch`](#aux-pulses-mismatch)                   | warn       | sometimes | exclude the listed trials, or reprocess                 |
+| [`aux-stream-mismatch`](#aux-stream-mismatch)                   | warn, info | —         | check the listed trials (warn)                          |
 
 "Re-sync" means rerunning `group-kilo-spikes` with the current version on the
 original sort, and depositing the output as new resources (see [Fixing
@@ -296,7 +296,7 @@ track.
 
 ### Findings about the recording
 
-#### `trial-tables`
+#### `trial-tables-differ`
 
 **Severity:** warn
 
@@ -310,12 +310,12 @@ work out which run each group comes from. Analyses that compare or pool units
 should use units from one run. No reprocessing is needed if one complete run
 exists.
 
-#### `versions`
+#### `versions-differ`
 
 **Severity:** info
 
 **Problem:** The units were processed by different versions. This is often
-harmless, but check whether `trial-tables` was also reported.
+harmless, but check whether `trial-tables-differ` was also reported.
 
 **Fixable:** nothing to fix on its own.
 
@@ -337,7 +337,7 @@ None of these is automatically right: usually the registry is wrong, but
 check each case. These findings don't affect spike times, but they do affect
 analyses that select or group units by these fields.
 
-#### `registry`
+#### `recording-unregistered`
 
 **Severity:** warn
 
@@ -347,7 +347,7 @@ after something other than its id), or the recording was never registered.
 
 **Fixable:** yes. Audit with the right id, or register the recording.
 
-#### `metadata-arf`
+#### `metadata-arf-mismatch`
 
 **Severity:** warn
 
@@ -362,7 +362,7 @@ registry with `nbank modify -k FIELD=VALUE <recording>`. The ARF file itself
 is never edited. If the registry is right, note the error in the recording's
 registry metadata.
 
-#### `metadata-name`
+#### `metadata-bird-mismatch`
 
 **Severity:** warn (checked without a registry too)
 
@@ -377,7 +377,7 @@ metadata, and note it on the units.
 
 ### Findings about a unit: the pprox file
 
-#### `schema`
+#### `schema-invalid`
 
 **Severity:** warn (trials listed), or info if the pprox has no `$schema`, or
 one that isn't pprox or stimtrial
@@ -392,9 +392,9 @@ type 'number'`). Tools that rely on the schema may fail on the file. As info:
 the pprox isn't validated, because it names no schema or an unknown one.
 
 **Fixable:** sometimes. Exclude the listed trials. If a trial is unusable,
-`pprox-fields` is also reported; see there.
+`stimtrial-fields-missing` is also reported; see there.
 
-#### `pprox-fields`
+#### `stimtrial-fields-missing`
 
 **Severity:** fail
 
@@ -409,7 +409,7 @@ deposited as a new resource (see
 [Regenerating missing pprox files](#regenerating-missing-pprox-files)). Otherwise the unit
 needs reprocessing.
 
-#### `recording-name`
+#### `recording-mismatch`
 
 **Severity:** warn, or info if the pprox names no recording
 
@@ -422,7 +422,7 @@ files), so it was matched to the recording by name only.
 recording and its `recording` field is wrong: note this in the unit's registry
 metadata. If they fail, audit the unit against the recording its pprox names.
 
-#### `trial-order`
+#### `trials-unordered`
 
 **Severity:** warn
 
@@ -432,7 +432,7 @@ edited or merged.
 
 **Fixable:** yes. Sort the trials by `offset` when reading.
 
-#### `trial-index`
+#### `trial-index-duplicate`
 
 **Severity:** warn
 
@@ -441,7 +441,7 @@ several.
 
 **Fixable:** yes. Identify trials by `offset` instead of `index`.
 
-#### `events-in-interval`
+#### `events-outside-interval`
 
 **Severity:** warn (trials listed)
 
@@ -453,7 +453,7 @@ recording, though its interval ended earlier.
 **Fixable:** yes, in analyses. Drop the events outside the interval, or
 exclude the listed trials.
 
-#### `spike-count`
+#### `too-many-events`
 
 **Severity:** warn
 
@@ -464,7 +464,7 @@ or metadata copied from another cluster.
 **Fixable:** unknown until the cause is found. Investigate before using the
 unit.
 
-#### `recording-field`
+#### `recording-ranges-missing`
 
 **Severity:** info
 
@@ -473,7 +473,7 @@ versions), so the unit isn't checked against its waveform file.
 
 **Fixable:** nothing to fix.
 
-#### `trial-overlap`
+#### `trials-overlap`
 
 **Severity:** warn (trials listed)
 
@@ -484,7 +484,7 @@ elsewhere or was edited. Spikes in the overlap may be counted in both trials.
 **Fixable:** yes, in analyses. Clip each trial's interval to the next trial's
 start.
 
-#### `recording-range`
+#### `recording-range-mismatch`
 
 **Severity:** warn (trials listed)
 
@@ -497,7 +497,7 @@ many.
 
 ### Findings about a unit: the waveform file
 
-#### `waveforms`
+#### `waveforms-missing`
 
 **Severity:** info
 
@@ -507,23 +507,23 @@ verified, and the pprox can't be regenerated.
 
 **Fixable:** nothing to fix.
 
-#### `waveforms-recording`
+#### `waveforms-recording-mismatch`
 
 **Severity:** fail
 
 **Problem:** The waveform file's `recording` attribute names a different
 recording from the pprox.
-- If `waveforms-events` was not also reported, the spike times match and
+- If `waveforms-events-mismatch` was not also reported, the spike times match and
   only the attribute is wrong. For example, C401_1_1b's waveform files say
   E76_1_1b. The data are fine.
-- If `waveforms-events` was also reported, the waveform file probably
+- If `waveforms-events-mismatch` was also reported, the waveform file probably
   belongs to another unit or recording.
 
 **Fixable:** yes. In the first case, note the error in the waveform resource's
 registry metadata. In the second, find the correct waveform file; the
 registry may have the two resources mixed up.
 
-#### `waveforms-events`
+#### `waveforms-events-mismatch`
 
 **Severity:** fail (trials listed)
 
@@ -548,7 +548,7 @@ pprox. This has no effect on analyses.
 
 ### Findings about a unit: metadata
 
-#### `metadata-registry`
+#### `metadata-pprox-mismatch`
 
 **Severity:** warn, or info for a field in only one of the two
 
@@ -561,7 +561,7 @@ one of the two, typically one added to the registry later.
 from the registry rather than the pprox; reprocessing isn't needed. If the
 registry is wrong, correct it with `nbank modify`.
 
-#### `metadata-unit`
+#### `metadata-unit-mismatch`
 
 **Severity:** warn
 
@@ -581,7 +581,7 @@ spread evenly over about 0.2 s with a larger audio buffer. The messages give
 the order of the stimuli; the onsets come from the sync track, which is
 recorded with the neural data.
 
-#### `messages`
+#### `messages-unchecked`
 
 **Severity:** info
 
@@ -603,9 +603,10 @@ label and consistent lags, but the onsets are far from their messages (here,
 more than 2 s after or any time before). The trials, and probably the spikes,
 are timed from another origin than the ARF file's, as when a recording was
 sorted from some time after its start (P388_3_1 from 700 s and P390_3_1 from
-500 s, processed by group-kilo-spikes 2025.09.03). The message gives *k* and
-the median time from message to onset, which is the shift plus the usual
-lag. The other message checks use the messages the shift pairs the trials
+500 s, processed by group-kilo-spikes 2025.09.03). The message gives the
+origin, to the nearest second (the median time from onset to message, which
+also includes the usual lag of 0.25–1 s), and the message the first trial
+follows. The other message checks use the messages the shift pairs the trials
 with, so `trials-dropped` lists the messages outside the sorted part.
 
 **Fixable:** yes. Analyses locked to the stimulus are unaffected, since the
@@ -614,7 +615,7 @@ spikes and onsets share the origin. The absolute times (`offset`,
 only for analyses that refer back to it (LFP, other channels, other
 recordings); correct them by the shift there.
 
-#### `messages-before`
+#### `trials-before-messages`
 
 **Severity:** warn if at most half of the trials are listed, fail if more
 
@@ -628,9 +629,9 @@ still run on the remaining trials.
   as `clock-shift` instead).
 
 **Fixable:** sometimes. For a warning, exclude the listed trials. For a
-failure, check `recording-name` first; if the recording is right, re-sync.
+failure, check `recording-mismatch` first; if the recording is right, re-sync.
 
-#### `stimulus-labels`
+#### `stimulus-mislabeled`
 
 **Severity:** fail (trials listed)
 
@@ -648,17 +649,17 @@ strongest case for reprocessing. Excluding trials is only safe if a few
 isolated trials are listed. Without a sync signal, the onsets may be
 recoverable from the analog copy of the stimulus (planned).
 
-#### `messages-shared`
+#### `trials-share-message`
 
 **Severity:** fail (trials listed)
 
 **Problem:** Each listed trial follows the same start message as the trial
 before it. One stimulus presentation became two trials, from a spurious sync
-event or a missing message. This usually comes with `stimulus-labels`.
+event or a missing message. This usually comes with `stimulus-mislabeled`.
 
-**Fixable:** as for `stimulus-labels`.
+**Fixable:** as for `stimulus-mislabeled`.
 
-#### `stimulus-durations`
+#### `stimulus-duration-mismatch`
 
 **Severity:** warn if at most 1% of the trials (at least one) are listed,
 fail if more
@@ -694,15 +695,15 @@ more than 1% of the stimuli don't fit.
 failure, the labels are unreliable: re-sync if the recording has a usable
 sync track.
 
-#### `sync-lag`
+#### `message-jitter`
 
 **Severity:** info
 
 **Problem:** A trial's lag is the time from its start message to its onset,
 the sync event that its spike times are relative to. The neural data and the
 sync track are recorded together, so an onset that is the stimulus's sync
-event is right whatever its lag (`stimulus-durations` checks the onsets and
-`stimulus-labels` the labels): the lags describe the message timing, which is
+event is right whatever its lag (`stimulus-duration-mismatch` checks the onsets and
+`stimulus-mislabeled` the labels): the lags describe the message timing, which is
 worth knowing about for the presentation setup. The message gives the median
 lag and its 5th to 95th percentile, and is reported when the lags are spread
 over more than 0.1 s (rather than the usual ~30 ms), or when the listed trials
@@ -737,7 +738,7 @@ channels and, optionally, the jrelay message stream that drives them. The
 pulse track is the ground truth: `aux` should record the pulses that were
 delivered, whether or not they were commanded.
 
-#### `aux-tracks`
+#### `aux-tracks-missing`
 
 **Severity:** warn (trials listed)
 
@@ -748,7 +749,7 @@ the recording.
 **Fixable:** partly. The pulses may well be right; if the channel is known,
 note it in the unit's registry metadata.
 
-#### `aux-fields`
+#### `aux-fields-invalid`
 
 **Severity:** warn (trials listed)
 
@@ -761,7 +762,7 @@ trial in which it starts). The file was probably made or edited by hand.
 **Fixable:** partly. Exclude the listed trials from analyses of the aux
 pulses.
 
-#### `aux-pulses`
+#### `aux-pulses-mismatch`
 
 **Severity:** warn (trials listed)
 
@@ -776,7 +777,7 @@ missing (group-kilo-spikes drops them).
 pulses. If many trials are listed, rerunning group-kilo-spikes with `--aux`
 on the original sort gives the right pulses.
 
-#### `aux-stream`
+#### `aux-stream-mismatch`
 
 **Severity:** warn for pulses without a message; info for messages without a
 pulse, and for pulses out of line

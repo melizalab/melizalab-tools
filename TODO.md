@@ -146,7 +146,7 @@ when a fix makes one pass.
 - [x] Check stimulus lengths against the sync track when splitting trials
   (`kilo.check_stimulus_lengths`, in `arf_to_trials`): the gaps before the
   next onsets, and pulse widths for a pulse track (`kilo.is_pulse_track`:
-  median width > 50 ms); see `stimulus-durations` in the audit. Logs each
+  median width > 50 ms); see `stimulus-duration-mismatch` in the audit. Logs each
   trial that doesn't fit, and stops if more than 1% of the stimuli (at least
   one) don't, since the trials would probably be mislabeled. Applies to
   `--oeaudio-log` too, where it checks a log paired in order. Tests in
@@ -156,7 +156,7 @@ when a fix makes one pass.
   `match_sync_events` pairs each sync event with the last message before it,
   which assumes messages arrive before their sync event; messages that
   jittered by more than the gap between stimuli would mislabel trials (or
-  raise). The same applies to the audit's `stimulus-labels` check.
+  raise). The same applies to the audit's `stimulus-mislabeled` check.
 - [ ] Sorting part of a recording: merge in the code the student used to sort
   a time window (deliberate exclusions, confirmed 2026-10-09), and record the
   window actually sorted as a top-level annotation in the pprox and waveform
@@ -262,23 +262,28 @@ recordings, which are out of scope).
 - [x] audit-kilo-spikes metadata checks: the recording metadata (bird, pen,
   site, hemisphere, protocol, experimenter) in the registry, the ARF entry
   attributes (arfx-oephys >= 2.8.0) and oeaudio-present's metadata message
-  are compared (`metadata-arf`); the bird in the message or entry name against
-  the recording id (`metadata-name`); each pprox against the recording's
-  registry record (`metadata-registry`) and its own resources' records
-  (`metadata-unit`). Registry checks only with a registry. Found: C180_1_1's
+  are compared (`metadata-arf-mismatch`); the bird in the message or entry name against
+  the recording id (`metadata-bird-mismatch`); each pprox against the recording's
+  registry record (`metadata-pprox-mismatch`) and its own resources' records
+  (`metadata-unit-mismatch`). Registry checks only with a registry. Found: C180_1_1's
   metadata message says experimenter uac6qw, its entry attributes bple.
 - [x] audit-kilo-spikes aux checks (units processed with `--aux`): fields
-  (`aux-tracks`, `aux-fields`), the pprox pulses against those detected on
-  their channel (`aux-pulses`), and the channel's pulses against the stream
-  in `aux_tracks` (`aux-stream`; `kilo.match_aux_pulses`, shared with
+  (`aux-tracks-missing`, `aux-fields-invalid`), the pprox pulses against those detected on
+  their channel (`aux-pulses-mismatch`), and the channel's pulses against the stream
+  in `aux_tracks` (`aux-stream-mismatch`; `kilo.match_aux_pulses`, shared with
   group-kilo-spikes). Clean on all 650 E36 LED pulses.
-- [x] audit-kilo-spikes schema check (`schema`): each pprox against the
+- [x] audit-kilo-spikes schema check (`schema-invalid`): each pprox against the
   schema in its `$schema`, using copies of the published schemas bundled in
   dlab/schemas (`pprox.validate`, `pprox.validation_errors`; jsonschema is now
   a runtime dependency).
 - [ ] audit-kilo-spikes, still to do:
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
     or found by trying channels for older files) and compare per trial.
+- [x] Check names describe the problem found, not the check (2026-10-09), e.g.
+  `events-outside-interval` (was `events-in-interval`), `message-jitter` (was
+  `sync-lag`), `stimtrial-fields-missing` (was `pprox-fields`); the old names
+  are not accepted, so reports from before the rename should be regenerated.
+  The items below use the new names.
 - Audit of the `induction` archive (2026-10-08; 170 recordings with their ARF
   files on the VM, recorded 2026-01-06 to 2026-09-21; see
   `audit-findings-2026-10.md`). Checked against the analog stimulus copy
@@ -286,26 +291,26 @@ recordings, which are out of scope).
   onset within ~1 ms. The failures and warnings came from the audit, apart
   from E36_2_1 trial 0. Audit bugs found, now fixed (tests in
   tests/test_kilo_audit.py; the 8 recordings below re-audited as expected):
-  - [x] `sync-lag`'s fixed 0.1 s tolerance flagged the tails of message
+  - [x] `message-jitter`'s fixed 0.1 s tolerance flagged the tails of message
     jitter. In 47 recordings (open-ephys 0.5.3.1, 2026-01-06 to -12 and
     2026-04-09 to 05-11) the lag is spread evenly over ~0.215 s (median
     0.57-0.67 s, against 0.369 s and a 28 ms spread otherwise), probably from
     a larger audio buffer on the presentation machine; the onsets come from
-    the clicks and are right. Every one of the 47 `sync-lag` warnings in
+    the clicks and are right. Every one of the 47 `message-jitter` warnings in
     problems.txt was this. Now `kilo.sync_lag_outliers` (shared with
     group-kilo-spikes) flags lags more than 0.1 s outside the 5th-95th
     percentile range (`kilo.sync_lag_range`), or of the median if that range
     is wider than 0.3 s or there are fewer than 20 lags. C165_3_1, C361_1_1,
     E92_4_1 and P399_4_1 now have only an info finding.
     `test_wide_message_jitter_is_info`, `test_late_onset_with_wide_jitter`.
-    Then (2026-10-09) `sync-lag` was made info only, since the lags only
+    Then (2026-10-09) `message-jitter` was made info only, since the lags only
     describe the message timing: the neural data and sync track share a
     clock, so an onset that is the stimulus's sync event is right whatever
     its lag. It reports the median lag and 5th-95th percentile when that
     range is wider than 0.1 s or trials are out of line (listed), to flag
     problems with the presentation setup. The onsets and labels are checked
-    by `stimulus-durations` (below) and `stimulus-labels`.
-  - [x] `stimulus-durations` (2026-10-09): the messages give the order of the
+    by `stimulus-duration-mismatch` (below) and `stimulus-mislabeled`.
+  - [x] `stimulus-duration-mismatch` (2026-10-09): the messages give the order of the
     stimuli, so the trials are right if each sync event has the right
     stimulus, which the stimulus lengths check. From the pprox alone, the gap
     from the end of each stimulus to the next onset must not be short against
@@ -336,15 +341,15 @@ recordings, which are out of scope).
     The sorted-window annotation (see group-kilo-spikes) would make this
     explicit for new output. `test_clock_shift`,
     `test_clock_shift_with_trials_before_messages`.
-  - [x] `messages-before` returned before the other message checks, so
+  - [x] `trials-before-messages` returned before the other message checks, so
     P390_3_1's summary listed one trial though 2897 of 2908 trials don't
     match their messages. Now the other checks run on the remaining trials.
     `test_messages_before_with_other_checks`.
-  - [x] `messages-before` failed a unit for a single trial (E36_2_1 trial 0:
+  - [x] `trials-before-messages` failed a unit for a single trial (E36_2_1 trial 0:
     the pulse track was high when recording started, and
     group-klopto-spikes 2026.07.15 put the onset at sample 0), with an
     explanation that didn't fit. Now warn if at most half the trials are
-    listed, fail if more, as for `sync-lag`; the docs give both causes.
+    listed, fail if more, as for `message-jitter`; the docs give both causes.
     `test_trial_zero_at_recording_start`,
     `test_most_trials_before_messages_fail`.
   - [x] jpresent sent each `start` message twice in E1 (2026-08-12), so
@@ -378,7 +383,7 @@ recordings, which are out of scope).
   audit.tsv 'audit-kilo-spikes {1} --units {2} -o reports/{1}.json'` on the
   archive host, where the ARF files are local. Since units are grouped by
   name, the audit checks that each pprox names the recording
-  (`recording-name`).
+  (`recording-mismatch`).
   Requires a selection (a list, `--name` or `--all`). Recordings whose ARF isn't in
   a neurobank archive on this host (e.g. cold storage) are skipped, or listed
   with `--unavailable`; their orphans are still listed. The audit scripts

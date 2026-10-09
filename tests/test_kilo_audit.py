@@ -128,7 +128,9 @@ def test_missing_event(output):
         trial["events"] = trial["events"][1:]
 
     edit_pprox(output, drop)
-    assert checks(unit_report(audit(output))) == [("waveforms-events", "fail", [2])]
+    assert checks(unit_report(audit(output))) == [
+        ("waveforms-events-mismatch", "fail", [2])
+    ]
 
 
 def test_mislabeled_trial(output):
@@ -141,7 +143,7 @@ def test_mislabeled_trial(output):
     edit_pprox(output, swap)
     unit = unit_report(audit(output))
     assert unit["status"] == "fail"
-    assert checks(unit) == [("stimulus-labels", "fail", [1])]
+    assert checks(unit) == [("stimulus-mislabeled", "fail", [1])]
 
 
 def shift_onset(trial, seconds):
@@ -159,11 +161,11 @@ def test_late_onset(output):
     edit_pprox(output, lambda pp: shift_onset(pp["pprox"][3], 0.5))
     report = audit(output)
     assert checks(unit_report(report)) == [
-        ("sync-lag", "info", [3]),
-        ("stimulus-durations", "warn", [3]),
+        ("message-jitter", "info", [3]),
+        ("stimulus-duration-mismatch", "warn", [3]),
     ]
     # the other units now have a different trial table
-    assert [f["check"] for f in report["findings"]] == ["trial-tables"]
+    assert [f["check"] for f in report["findings"]] == ["trial-tables-differ"]
 
 
 def test_pulse_end_onset_in_old_version(output):
@@ -179,7 +181,7 @@ def test_pulse_end_onset_in_old_version(output):
 
     edit_pprox(output, old)
     found = unit_report(audit(output))["findings"]
-    (f,) = [f for f in found if f["check"] == "stimulus-durations"]
+    (f,) = [f for f in found if f["check"] == "stimulus-duration-mismatch"]
     assert (f["severity"], f["trials"]) == ("warn", [3])
     assert "probably pulse onsets reported at the end of the pulse" in f["message"]
 
@@ -195,7 +197,7 @@ def test_pulse_track_found_without_sync_track(output):
 
     edit_pprox(output, old)
     found = unit_report(audit(output))["findings"]
-    (f,) = [f for f in found if f["check"] == "stimulus-durations"]
+    (f,) = [f for f in found if f["check"] == "stimulus-duration-mismatch"]
     assert f["trials"] == [3]
     assert "the width of the pulse on ADC3" in f["message"]
 
@@ -211,8 +213,8 @@ def test_most_onsets_out_of_line(output):
     edit_pprox(output, drift)
     unit = unit_report(audit(output))
     assert checks(unit) == [
-        ("sync-lag", "info", [0, 1, 3, 4]),
-        ("stimulus-durations", "fail", [1, 2, 3, 4]),
+        ("message-jitter", "info", [0, 1, 3, 4]),
+        ("stimulus-duration-mismatch", "fail", [1, 2, 3, 4]),
     ]
 
 
@@ -221,7 +223,9 @@ def test_events_outside_interval(output):
         pp["pprox"][4]["events"].append(pp["pprox"][4]["interval"][1] + 1.0)
 
     edit_pprox(output, stray)
-    assert ("events-in-interval", "warn", [4]) in checks(unit_report(audit(output)))
+    assert ("events-outside-interval", "warn", [4]) in checks(
+        unit_report(audit(output))
+    )
 
 
 def test_missing_required_field(output):
@@ -229,8 +233,8 @@ def test_missing_required_field(output):
     further."""
     edit_pprox(output, lambda pp: pp["pprox"][0].pop("stimulus"))
     assert checks(unit_report(audit(output))) == [
-        ("schema", "warn", [0]),
-        ("pprox-fields", "fail", [0]),
+        ("schema-invalid", "warn", [0]),
+        ("stimtrial-fields-missing", "fail", [0]),
     ]
 
 
@@ -244,25 +248,25 @@ def test_schema_violation(output):
 
     edit_pprox(output, bad)
     unit = unit_report(audit(output))
-    schema = [f for f in unit["findings"] if f["check"] == "schema"]
+    schema = [f for f in unit["findings"] if f["check"] == "schema-invalid"]
     assert [(f["severity"], f["trials"]) for f in schema] == [("warn", [1, 3])]
     assert "pprox[1].events[0]: 'x' is not of type 'number'" in schema[0]["message"]
     # the unusable trials fail the unit, rather than crashing the audit
-    assert ("pprox-fields", "fail", [1, 3]) in checks(unit)
+    assert ("stimtrial-fields-missing", "fail", [1, 3]) in checks(unit)
 
 
 def test_schema_unknown_or_missing(output):
     """A pprox with an unknown $schema, or none, is noted but not validated."""
     edit_pprox(output, lambda pp: pp.update({"$schema": "https://example.org/x.json"}))
-    assert checks(unit_report(audit(output))) == [("schema", "info", None)]
+    assert checks(unit_report(audit(output))) == [("schema-invalid", "info", None)]
     edit_pprox(output, lambda pp: pp.pop("$schema"))
     (f,) = unit_report(audit(output))["findings"]
-    assert f["check"] == "schema" and "no $schema" in f["message"]
+    assert f["check"] == "schema-invalid" and "no $schema" in f["message"]
 
 
 def test_no_waveform_file(output):
     (output / f"{UNIT}_spikes.h5").unlink()
-    assert checks(unit_report(audit(output))) == [("waveforms", "info", None)]
+    assert checks(unit_report(audit(output))) == [("waveforms-missing", "info", None)]
 
 
 def rewrite_waveforms(path, **changes):
@@ -280,7 +284,9 @@ def test_waveform_file_from_another_recording(output):
     """A waveform file naming another recording fails, but its events are
     still compared (here they match: only the attribute is wrong)."""
     rewrite_waveforms(output / f"{UNIT}_spikes.h5", recording="elsewhere")
-    assert checks(unit_report(audit(output))) == [("waveforms-recording", "fail", None)]
+    assert checks(unit_report(audit(output))) == [
+        ("waveforms-recording-mismatch", "fail", None)
+    ]
 
 
 def test_spikes_before_first_trial(output):
@@ -301,13 +307,13 @@ def test_pprox_names_another_recording(excerpt_output):
     units = kilo_audit.load_units([str(excerpt_output)], None)
     report = kilo_audit.audit_recording(E36, units, recording="E36_5_2")
     for unit in report["units"]:
-        assert checks(unit) == [("recording-name", "warn", None)]
+        assert checks(unit) == [("recording-mismatch", "warn", None)]
 
 
 def test_different_versions(output):
     edit_pprox(output, lambda pp: pp.update(processed_by=["group-kilo-spikes 0.1"]))
     assert [(f["check"], f["severity"]) for f in audit(output)["findings"]] == [
-        ("versions", "info")
+        ("versions-differ", "info")
     ]
 
 
@@ -400,7 +406,7 @@ def test_e36_old_version_flags_end_of_pulse_trials():
     report = example_report("E36_5_1", "output-a20b62a")
     assert report["status"] == "warn"
     for unit in report["units"]:
-        lag = [f for f in unit["findings"] if f["check"] == "sync-lag"]
+        lag = [f for f in unit["findings"] if f["check"] == "message-jitter"]
         assert [(f["severity"], f["trials"]) for f in lag] == [("warn", [0, 3, 12])]
 
 
@@ -413,7 +419,11 @@ def test_c401_fails():
     assert report["status"] == "fail"
     for unit in report["units"]:
         found = {f["check"] for f in unit["findings"] if f["severity"] == "fail"}
-        assert {"stimulus-labels", "sync-lag", "waveforms-recording"} <= found
+        assert {
+            "stimulus-mislabeled",
+            "message-jitter",
+            "waveforms-recording-mismatch",
+        } <= found
 
 
 # --- message checks on synthetic trial tables (cases from the archive audit)
@@ -478,7 +488,7 @@ def test_wide_message_jitter_is_info():
         message_unit(trials), message_stimuli(names, starts), RATE
     )
     assert [(f["check"], f["severity"], f.get("trials")) for f in found] == [
-        ("sync-lag", "info", None)
+        ("message-jitter", "info", None)
     ]
     assert found[0]["message"].startswith("onsets follow their messages by 0.6")
     assert "spread more than the usual ~30 ms" in found[0]["message"]
@@ -494,7 +504,7 @@ def test_late_onset_with_wide_jitter():
         message_unit(trials), message_stimuli(names, starts), RATE
     )
     assert [(f["check"], f["severity"], f.get("trials")) for f in found] == [
-        ("sync-lag", "info", [7])
+        ("message-jitter", "info", [7])
     ]
     assert "(5th-95th percentile 0.5" in found[0]["message"]
 
@@ -523,8 +533,8 @@ def test_clock_shift():
         ("clock-shift", "warn"),
         ("trials-dropped", "warn"),
     ]
-    assert found[0]["message"].startswith(
-        "trial i follows message i+80, with onsets 99.6"
+    assert found[0]["message"] == (
+        "trials timed from about 100 s into the recording (trial 0 follows message 80)"
     )
     assert found[1]["message"] == "80 of 300 stimulus messages have no trial"
 
@@ -549,8 +559,8 @@ def test_messages_before_with_other_checks():
     trials[50] = (names[49], trials[50][1])
     found = message_checks(trials, message_stimuli(names, starts))
     assert found == [
-        ("messages-before", "warn", [0]),
-        ("stimulus-labels", "fail", [50]),
+        ("trials-before-messages", "warn", [0]),
+        ("stimulus-mislabeled", "fail", [50]),
         ("trials-dropped", "info", None),  # trial 0's message
     ]
 
@@ -564,7 +574,7 @@ def test_trial_zero_at_recording_start():
     trials = list(zip(names, onsets, strict=True))
     trials[0] = (names[0], 0.0)
     assert message_checks(trials, message_stimuli(names, starts)) == [
-        ("messages-before", "warn", [0]),
+        ("trials-before-messages", "warn", [0]),
         ("trials-dropped", "info", None),
     ]
 
@@ -575,7 +585,7 @@ def test_most_trials_before_messages_fail():
     names, starts, _ = presentation(100)
     trials = [(name, 0.01 * i) for i, name in enumerate(names)]
     found = message_checks(trials, message_stimuli(names, starts))
-    assert found[0][:2] == ("messages-before", "fail")
+    assert found[0][:2] == ("trials-before-messages", "fail")
 
 
 def test_duplicate_start_messages():
@@ -631,7 +641,7 @@ def test_stimulus_durations_shifted_labels():
     lengths, onsets = presented()
     unit = length_unit(lengths[:-1], np.delete(onsets, 100))
     (f,) = kilo_audit.check_stimulus_durations(unit, RATE)
-    assert (f["check"], f["severity"]) == ("stimulus-durations", "fail")
+    assert (f["check"], f["severity"]) == ("stimulus-duration-mismatch", "fail")
     assert min(f["trials"]) >= 99 and len(f["trials"]) > 10
 
 
@@ -1009,17 +1019,17 @@ REPORTS = [
     make_report("A_1", ("A_1_c1", NEW, []), ("A_1_c2", NEW, [])),
     make_report(
         "B_1",
-        ("B_1_c1", OLD, [("sync-lag", "warn")]),
+        ("B_1_c1", OLD, [("message-jitter", "warn")]),
         (
             "B_1_c2",
             OLD,
-            [("sync-lag", "warn"), ("waveforms-before-first-trial", "info")],
+            [("message-jitter", "warn"), ("waveforms-before-first-trial", "info")],
         ),
     ),
     make_report(
         "C_1",
-        ("C_1_c1", NEW, [("stimulus-labels", "fail")]),
-        findings=[("trial-tables", "warn")],
+        ("C_1_c1", NEW, [("stimulus-mislabeled", "fail")]),
+        findings=[("trial-tables-differ", "warn")],
     ),
 ]
 
@@ -1057,11 +1067,13 @@ def test_summarize():
         "warn": ["1", "2"],
         "fail": ["1", "1"],
     }
-    checks = [line.split() for line in lines if line.startswith(("sync-lag", "trial-"))]
+    checks = [
+        line.split() for line in lines if line.startswith(("message-jitter", "trial-"))
+    ]
     # the recording-level finding counts the recording, but no units
     assert checks == [
-        ["sync-lag", "warn", "1", "2"],
-        ["trial-tables", "warn", "1", "0"],
+        ["message-jitter", "warn", "1", "2"],
+        ["trial-tables-differ", "warn", "1", "0"],
     ]
     versions = {
         line.rsplit(None, 4)[0]: line.split()[-4:]
@@ -1071,8 +1083,10 @@ def test_summarize():
     assert versions == {OLD: ["0", "0", "2", "0"], NEW: ["2", "0", "0", "1"]}
     flagged = lines[lines.index("recordings with warn or fail:") + 1 :]
     assert [line.split()[:2] for line in flagged] == [["C_1", "fail"], ["B_1", "warn"]]
-    assert flagged[0].endswith("stimulus-labels (fail) x1, trial-tables (warn)")
-    assert flagged[1].endswith("sync-lag (warn) x2")
+    assert flagged[0].endswith(
+        "stimulus-mislabeled (fail) x1, trial-tables-differ (warn)"
+    )
+    assert flagged[1].endswith("message-jitter (warn) x2")
 
 
 def test_summarize_level():
@@ -1103,12 +1117,20 @@ def test_write_findings(tmp_path):
         "B_1",
         "B_1_c1",
         OLD,
-        "sync-lag",
+        "message-jitter",
         "warn",
         "1,2",
-        "sync-lag message",
+        "message-jitter message",
     ]
-    assert ["C_1", "", "", "trial-tables", "warn", "", "trial-tables message"] in rows
+    assert [
+        "C_1",
+        "",
+        "",
+        "trial-tables-differ",
+        "warn",
+        "",
+        "trial-tables-differ message",
+    ] in rows
 
 
 def test_collect_script(tmp_path, capsys, caplog):
@@ -1169,11 +1191,11 @@ def test_registry_disagrees(excerpt_output, fake_records):
     fake_records["E36_5_1"]["metadata"]["pen"] = 6
     report = audit_with_registry(excerpt_output)
     assert [(f["check"], f["severity"]) for f in report["findings"]] == [
-        ("metadata-arf", "warn")
+        ("metadata-arf-mismatch", "warn")
     ]
     assert "pen: 6 (registry), 5 (ARF attributes)" in report["findings"][0]["message"]
     for unit in report["units"]:
-        assert checks(unit) == [("metadata-registry", "warn", None)]
+        assert checks(unit) == [("metadata-pprox-mismatch", "warn", None)]
         assert "pen: 5 (pprox), 6 (registry)" in unit["findings"][0]["message"]
 
 
@@ -1183,7 +1205,7 @@ def test_field_only_in_registry(excerpt_output, fake_records):
     report = audit_with_registry(excerpt_output)
     for unit in report["units"]:
         (f,) = unit["findings"]
-        assert (f["check"], f["severity"]) == ("metadata-registry", "info")
+        assert (f["check"], f["severity"]) == ("metadata-pprox-mismatch", "info")
         assert "hemisphere (registry only)" in f["message"]
 
 
@@ -1191,7 +1213,7 @@ def test_recording_not_registered(excerpt_output, fake_records):
     del fake_records["E36_5_1"]
     report = audit_with_registry(excerpt_output)
     assert [(f["check"], f["severity"]) for f in report["findings"]] == [
-        ("registry", "warn")
+        ("recording-unregistered", "warn")
     ]
 
 
@@ -1203,7 +1225,7 @@ def test_unit_resource_disagrees(excerpt_output, fake_records):
         "metadata": {"site": 2, "note": "anything"},
     }
     unit = unit_report(audit_with_registry(excerpt_output))
-    assert checks(unit) == [("metadata-unit", "warn", None)]
+    assert checks(unit) == [("metadata-unit-mismatch", "warn", None)]
     assert f"site: 1 (pprox), 2 ({UNIT}_spikes)" in unit["findings"][0]["message"]
 
 
@@ -1214,7 +1236,7 @@ def test_script_uses_registry(excerpt_output, e36_arf, fake_records, tmp_path):
         ["-r", REGISTRY, "--units", str(excerpt_output), "-o", str(out), str(e36_arf)]
     )
     report = json.loads(out.read_text())
-    assert [f["check"] for f in report["findings"]] == ["metadata-arf"]
+    assert [f["check"] for f in report["findings"]] == ["metadata-arf-mismatch"]
 
 
 def metadata_arf(tmp_path, name, metadata=None, **attrs):
@@ -1253,7 +1275,7 @@ def test_arf_disagrees_with_itself(tmp_path):
         pen="1",
     )
     (f,) = recording_checks(path, "C1_1_1")
-    assert f["check"] == "metadata-arf"
+    assert f["check"] == "metadata-arf-mismatch"
     assert f["message"] == (
         "the ARF file disagrees with itself: "
         "experimenter: other (ARF attributes), someone (ARF metadata message)"
@@ -1337,12 +1359,12 @@ def test_aux_output_is_clean(aux_excerpt_output):
 
 def test_aux_without_tracks(aux_output):
     edit_pprox(aux_output, lambda pp: pp.pop("aux_tracks"))
-    assert aux_checks(audit(aux_output)) == [("aux-tracks", "warn", [4])]
+    assert aux_checks(audit(aux_output)) == [("aux-tracks-missing", "warn", [4])]
 
 
 def test_trial_without_aux_list(aux_output):
     edit_pprox(aux_output, lambda pp: pp["pprox"][1].pop("aux"))
-    assert aux_checks(audit(aux_output)) == [("aux-fields", "warn", [1])]
+    assert aux_checks(audit(aux_output)) == [("aux-fields-invalid", "warn", [1])]
 
 
 def test_aux_pulse_with_unknown_name(aux_output):
@@ -1351,12 +1373,12 @@ def test_aux_pulse_with_unknown_name(aux_output):
 
     edit_pprox(aux_output, rename)
     found = unit_report(audit(aux_output))["findings"]
-    (fields,) = [f for f in found if f["check"] == "aux-fields"]
+    (fields,) = [f for f in found if f["check"] == "aux-fields-invalid"]
     assert (
         fields["trials"] == [4] and "names not in aux_tracks: ttl" in fields["message"]
     )
     # and the led pulse on ADC4 is now missing from the pprox
-    assert ("aux-pulses", "warn", [4]) in aux_checks(audit(aux_output))
+    assert ("aux-pulses-mismatch", "warn", [4]) in aux_checks(audit(aux_output))
 
 
 def test_aux_pulse_outside_its_trial(aux_output):
@@ -1369,13 +1391,17 @@ def test_aux_pulse_outside_its_trial(aux_output):
         trial["aux"].append({"name": "led", "interval": [start, start + 1.0]})
 
     edit_pprox(aux_output, move)
-    assert ("aux-fields", "warn", [3]) in aux_checks(audit(aux_output))
+    assert ("aux-fields-invalid", "warn", [3]) in aux_checks(audit(aux_output))
 
 
 def test_aux_pulse_missing_from_pprox(aux_output):
     edit_pprox(aux_output, lambda pp: pp["pprox"][4]["aux"].clear())
     report = audit(aux_output)
-    (f,) = [f for f in unit_report(report)["findings"] if f["check"] == "aux-pulses"]
+    (f,) = [
+        f
+        for f in unit_report(report)["findings"]
+        if f["check"] == "aux-pulses-mismatch"
+    ]
     assert f["trials"] == [4] and "missing from the pprox" in f["message"]
 
 
@@ -1388,7 +1414,7 @@ def test_aux_pulse_not_on_channel(aux_output):
 
     edit_pprox(aux_output, add)
     report = audit(aux_output)
-    assert aux_checks(report) == [("aux-pulses", "warn", [2])]
+    assert aux_checks(report) == [("aux-pulses-mismatch", "warn", [2])]
     assert "aren't on ADC4" in unit_report(report)["findings"][0]["message"]
 
 
@@ -1398,18 +1424,18 @@ def test_aux_pulse_end_differs(aux_output):
 
     edit_pprox(aux_output, stretch)
     report = audit(aux_output)
-    assert aux_checks(report) == [("aux-pulses", "warn", [4])]
+    assert aux_checks(report) == [("aux-pulses-mismatch", "warn", [4])]
     assert "end doesn't match" in unit_report(report)["findings"][0]["message"]
 
 
 def test_aux_channel_not_in_arf(aux_output):
     edit_pprox(aux_output, lambda pp: pp["aux_tracks"]["led"].update(channel="ADC9"))
-    assert aux_checks(audit(aux_output)) == [("aux-pulses", "warn", None)]
+    assert aux_checks(audit(aux_output)) == [("aux-pulses-mismatch", "warn", None)]
 
 
 def test_aux_stream_without_messages(aux_output):
     edit_pprox(aux_output, lambda pp: pp["aux_tracks"]["led"].update(stream="channel3"))
-    assert aux_checks(audit(aux_output)) == [("aux-stream", "info", None)]
+    assert aux_checks(audit(aux_output)) == [("aux-stream-mismatch", "info", None)]
 
 
 def test_spurious_aux_pulse(aux_output, tmp_path):
@@ -1423,8 +1449,8 @@ def test_spurious_aux_pulse(aux_output, tmp_path):
 
     arf = modified_arf(tmp_path, pulse)
     found = aux_checks(audit_arf(aux_output, arf))
-    assert ("aux-stream", "warn", [2]) in found
-    assert ("aux-pulses", "warn", [2]) in found  # and the pprox lacks it
+    assert ("aux-stream-mismatch", "warn", [2]) in found
+    assert ("aux-pulses-mismatch", "warn", [2]) in found  # and the pprox lacks it
 
 
 def test_message_without_aux_pulse(aux_output, tmp_path):
@@ -1439,7 +1465,7 @@ def test_message_without_aux_pulse(aux_output, tmp_path):
 
     edit_pprox(aux_output, lambda pp: pp["pprox"][4]["aux"].clear())
     found = aux_checks(audit_arf(aux_output, modified_arf(tmp_path, silence)))
-    assert found == [("aux-stream", "info", [4])]
+    assert found == [("aux-stream-mismatch", "info", [4])]
 
 
 @pytest.mark.slow
@@ -1471,5 +1497,5 @@ def test_e36_aux_pulses_clean():
     unit = kilo_audit.Unit("E36_5_1_c0", Path("E36_5_1_c0.pprox"), pprox)
     report = kilo_audit.audit_recording(ex / "E36_5_1.arf", [unit])
     assert [f["check"] for f in unit_report(report, "E36_5_1_c0")["findings"]] == [
-        "waveforms"
+        "waveforms-missing"
     ]

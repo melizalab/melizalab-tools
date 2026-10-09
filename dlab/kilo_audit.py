@@ -164,7 +164,7 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
     if missing:
         out.append(
             finding(
-                "pprox-fields",
+                "stimtrial-fields-missing",
                 "fail",
                 "trials without the events, offset, interval or stimulus that "
                 "stimtrial requires (or with non-numeric times)",
@@ -174,10 +174,12 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
         return out
     offsets = np.array([t["offset"] for t in trials])
     if np.any(np.diff(offsets) < 0):
-        out.append(finding("trial-order", "warn", "trials are not in time order"))
+        out.append(finding("trials-unordered", "warn", "trials are not in time order"))
     indexes = [t.get("index") for t in trials]
     if len(set(indexes)) < len(indexes):
-        out.append(finding("trial-index", "warn", "trial indexes are not unique"))
+        out.append(
+            finding("trial-index-duplicate", "warn", "trial indexes are not unique")
+        )
     outside = [
         i
         for i, t in enumerate(trials)
@@ -187,7 +189,7 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
     if outside:
         out.append(
             finding(
-                "events-in-interval",
+                "events-outside-interval",
                 "warn",
                 "trials with events outside the trial interval",
                 outside,
@@ -198,7 +200,7 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
     if n_sorted is not None and n_events > n_sorted:
         out.append(
             finding(
-                "spike-count",
+                "too-many-events",
                 "warn",
                 f"{n_events} events, but kilosort_n_spikes is {n_sorted}",
             )
@@ -206,7 +208,7 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
     if not all("recording" in t for t in trials):
         out.append(
             finding(
-                "recording-field",
+                "recording-ranges-missing",
                 "info",
                 "trials without a recording field; not checked against the "
                 "waveform file",
@@ -218,7 +220,7 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
     if np.any(ends[:-1] > starts[1:]):
         out.append(
             finding(
-                "trial-overlap",
+                "trials-overlap",
                 "warn",
                 "trials that overlap the next trial",
                 np.flatnonzero(ends[:-1] > starts[1:]),
@@ -234,7 +236,7 @@ def check_pprox(unit: Unit, sampling_rate: float) -> list[dict]:
     if bad.size:
         out.append(
             finding(
-                "recording-range",
+                "recording-range-mismatch",
                 "warn",
                 "trials whose recording sample range doesn't match their offset "
                 "and interval",
@@ -257,11 +259,17 @@ def check_schema(unit: Unit, max_errors: int = 3) -> list[dict]:
     the bundled copies of the published pprox and stimtrial schemas."""
     schema = unit.pprox.get("$schema")
     if schema is None:
-        return [finding("schema", "info", "the pprox has no $schema; not validated")]
+        return [
+            finding("schema-invalid", "info", "the pprox has no $schema; not validated")
+        ]
     try:
         errors = pprox.validation_errors(unit.pprox)
     except ValueError:
-        return [finding("schema", "info", f"unknown $schema {schema}; not validated")]
+        return [
+            finding(
+                "schema-invalid", "info", f"unknown $schema {schema}; not validated"
+            )
+        ]
     if not errors:
         return []
     described = []
@@ -278,7 +286,7 @@ def check_schema(unit: Unit, max_errors: int = 3) -> list[dict]:
     )
     return [
         finding(
-            "schema",
+            "schema-invalid",
             "warn",
             f"{len(errors)} violation(s) of {schema}: " + "; ".join(described) + more,
             trials or None,
@@ -293,7 +301,7 @@ def check_waveforms(unit: Unit) -> list[dict]:
     """Checks that the events in a unit's pprox can be rebuilt from the spike
     times in its waveform file."""
     if unit.waveforms_path is None:
-        return [finding("waveforms", "info", "no waveform file")]
+        return [finding("waveforms-missing", "info", "no waveform file")]
     if not all("recording" in t for t in unit.trials):
         return []
     with h5.File(unit.waveforms_path, "r") as fp:
@@ -304,7 +312,7 @@ def check_waveforms(unit: Unit) -> list[dict]:
     if recording is not None and recording != unit.pprox.get("recording"):
         out.append(
             finding(
-                "waveforms-recording",
+                "waveforms-recording-mismatch",
                 "fail",
                 f"the waveform file is from {recording}, the pprox from "
                 f"{unit.pprox.get('recording')}",
@@ -321,7 +329,7 @@ def check_waveforms(unit: Unit) -> list[dict]:
     if bad:
         out.append(
             finding(
-                "waveforms-events",
+                "waveforms-events-mismatch",
                 "fail",
                 "trials whose events don't match the spike times in the waveform file",
                 bad,
@@ -418,7 +426,7 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     if stimuli is None:
         return [
             finding(
-                "messages",
+                "messages-unchecked",
                 "info",
                 "no stimulus messages in the ARF file (use --oeaudio-log); "
                 "trials not checked against them",
@@ -448,10 +456,9 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
                 finding(
                     "clock-shift",
                     "warn",
-                    f"trial i follows message i+{k}, with onsets {abs(lag):.3f} s "
-                    f"{'before' if lag < 0 else 'after'} their messages: the trials "
-                    "are timed from another origin (e.g. the start of a sort of "
-                    "part of the recording); checked against those messages",
+                    f"trials timed from about {abs(lag):.0f} s "
+                    f"{'into' if lag < 0 else 'before'} the recording "
+                    f"(trial 0 follows message {k})",
                 )
             )
             idx = np.arange(len(trials)) + k
@@ -461,7 +468,7 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
         severity = "fail" if early.size > MAX_OUTLIER_FRACTION * len(trials) else "warn"
         out.append(
             finding(
-                "messages-before",
+                "trials-before-messages",
                 severity,
                 "trials that start before any stimulus message",
                 early,
@@ -470,7 +477,7 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     if wrong:
         out.append(
             finding(
-                "stimulus-labels",
+                "stimulus-mislabeled",
                 "fail",
                 "trials labeled with a different stimulus from the message "
                 "before their onset",
@@ -482,7 +489,7 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     if shared.size:
         out.append(
             finding(
-                "messages-shared",
+                "trials-share-message",
                 "fail",
                 "trials that follow the same stimulus message as the previous trial",
                 shared,
@@ -510,10 +517,12 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
         message = (
             f"{timing}; {'; '.join(notes)}: the messages were delayed by varying "
             "amounts (message timing only; the onsets come from the sync track, "
-            "and stimulus-durations checks them)"
+            "and stimulus-duration-mismatch checks them)"
         )
         out.append(
-            finding("sync-lag", "info", message, outliers if outliers.size else None)
+            finding(
+                "message-jitter", "info", message, outliers if outliers.size else None
+            )
         )
     n_dropped = len(stimuli) - np.unique(idx[later]).size
     allowed = max(1, int(0.01 * len(stimuli)))
@@ -626,7 +635,7 @@ def check_stimulus_durations(unit: Unit, sampling_rate: float, sync=None) -> lis
             )
     allowed = max(1, int(0.01 * len(trials)))
     severity = "fail" if bad.size > allowed else "warn"
-    return [finding("stimulus-durations", severity, message, bad)]
+    return [finding("stimulus-duration-mismatch", severity, message, bad)]
 
 
 def check_recording_name(unit: Unit, recording: str) -> list[dict]:
@@ -634,12 +643,12 @@ def check_recording_name(unit: Unit, recording: str) -> list[dict]:
     (by neurobank id, the last part of its URL)."""
     url = unit.pprox.get("recording")
     if url is None:
-        return [finding("recording-name", "info", "the pprox names no recording")]
+        return [finding("recording-mismatch", "info", "the pprox names no recording")]
     name = url.rstrip("/").rsplit("/", 1)[-1]
     if name != recording:
         return [
             finding(
-                "recording-name",
+                "recording-mismatch",
                 "warn",
                 f"the pprox names recording {name}, not {recording}",
             )
@@ -678,7 +687,7 @@ def check_aux_fields(unit: Unit) -> list[dict]:
         if with_aux:
             return [
                 finding(
-                    "aux-tracks",
+                    "aux-tracks-missing",
                     "warn",
                     "trials have aux pulses, but there is no aux_tracks field "
                     "describing their channels",
@@ -691,7 +700,7 @@ def check_aux_fields(unit: Unit) -> list[dict]:
     if no_list:
         out.append(
             finding(
-                "aux-fields",
+                "aux-fields-invalid",
                 "warn",
                 "trials without an aux list (a trial without pulses should have an "
                 "empty one)",
@@ -719,7 +728,7 @@ def check_aux_fields(unit: Unit) -> list[dict]:
         names = f" (names not in aux_tracks: {', '.join(sorted(map(str, unknown)))})"
         out.append(
             finding(
-                "aux-fields",
+                "aux-fields-invalid",
                 "warn",
                 "trials with malformed aux pulses" + (names if unknown else ""),
                 sorted(set(malformed)),
@@ -728,7 +737,7 @@ def check_aux_fields(unit: Unit) -> list[dict]:
     if outside:
         out.append(
             finding(
-                "aux-fields",
+                "aux-fields-invalid",
                 "warn",
                 "trials with aux pulses that don't start in the trial",
                 sorted(set(outside)),
@@ -773,7 +782,10 @@ def check_aux_channel(
         if trials:
             out.append(
                 finding(
-                    "aux-pulses", "warn", f"trials with {what}", sorted(set(trials))
+                    "aux-pulses-mismatch",
+                    "warn",
+                    f"trials with {what}",
+                    sorted(set(trials)),
                 )
             )
     return out
@@ -795,7 +807,7 @@ def check_aux_stream(
     if not messages:
         return [
             finding(
-                "aux-stream",
+                "aux-stream-mismatch",
                 "info",
                 f"no '{stream}' messages to check aux '{name}' against",
             )
@@ -817,7 +829,7 @@ def check_aux_stream(
     if found["unexpected"]:
         out.append(
             finding(
-                "aux-stream",
+                "aux-stream-mismatch",
                 "warn",
                 f"trials with aux '{name}' pulses outside every '{stream}' message's "
                 "window (spurious pulses?)",
@@ -827,7 +839,7 @@ def check_aux_stream(
     if found["missing"]:
         out.append(
             finding(
-                "aux-stream",
+                "aux-stream-mismatch",
                 "info",
                 f"{len(found['missing'])} of {len(messages)} '{stream}' messages have "
                 f"no '{name}' pulse (recorded as such in aux)",
@@ -837,7 +849,7 @@ def check_aux_stream(
     if found["late"]:
         out.append(
             finding(
-                "aux-stream",
+                "aux-stream-mismatch",
                 "info",
                 f"trials with aux '{name}' pulses whose lag after their '{stream}' "
                 f"message differs from the median ({found['lag'] / sampling_rate:.3f} s) "
@@ -882,7 +894,9 @@ def check_aux(unit: Unit, entry, first_sample: int, sampling_rate: float, cache:
         if channel is None:
             out.append(
                 finding(
-                    "aux-pulses", "warn", f"aux_tracks gives no channel for '{name}'"
+                    "aux-pulses-mismatch",
+                    "warn",
+                    f"aux_tracks gives no channel for '{name}'",
                 )
             )
             continue
@@ -895,7 +909,7 @@ def check_aux(unit: Unit, entry, first_sample: int, sampling_rate: float, cache:
         if detected is None:
             out.append(
                 finding(
-                    "aux-pulses",
+                    "aux-pulses-mismatch",
                     "warn",
                     f"channel {channel} for aux '{name}' is not in the ARF file",
                 )
@@ -983,7 +997,7 @@ def check_recording_metadata(
     if mismatched:
         out.append(
             finding(
-                "metadata-arf",
+                "metadata-arf-mismatch",
                 "warn",
                 "the ARF file and the registry disagree: " + "; ".join(mismatched)
                 if record is not None
@@ -1003,7 +1017,7 @@ def check_recording_metadata(
             if name != bird:
                 out.append(
                     finding(
-                        "metadata-name",
+                        "metadata-bird-mismatch",
                         "warn",
                         f"the ARF {source} is for bird {name}, but the recording "
                         f"is {recording}",
@@ -1032,7 +1046,7 @@ def check_unit_metadata(
         if differ:
             out.append(
                 finding(
-                    "metadata-registry",
+                    "metadata-pprox-mismatch",
                     "warn",
                     "the pprox and the recording's registry record disagree: "
                     + "; ".join(differ),
@@ -1046,7 +1060,7 @@ def check_unit_metadata(
         if one_side:
             out.append(
                 finding(
-                    "metadata-registry",
+                    "metadata-pprox-mismatch",
                     "info",
                     "fields in only one of the pprox and the recording's registry "
                     "record: " + ", ".join(one_side),
@@ -1062,7 +1076,7 @@ def check_unit_metadata(
         if differ:
             out.append(
                 finding(
-                    "metadata-unit",
+                    "metadata-unit-mismatch",
                     "warn",
                     "the pprox and the registry record of the unit's resource "
                     "disagree: " + "; ".join(differ),
@@ -1102,7 +1116,7 @@ def check_units(units: list[Unit]) -> list[dict]:
         groups = sorted(tables.values(), key=len, reverse=True)
         out.append(
             finding(
-                "trial-tables",
+                "trial-tables-differ",
                 "warn",
                 "units have different trials: "
                 + "; ".join(", ".join(names) for names in groups),
@@ -1114,7 +1128,7 @@ def check_units(units: list[Unit]) -> list[dict]:
     if len(versions) > 1:
         out.append(
             finding(
-                "versions",
+                "versions-differ",
                 "info",
                 "units processed by different versions: " + "; ".join(sorted(versions)),
             )
@@ -1149,7 +1163,7 @@ def audit_recording(
         if recording not in records:
             findings.append(
                 finding(
-                    "registry",
+                    "recording-unregistered",
                     "warn",
                     f"the recording {recording} is not in the registry",
                 )
@@ -1190,7 +1204,7 @@ def audit_recording(
             if len(entry_ids) > 1:
                 unit.findings.append(
                     finding(
-                        "messages",
+                        "messages-unchecked",
                         "info",
                         "trials from more than one entry; not checked against "
                         "the messages",
