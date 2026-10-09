@@ -143,6 +143,45 @@ when a fix makes one pass.
 - [x] Record the options that determine the trials (`sync_track`, `prepad`,
   and `sync_thresh`/`oeaudio_log` when given) in the pprox and waveform files,
   so trials can be reconstructed without the command line.
+- [ ] Sorting part of a recording: merge in the code the student used to sort
+  a time window (deliberate exclusions, confirmed 2026-10-09), and record the
+  window actually sorted as a top-level annotation in the pprox and waveform
+  files, with enough to replicate the exclusion from the ARF file alone: the
+  entry (or entries), the start and end in samples from the entry's first
+  sample (half-open, [start, end)) as well as in s, the open-ephys sample
+  number of the entry's first sample (so message times can be placed), how
+  the window was applied (data cut before sorting, or kilosort's
+  `tmin`/`tmax`) and the program and version that applied it. Check against
+  the student's code which of these it already knows. Deposited examples: P388_3_1 (700 s to ~4500 s) and P390_3_1 (from
+  500 s), whose trials and spikes are timed from the window's start; C110_1_1,
+  C122_1_1, P388_4_1, E82_1_1, E82_2_1, which end early and keep the
+  recording's origin. Decide whether output is timed from the recording's
+  start (consistent with the ARF; needs the spike times shifted) or the
+  window's start (with the annotation, consumers can convert). The audit and
+  regenerate-pprox `--from-arf` should then use the annotation: messages
+  outside the window are expected to have no trial, and a shifted origin is
+  not a failure (see the clock-shift item under the audit).
+- [ ] Store the other parameters that determine group-kilo-spikes output in
+  the pprox (and waveform files where they apply), so a unit can be
+  reproduced and audited without the command line. Not recorded now:
+  - `artifact_reject_thresh`, which decides which spikes are dropped as
+    artifacts, and the counts of spikes dropped (as artifacts, too close to
+    the ends of temp_wh.dat for a waveform, as duplicate times, and before
+    the first trial), so a unit's spike total can be reconciled with
+    `kilosort_n_spikes`;
+  - `waveform_pre_peak`/`waveform_post_peak` in the pprox (implicit in the
+    waveform file's shape and `peak_index`, but they also decide which
+    spikes are too close to the ends);
+  - the cluster id and its phy group (`good`, or `mua` with `--mua`), now
+    only implied by the file name and the option;
+  - the sort: the sort directory's name, `params.py` (dtype, channel count,
+    sampling rate) and the number of samples in temp_wh.dat. The sample
+    count also shows whether a window was sorted (see the item above);
+  - `--local-stim-dir`, when stimulus durations came from local files
+    instead of neurobank.
+  The trial options already recorded (`sync_track`, `prepad`, `sync_thresh`,
+  `oeaudio_log`, `aux_tracks`) stay as they are; the schema allows extra
+  top-level fields.
 - [ ] Rescue stimulus onsets in recordings without a sync track by
   cross-correlating the stimulus files with the ADC channel that records an
   analog copy of the audio sent to the speaker. Example: examples/C401_1_1b
@@ -250,7 +289,9 @@ recordings, which are out of scope).
     700 s (500 s) early; labels right. The audit reports nearly every trial
     as mislabeled and lag outliers. Could align the label sequence with the
     messages and report the shift as its own finding (not a fail for
-    stimulus-locked analyses). `test_clock_shift_reported_as_mislabeling`.
+    stimulus-locked analyses). The sorted-window annotation (see
+    group-kilo-spikes) would make this explicit for new output.
+    `test_clock_shift_reported_as_mislabeling`.
   - [ ] `messages-before` returns before the other message checks, so
     P390_3_1's summary lists one trial though 2897 of 2908 trials don't match
     their messages. `test_messages_before_hides_other_checks`.
