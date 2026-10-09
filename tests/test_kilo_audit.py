@@ -153,30 +153,56 @@ def shift_onset(trial, seconds):
 
 
 def test_late_onset(output):
-    """A trial whose onset is out of line with its message is a warning,
-    listing the trial (it can be excluded)."""
+    """An onset that isn't the rise of its stimulus's pulse (here 0.5 s late)
+    fails the stimulus length check, listing the trial; its lag is noted as
+    message timing."""
     edit_pprox(output, lambda pp: shift_onset(pp["pprox"][3], 0.5))
     report = audit(output)
-    assert checks(unit_report(report)) == [("sync-lag", "warn", [3])]
+    assert checks(unit_report(report)) == [
+        ("sync-lag", "info", [3]),
+        ("stimulus-durations", "warn", [3]),
+    ]
     # the other units now have a different trial table
     assert [f["check"] for f in report["findings"]] == ["trial-tables"]
 
 
-def test_late_onsets_in_old_version(output):
-    """In output from a version before the sync fixes, the finding says the
-    outliers are probably a known error."""
+def test_pulse_end_onset_in_old_version(output):
+    """In output from a version before the sync fixes, an onset at the end of
+    its pulse is probably the known detection error, and the finding says
+    so."""
 
     def old(pp):
-        shift_onset(pp["pprox"][3], 0.5)
+        trial = pp["pprox"][3]
+        start, stop = trial["stimulus"]["interval"]
+        shift_onset(trial, stop - start)
         pp["processed_by"] = ["group-kilo-spikes 2026.07.15"]
 
     edit_pprox(output, old)
-    (f,) = unit_report(audit(output))["findings"]
-    assert "expected in versions before 2026.10.07" in f["message"]
+    found = unit_report(audit(output))["findings"]
+    (f,) = [f for f in found if f["check"] == "stimulus-durations"]
+    assert (f["severity"], f["trials"]) == ("warn", [3])
+    assert "probably pulse onsets reported at the end of the pulse" in f["message"]
+
+
+def test_pulse_track_found_without_sync_track(output):
+    """For pprox files that don't record their sync track (versions before
+    2026.10.07), the pulse track is the channel whose pulses rise at the
+    onsets."""
+
+    def old(pp):
+        del pp["sync_track"]
+        shift_onset(pp["pprox"][3], 0.5)
+
+    edit_pprox(output, old)
+    found = unit_report(audit(output))["findings"]
+    (f,) = [f for f in found if f["check"] == "stimulus-durations"]
+    assert f["trials"] == [3]
+    assert "the width of the pulse on ADC3" in f["message"]
 
 
 def test_most_onsets_out_of_line(output):
-    """Lag outliers in more than half of the trials fail the unit."""
+    """Onsets that drift away from their pulses fail the stimulus length
+    check; the lags are noted as message timing."""
 
     def drift(pp):
         for i, trial in enumerate(pp["pprox"]):
@@ -184,7 +210,10 @@ def test_most_onsets_out_of_line(output):
 
     edit_pprox(output, drift)
     unit = unit_report(audit(output))
-    assert ("sync-lag", "fail", [0, 1, 3, 4]) in checks(unit)
+    assert checks(unit) == [
+        ("sync-lag", "info", [0, 1, 3, 4]),
+        ("stimulus-durations", "fail", [1, 2, 3, 4]),
+    ]
 
 
 def test_events_outside_interval(output):
@@ -451,12 +480,13 @@ def test_wide_message_jitter_is_info():
     assert [(f["check"], f["severity"], f.get("trials")) for f in found] == [
         ("sync-lag", "info", None)
     ]
-    assert found[0]["message"].startswith("onset lags are spread over 0.5")
+    assert found[0]["message"].startswith("onsets follow their messages by 0.6")
+    assert "spread more than the usual ~30 ms" in found[0]["message"]
 
 
 def test_late_onset_with_wide_jitter():
-    """A late onset is still flagged when the lags are spread widely, against
-    the range of the others."""
+    """An out-of-line lag is still found when the lags are spread widely,
+    judged against the range of the others; it is noted as message timing."""
     names, starts, onsets = presentation(200, lag=(0.565, 0.780))
     onsets[7] += 0.3  # late, but before the next message
     trials = list(zip(names, onsets, strict=True))
@@ -464,10 +494,9 @@ def test_late_onset_with_wide_jitter():
         message_unit(trials), message_stimuli(names, starts), RATE
     )
     assert [(f["check"], f["severity"], f.get("trials")) for f in found] == [
-        ("sync-lag", "warn", [7]),
-        ("sync-lag", "info", None),
+        ("sync-lag", "info", [7])
     ]
-    assert "outside the range of the others (0.5" in found[0]["message"]
+    assert "(5th-95th percentile 0.5" in found[0]["message"]
 
 
 def shifted_presentation(shift=100.0, skip=80):
@@ -569,6 +598,41 @@ def test_duplicate_start_messages():
         round(s * RATE) - (s == starts[-1]) * 30 for s in starts
     ]
     assert message_checks(trials, stimuli) == []
+
+
+def length_unit(lengths, onsets):
+    """A unit whose trials have these stimulus lengths (s) and onsets (s)"""
+    unit = message_unit([(f"s{i}", on) for i, on in enumerate(onsets)])
+    for trial, length in zip(unit.trials, lengths, strict=True):
+        trial["stimulus"]["interval"] = [0.0, length]
+    return unit
+
+
+def presented(n=200, seed=4):
+    """Lengths (s) and onsets (s) of n stimuli of varied length, each followed
+    by a gap of 1.4-1.75 s, as oeaudio-present presents them"""
+    rng = np.random.default_rng(seed)
+    lengths = rng.uniform(0.5, 2.0, n)
+    gaps = rng.uniform(1.4, 1.75, n)
+    onsets = 1.0 + np.concatenate([[0.0], np.cumsum(lengths + gaps)[:-1]])
+    return lengths, onsets
+
+
+def test_stimulus_durations_fit():
+    lengths, onsets = presented()
+    unit = length_unit(lengths, onsets)
+    assert kilo_audit.check_stimulus_durations(unit, RATE) == []
+
+
+def test_stimulus_durations_shifted_labels():
+    """Trials paired with the stimuli in order after a missed sync event (the
+    error of versions before 2026.10.07) don't fit the gaps between the onsets,
+    from the pprox alone."""
+    lengths, onsets = presented()
+    unit = length_unit(lengths[:-1], np.delete(onsets, 100))
+    (f,) = kilo_audit.check_stimulus_durations(unit, RATE)
+    assert (f["check"], f["severity"]) == ("stimulus-durations", "fail")
+    assert min(f["trials"]) >= 99 and len(f["trials"]) > 10
 
 
 # --- selection

@@ -143,6 +143,20 @@ when a fix makes one pass.
 - [x] Record the options that determine the trials (`sync_track`, `prepad`,
   and `sync_thresh`/`oeaudio_log` when given) in the pprox and waveform files,
   so trials can be reconstructed without the command line.
+- [x] Check stimulus lengths against the sync track when splitting trials
+  (`kilo.check_stimulus_lengths`, in `arf_to_trials`): the gaps before the
+  next onsets, and pulse widths for a pulse track (`kilo.is_pulse_track`:
+  median width > 50 ms); see `stimulus-durations` in the audit. Logs each
+  trial that doesn't fit, and stops if more than 1% of the stimuli (at least
+  one) don't, since the trials would probably be mislabeled. Applies to
+  `--oeaudio-log` too, where it checks a log paired in order. Tests in
+  tests/test_kilo_arf.py; the excerpt tests now use the real stimulus lengths.
+- [ ] Pair sync events with stimuli by order, checked by stimulus length, with
+  message times only to locate a missed or spurious sync event.
+  `match_sync_events` pairs each sync event with the last message before it,
+  which assumes messages arrive before their sync event; messages that
+  jittered by more than the gap between stimuli would mislabel trials (or
+  raise). The same applies to the audit's `stimulus-labels` check.
 - [ ] Sorting part of a recording: merge in the code the student used to sort
   a time window (deliberate exclusions, confirmed 2026-10-09), and record the
   window actually sorted as a top-level annotation in the pprox and waveform
@@ -281,11 +295,34 @@ recordings, which are out of scope).
     problems.txt was this. Now `kilo.sync_lag_outliers` (shared with
     group-kilo-spikes) flags lags more than 0.1 s outside the 5th-95th
     percentile range (`kilo.sync_lag_range`), or of the median if that range
-    is wider than 0.3 s or there are fewer than 20 lags. A range wider than
-    0.1 s is reported as `sync-lag` at info (long, variable delays on one
-    machine are worth knowing about). C165_3_1, C361_1_1, E92_4_1 and
-    P399_4_1 now have only that. `test_wide_message_jitter_is_info`,
-    `test_late_onset_with_wide_jitter`.
+    is wider than 0.3 s or there are fewer than 20 lags. C165_3_1, C361_1_1,
+    E92_4_1 and P399_4_1 now have only an info finding.
+    `test_wide_message_jitter_is_info`, `test_late_onset_with_wide_jitter`.
+    Then (2026-10-09) `sync-lag` was made info only, since the lags only
+    describe the message timing: the neural data and sync track share a
+    clock, so an onset that is the stimulus's sync event is right whatever
+    its lag. It reports the median lag and 5th-95th percentile when that
+    range is wider than 0.1 s or trials are out of line (listed), to flag
+    problems with the presentation setup. The onsets and labels are checked
+    by `stimulus-durations` (below) and `stimulus-labels`.
+  - [x] `stimulus-durations` (2026-10-09): the messages give the order of the
+    stimuli, so the trials are right if each sync event has the right
+    stimulus, which the stimulus lengths check. From the pprox alone, the gap
+    from the end of each stimulus to the next onset must not be short against
+    the recording's other gaps (`kilo.stimulus_length_mismatches`: below the
+    lower Tukey fence less 50 ms, or negative; the gap is exactly 1.100 s for
+    jpresent and within ~0.35 s for oeaudio-present in the archive, and a
+    one-trial label shift breaks 28-96% of trials). With a pulse sync track in
+    the ARF (`sync_track`, or the pulse channel rising at the most onsets, at
+    least half), each onset must be the rise of a pulse within 10 ms as long as
+    its stimulus (to the sample in E36_2_1); this catches the old pulse-end
+    error. Warn for at most 1% of trials (at least one), fail above. On 12
+    archive recordings only E36_2_1 trial 0 is listed (clicks in the 0.5 and
+    1.0 rigs, P397 with labels from the log, E1 clicks, P352 and E36 pulses).
+    Tests in tests/test_kilo_audit.py (`test_late_onset`,
+    `test_pulse_end_onset_in_old_version`,
+    `test_pulse_track_found_without_sync_track`,
+    `test_stimulus_durations_*`).
   - [x] A constant clock shift was reported as mislabeling. P388_3_1 and
     P390_3_1 were sorted from 700 s and 500 s into the recording, and
     group-kilo-spikes 2025.09.03 timed their trials (and spikes) from the

@@ -395,15 +395,85 @@ def test_pulses_detected_at_rising_edge(make_arf, stimuli, nsamples, dips):
     failed on both counts.
     """
     path = make_arf(pulse_entry(stimuli, nsamples, dips))
-    result = trials(path, StubFinder({"a": 0.4, "b": 0.4, "c": 0.4}))
+    lengths = {name: (off - on) / SAMPLING_RATE for name, on, off in stimuli}
+    result = trials(path, StubFinder(lengths))
     assert [t.stimulus_start for t in result] == [on for _, on, _ in stimuli]
 
 
 def test_pulse_falling_edge_not_used(make_arf):
-    """stimulus_end comes from the stimulus duration, not the end of the pulse."""
-    finder = StubFinder({"a": 0.4, "b": 0.4, "c": 0.4})  # shorter than the pulses
+    """stimulus_end comes from the stimulus duration, not the end of the pulse
+    (which may differ by up to 10 ms; see test_pulse_width_mismatch)."""
+    finder = StubFinder({"a": 0.495, "b": 0.495, "c": 0.495})  # pulses are 0.5 s
     for t in trials(make_arf(pulse_entry()), finder):
-        assert t.stimulus_end - t.stimulus_start == 12000, "end from duration"
+        assert t.stimulus_end - t.stimulus_start == 14850, "end from duration"
+
+
+def presentation_lengths(n=100, gap=1.1, seed=2):
+    """Onsets (samples) and lengths (s) of n stimuli of varied length, each
+    followed by a constant gap, as jpresent presents them"""
+    rng = np.random.default_rng(seed)
+    lengths = rng.uniform(0.5, 2.5, n)
+    onsets = np.round(
+        np.concatenate([[1.0], 1.0 + np.cumsum(lengths[:-1] + gap)]) * SAMPLING_RATE
+    ).astype(int)
+    return onsets, lengths
+
+
+def test_stimulus_lengths_fit():
+    """Stimuli that end a constant gap before the next onset, or a varying gap
+    as with oeaudio-present, fit the sync track."""
+    onsets, lengths = presentation_lengths()
+    assert kilo.stimulus_length_mismatches(onsets, lengths, SAMPLING_RATE).size == 0
+    rng = np.random.default_rng(3)
+    jittered = onsets + np.round(rng.uniform(0, 0.35, onsets.size) * SAMPLING_RATE)
+    assert kilo.stimulus_length_mismatches(jittered, lengths, SAMPLING_RATE).size == 0
+
+
+def test_stimulus_lengths_shifted_labels():
+    """If the stimuli after a missed sync event are paired with the sync events
+    in order, many no longer fit the gaps before the next onsets."""
+    onsets, lengths = presentation_lengths()
+    remaining = np.delete(onsets, 50)  # sync event 50 missed
+    # paired in order: the event of stimulus 51 gets stimulus 50, and so on
+    bad = kilo.stimulus_length_mismatches(remaining, lengths[:-1], SAMPLING_RATE)
+    assert bad.size > 15 and bad.min() >= 49
+    # paired correctly, with stimulus 50's trial dropped, they fit
+    correct = np.delete(lengths, 50)
+    assert kilo.stimulus_length_mismatches(remaining, correct, SAMPLING_RATE).size == 0
+
+
+def test_stimulus_lengths_long_gap_allowed():
+    """A long gap (a dropped trial, or a pause) is not a mismatch."""
+    onsets, lengths = presentation_lengths()
+    keep = np.arange(onsets.size) != 50
+    bad = kilo.stimulus_length_mismatches(onsets[keep], lengths[keep], SAMPLING_RATE)
+    assert bad.size == 0
+
+
+def test_stimulus_lengths_pulse_widths():
+    """A pulse more than 10 ms longer or shorter than its stimulus is a
+    mismatch; an unknown width (NaN) isn't."""
+    onsets, lengths = presentation_lengths(10)
+    widths = lengths * SAMPLING_RATE
+    widths[2] += 0.005 * SAMPLING_RATE
+    widths[4] += 0.05 * SAMPLING_RATE
+    widths[6] = np.nan
+    bad = kilo.stimulus_length_mismatches(onsets, lengths, SAMPLING_RATE, widths)
+    assert bad.tolist() == [4]
+
+
+def test_pulse_width_mismatch(make_arf, caplog):
+    """A stimulus that doesn't match its pulse is logged; when more than 1% of
+    the stimuli (at least one) don't, the trials would probably be mislabeled,
+    so arf_to_trials stops."""
+    path = make_arf(pulse_entry())
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        trials(path, StubFinder({"a": 0.5, "b": 0.6, "c": 0.5}))
+    assert "stimulus 1 (b, 0.600 s) doesn't fit the sync track (pulse 0.500 s" in (
+        caplog.text
+    )
+    with pytest.raises(RuntimeError, match="2 of 3 stimuli don't fit the sync track"):
+        trials(path, StubFinder({"a": 0.5, "b": 0.6, "c": 0.6}))
 
 
 def test_flat_sync_track_is_an_error(make_arf):

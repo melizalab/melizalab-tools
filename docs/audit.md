@@ -279,7 +279,8 @@ numbers are indexes into the pprox's `pprox` array.
 | [`messages-before`](#messages-before)                           | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
 | [`stimulus-labels`](#stimulus-labels)                           | fail       | sometimes | re-sync                                                 |
 | [`messages-shared`](#messages-shared)                           | fail       | sometimes | re-sync                                                 |
-| [`sync-lag`](#sync-lag)                                         | info–fail  | yes       | exclude trials (warn), re-sync (fail); none (info)      |
+| [`stimulus-durations`](#stimulus-durations)                     | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
+| [`sync-lag`](#sync-lag)                                         | info       | —         | none needed; check the presentation setup               |
 | [`trials-dropped`](#trials-dropped)                             | info, warn | —         | none needed; check the sync track if many               |
 | [`metadata-registry`](#metadata-registry)                       | warn, info | yes       | correct the registry metadata                           |
 | [`metadata-unit`](#metadata-unit)                               | warn       | yes       | correct the registry metadata                           |
@@ -576,7 +577,9 @@ These compare each trial's onset (its sync event) with the start message that
 the presentation script sent for its stimulus. Sync events follow their
 message by a lag from audio buffering. The lag is typically 0.25–1 s,
 depending on the setup. Within a recording it varies by about 30 ms, or is
-spread evenly over about 0.2 s with a larger audio buffer.
+spread evenly over about 0.2 s with a larger audio buffer. The messages give
+the order of the stimuli; the onsets come from the sync track, which is
+recorded with the neural data.
 
 #### `messages`
 
@@ -655,31 +658,60 @@ event or a missing message. This usually comes with `stimulus-labels`.
 
 **Fixable:** as for `stimulus-labels`.
 
+#### `stimulus-durations`
+
+**Severity:** warn if at most 1% of the trials (at least one) are listed,
+fail if more
+
+**Problem:** The listed trials' stimulus lengths don't fit the sync track.
+The messages give the order of the stimuli, and the sync events give their
+onsets, so the trials are right if each sync event is paired with the right
+stimulus. The stimulus lengths check that pairing:
+- The presenters wait a nearly constant time after each stimulus before the
+  next (exactly, for jpresent; within ~0.35 s for oeaudio-present). A trial is
+  listed if the gap from the end of its stimulus to the next onset is shorter
+  than the recording's other gaps (below the lower Tukey fence, less 50 ms).
+  This uses only the pprox, so it works on any unit. Longer gaps are allowed:
+  a trial may have been dropped or the presentation paused.
+- If the ARF file has a pulse sync track (the pprox's `sync_track`, or for
+  older files the channel whose pulses rise at 90% of the onsets), each onset
+  must be the rise of a pulse within 10 ms as long as its stimulus.
+
+A listed trial has the wrong stimulus, or an onset that isn't its sync event.
+- Versions before 2026.10.07 paired sync events with stimuli in order, so
+  after a missed sync event every later trial had the next trial's stimulus;
+  many of those trials don't fit.
+- Versions before 2026.10.07 reported some pulse onsets at the end of the
+  pulse, 1.2–1.5 s late, so they aren't the rise of a pulse (e.g. trials 0, 3
+  and 12 of E36_5_1 in the old run); the message notes this case. So was trial
+  0 of E36_2_1 (group-klopto-spikes 2026.07.15), whose pulse was already high
+  when the recording started.
+
+group-kilo-spikes makes the same check when it splits the trials, and stops if
+more than 1% of the stimuli don't fit.
+
+**Fixable:** sometimes. For a warning, exclude the listed trials. For a
+failure, the labels are unreliable: re-sync if the recording has a usable
+sync track.
+
 #### `sync-lag`
 
-**Severity:** warn if at most half of the trials are listed, fail if more;
-info for a wide spread of lags (no trials listed)
+**Severity:** info
 
-**Problem:** The listed trials' onsets lag their start message by more than
-0.1 s outside the range of the other lags, so spike times in those trials are
-misaligned with the stimulus. The range is the 5th to 95th percentile of the
-lags (given in the message), which allows for recordings whose lags are spread
-evenly over ~0.2 s (47 recordings from 2026, e.g. C165_3_1, from a larger
-audio buffer; their onsets are right). If that range is wider than 0.3 s, or
-there are fewer than 20 trials, the median is used instead.
+**Problem:** A trial's lag is the time from its start message to its onset,
+the sync event that its spike times are relative to. The neural data and the
+sync track are recorded together, so an onset that is the stimulus's sync
+event is right whatever its lag (`stimulus-durations` checks the onsets and
+`stimulus-labels` the labels): the lags describe the message timing, which is
+worth knowing about for the presentation setup. The message gives the median
+lag and its 5th to 95th percentile, and is reported when the lags are spread
+over more than 0.1 s (rather than the usual ~30 ms), or when the listed trials
+are more than 0.1 s outside that range (outside the median, if the range is
+wider than 0.3 s or there are fewer than 20 trials). In 47 recordings from
+2026 (e.g. C165_3_1) the lags are spread evenly over ~0.2 s, probably from a
+larger audio buffer than needed.
 
-At info, the lags are spread over more than 0.1 s (5th to 95th percentile),
-rather than the usual ~30 ms: the stimulus messages were delayed by varying
-amounts, which is worth knowing about on a single machine (e.g. an audio
-buffer set larger than needed). The onsets come from the sync track, so this
-doesn't affect the trials; `stimulus-labels` still checks the labels.
-- Versions before 2026.10.07 reported some pulse onsets at the end of the
-  pulse, 1.2–1.5 s late; the message notes this case. For example, trials 0,
-  3 and 12 of E36_5_1 were affected in the old run.
-- Without a working sync line, the onsets drift (C401_1_1b).
-
-**Fixable:** yes. For a warning, exclude the listed trials. For a failure, the
-onsets are unreliable: re-sync if the recording has a usable sync track.
+**Fixable:** nothing to fix in the data.
 
 #### `trials-dropped`
 

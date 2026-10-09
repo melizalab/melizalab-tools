@@ -423,7 +423,8 @@ def arf_to_trials(
                 f"unable to find sync track. Use --sync to configure. Options are: {available_tracks}"
             ) from err
 
-        stim_onsets = detect_sync_onsets(sync[:], level=sync_thresh)
+        sync_pulses = detect_pulses(sync[:], level=sync_thresh)
+        stim_onsets = sync_pulses[:, 0]
         log.info("    - detected %d sync events", stim_onsets.size)
         if stim_onsets.size == 0:
             raise RuntimeError(
@@ -504,6 +505,10 @@ def arf_to_trials(
                     hi,
                 )
 
+        check_stimulus_lengths(
+            entry_stimuli, stim_durations, sync_pulses, sync.size, sampling_rate
+        )
+
         padding_samples = int(prepad * sampling_rate)
         entry_trials = []
         for stim, onset, offset in zip_longest(
@@ -559,6 +564,49 @@ def arf_to_trials(
                 )
         trials.extend(entry_trials)
     return trials
+
+
+def check_stimulus_lengths(
+    stimuli: list[Stimulus],
+    durations: Mapping[str, float],
+    pulses: np.ndarray,
+    nsamples: int,
+    sampling_rate: float,
+    max_missing: float = 0.01,
+) -> None:
+    """Checks that the stimuli paired with the sync events (one per event) fit
+    the sync track: the gaps between them, and the pulse widths if the sync
+    track has pulses (see stimulus_length_mismatches). Logs a warning for each
+    trial that doesn't fit; raises RuntimeError if more than max_missing of the
+    trials (at least one) don't, since the stimuli are then probably paired
+    with the wrong sync events, and the trials would be mislabeled."""
+    onsets = pulses[:, 0]
+    lengths = np.array([durations[stim.name] for stim in stimuli])
+    widths = None
+    if is_pulse_track(pulses, sampling_rate):
+        # a pulse still high at the end of the track has no known width
+        widths = np.where(pulses[:, 1] < nsamples, pulses[:, 1] - pulses[:, 0], np.nan)
+    bad = stimulus_length_mismatches(onsets, lengths, sampling_rate, widths)
+    for i in bad:
+        log.warning(
+            "  - WARNING: stimulus %d (%s, %.3f s) doesn't fit the sync track "
+            "(%s; next sync event after %.3f s)",
+            i,
+            stimuli[i].name,
+            lengths[i],
+            "clicks" if widths is None else f"pulse {widths[i] / sampling_rate:.3f} s",
+            (onsets[i + 1] - onsets[i]) / sampling_rate
+            if i + 1 < onsets.size
+            else np.nan,
+        )
+    allowed = max(1, int(len(stimuli) * max_missing))
+    if bad.size > allowed:
+        raise RuntimeError(
+            f"{bad.size} of {len(stimuli)} stimuli don't fit the sync track: the "
+            "sync events are probably paired with the wrong stimuli (a missed or "
+            "spurious sync event), or the sync track or stimulus durations are "
+            "wrong. Check --sync, or set --sync-thresh."
+        )
 
 
 def match_aux_pulses(
@@ -862,6 +910,54 @@ def sync_lag_outliers(
         return np.array([], dtype=int)
     lo, hi = sync_lag_range(lags)
     return np.flatnonzero((lags < lo - tolerance) | (lags > hi + tolerance))
+
+
+def is_pulse_track(pulses: np.ndarray, sampling_rate: float) -> bool:
+    """True if the sync events (onset, offset pairs from detect_pulses) are
+    sustained pulses that last as long as the stimulus, not ~2 ms clicks."""
+    widths = (pulses[:, 1] - pulses[:, 0]) / sampling_rate
+    return widths.size > 0 and float(np.median(widths)) > 0.05
+
+
+def stimulus_length_mismatches(
+    onsets: np.ndarray,
+    durations: np.ndarray,
+    sampling_rate: float,
+    widths: np.ndarray | None = None,
+    tolerance: float = 0.01,
+    gap_tolerance: float = 0.05,
+) -> np.ndarray:
+    """Returns the indices of trials whose stimulus length doesn't fit the sync
+    track, which suggests the sync events and stimuli are paired wrongly (e.g.
+    one sync event missed, and the rest paired in order) or an onset that isn't
+    a sync event.
+
+    onsets are the trials' sync onsets (samples, increasing) and durations the
+    lengths of their stimuli (s). The presenters wait a nearly constant time
+    after each stimulus before the next (exactly, for jpresent; within ~0.35 s
+    for oeaudio-present), so a trial fails if the gap from the end of its
+    stimulus to the next onset is shorter than the other gaps (below the lower
+    Tukey fence of the gaps, less gap_tolerance s; with fewer than 4 gaps,
+    only if the next onset comes before the stimulus ends). Longer gaps are
+    allowed: a trial may have been dropped or the presentation paused. If widths (the
+    widths of the trials' sync pulses, in samples, NaN where unknown) are given,
+    a trial also fails if its pulse is more than tolerance s longer or shorter
+    than its stimulus.
+
+    """
+    onsets = np.asarray(onsets)
+    durations = np.asarray(durations, dtype=float)
+    bad = np.zeros(onsets.size, dtype=bool)
+    if widths is not None:
+        widths = np.asarray(widths, dtype=float) / sampling_rate
+        bad |= np.abs(widths - durations) > tolerance  # False where NaN
+    if onsets.size > 1:
+        gaps = np.diff(onsets) / sampling_rate - durations[:-1]
+        bad[:-1] |= gaps < 0
+        if gaps.size >= 4:
+            q1, q3 = np.percentile(gaps, [25, 75])
+            bad[:-1] |= gaps < q1 - 1.5 * (q3 - q1) - gap_tolerance
+    return np.flatnonzero(bad)
 
 
 def assign_spikes(times: np.ndarray, trial_starts: np.ndarray) -> np.ndarray:

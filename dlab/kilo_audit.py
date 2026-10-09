@@ -488,38 +488,32 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
                 shared,
             )
         )
-    lags = (onsets[later] - starts[idx[later]]) / sampling_rate
-    lo, hi = kilo.sync_lag_range(lags) if lags.size else (0.0, 0.0)
+    # the lags describe the message timing: the neural data and the sync track
+    # share a clock, so an onset that is a stimulus's sync event is right
+    # whatever its lag (check_stimulus_durations checks the onsets)
     outliers = later[
         kilo.sync_lag_outliers(starts[idx[later]], onsets[later], sampling_rate)
     ]
-    if outliers.size:
+    lags = (onsets[later] - starts[idx[later]]) / sampling_rate
+    if lags.size:
+        p5, p95 = np.percentile(lags, [5, 95])
+        timing = (
+            f"onsets follow their messages by {np.median(lags):.3f} s "
+            f"(5th-95th percentile {p5:.3f}-{p95:.3f} s)"
+        )
+    if outliers.size or (lags.size and p95 - p5 > MAX_LAG_SPREAD):
+        notes = []
+        if p95 - p5 > MAX_LAG_SPREAD:
+            notes.append("spread more than the usual ~30 ms")
+        if outliers.size:
+            notes.append("the listed trials are more than 0.1 s out of line")
         message = (
-            f"trials whose onset lag is more than 0.1 s outside the range of the "
-            f"others ({lo:.3f}-{hi:.3f} s)"
-            if lo != hi
-            else f"trials whose onset lag differs from the median ({lo:.3f} s) "
-            "by more than 0.1 s"
+            f"{timing}; {'; '.join(notes)}: the messages were delayed by varying "
+            "amounts (message timing only; the onsets come from the sync track, "
+            "and stimulus-durations checks them)"
         )
-        if old_sync_version(unit.processed_by):
-            message += (
-                f"; expected in versions before {SYNC_FIX_VERSION} if the sync "
-                "track was pulses"
-            )
-        severity = (
-            "fail" if outliers.size > MAX_OUTLIER_FRACTION * len(trials) else "warn"
-        )
-        out.append(finding("sync-lag", severity, message, outliers))
-    if hi - lo > MAX_LAG_SPREAD:
         out.append(
-            finding(
-                "sync-lag",
-                "info",
-                f"onset lags are spread over {lo:.3f}-{hi:.3f} s (5th-95th "
-                "percentile), not the usual ~30 ms: the stimulus messages were "
-                "delayed by varying amounts (e.g. a large audio buffer); the onsets "
-                "come from the sync track",
-            )
+            finding("sync-lag", "info", message, outliers if outliers.size else None)
         )
     n_dropped = len(stimuli) - np.unique(idx[later]).size
     allowed = max(1, int(0.01 * len(stimuli)))
@@ -540,6 +534,99 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
             )
         )
     return out
+
+
+def pulse_sync_track(unit: Unit, entry, sampling_rate: float, cache: dict):
+    """The name of the entry's sync track and its pulses, if it has sustained
+    pulses, or None. The track is the unit's sync_track, or for older pprox
+    files that don't record it, the pulse channel with pulses rising at (within
+    2 ms of) the most of the unit's onsets, if that is at least half of them.
+    cache holds the pulses detected on each channel, shared with check_aux."""
+    onsets = np.array([round(t["offset"] * sampling_rate) for t in unit.trials])
+    named = unit.pprox.get("sync_track")
+    if named is not None and named in entry:
+        names = [named]
+    else:
+        messages = kilo.find_message_dset(entry)
+        names = [
+            name
+            for name, dset in entry.items()
+            if not name.startswith("CH")
+            and dset != messages
+            and dset.ndim == 1
+            and dset.dtype.kind in "iuf"
+            and "sampling_rate" in dset.attrs
+        ]
+    window = round(0.002 * sampling_rate)
+    best, best_match = None, 0.5
+    for name in names:
+        key = (entry.name, name)
+        if key not in cache:
+            cache[key] = kilo.detect_pulses(entry[name][:])
+        pulses = cache[key]
+        if not kilo.is_pulse_track(pulses, sampling_rate) or onsets.size == 0:
+            continue
+        if name == named:
+            return name, pulses
+        distance = np.abs(pulses[_nearest_rise(pulses, onsets), 0] - onsets)
+        match = np.mean(distance <= window)
+        if match >= best_match:
+            best, best_match = (name, pulses), match
+    return best
+
+
+def _nearest_rise(pulses: np.ndarray, onsets: np.ndarray) -> np.ndarray:
+    """The index of the pulse whose rise is nearest each onset"""
+    rises = pulses[:, 0]
+    after = np.clip(np.searchsorted(rises, onsets), 0, rises.size - 1)
+    before = np.maximum(after - 1, 0)
+    return np.where(
+        np.abs(rises[after] - onsets) <= np.abs(rises[before] - onsets), after, before
+    )
+
+
+def check_stimulus_durations(unit: Unit, sampling_rate: float, sync=None) -> list[dict]:
+    """Checks that the trials' stimulus lengths fit their onsets: the gap from
+    the end of each stimulus to the next onset (from the pprox alone), and if
+    sync gives the entry's pulse sync track (name, pulses), that each onset is
+    the rise of a pulse as long as its stimulus (see
+    kilo.stimulus_length_mismatches). Since the stimuli are presented in order,
+    lengths that fit mean each sync event has the right stimulus."""
+    trials = unit.trials
+    onsets = np.array([round(t["offset"] * sampling_rate) for t in trials])
+    lengths = np.array(
+        [t["stimulus"]["interval"][1] - t["stimulus"]["interval"][0] for t in trials]
+    )
+    widths = None
+    no_pulse = np.array([], dtype=int)
+    if sync is not None:
+        pulses = sync[1]
+        k = _nearest_rise(pulses, onsets)
+        at_rise = np.abs(pulses[k, 0] - onsets) <= round(0.002 * sampling_rate)
+        widths = np.where(at_rise, pulses[k, 1] - pulses[k, 0], np.nan)
+        no_pulse = np.flatnonzero(~at_rise)
+    bad = np.union1d(
+        kilo.stimulus_length_mismatches(onsets, lengths, sampling_rate, widths),
+        no_pulse,
+    )
+    if bad.size == 0:
+        return []
+    message = (
+        "trials whose stimulus length doesn't fit the sync track (the gap before "
+        "the next onset"
+        + ("" if sync is None else f", or the width of the pulse on {sync[0]}")
+        + "): the sync events may be paired with the wrong stimuli"
+    )
+    if no_pulse.size:
+        message += f"; {no_pulse.size} onsets are not the rise of a pulse"
+        if old_sync_version(unit.processed_by):
+            message += (
+                f" (in versions before {SYNC_FIX_VERSION}, probably pulse onsets "
+                "reported at the end of the pulse)"
+            )
+    allowed = max(1, int(0.01 * len(trials)))
+    severity = "fail" if bad.size > allowed else "warn"
+    return [finding("stimulus-durations", severity, message, bad)]
 
 
 def check_recording_name(unit: Unit, recording: str) -> list[dict]:
@@ -1117,6 +1204,13 @@ def audit_recording(
                 )
             unit.findings.extend(
                 check_messages(unit, stimuli_cache[key], sampling_rate)
+            )
+            unit.findings.extend(
+                check_stimulus_durations(
+                    unit,
+                    sampling_rate,
+                    pulse_sync_track(unit, entry, sampling_rate, aux_cache),
+                )
             )
             if "aux_tracks" in unit.pprox or any("aux" in t for t in unit.trials):
                 unit.findings.extend(

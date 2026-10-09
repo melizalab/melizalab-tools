@@ -50,9 +50,23 @@ def p397_names():
         return [stim.name for stim in kilo.oeaudio_log_to_stimuli(fp, 30000)]
 
 
+def stimulus_lengths() -> dict[str, float]:
+    """The lengths of the E36 excerpt's stimuli (s), from its golden output"""
+    import json
+
+    lengths = {}
+    for path in (DATA / "E36_excerpt_golden").glob("*.pprox"):
+        for trial in json.loads(path.read_text())["pprox"]:
+            start, stop = trial["stimulus"]["interval"]
+            lengths[trial["stimulus"]["name"]] = stop - start
+    return lengths
+
+
 def split(path, sync, names, **kwargs):
+    """Trials from a recording, with E36's stimulus lengths (which the pulses
+    are checked against) and 1 s for any others"""
     kwargs.setdefault("oeaudio_log", None)
-    finder = StubFinder(dict.fromkeys(names, 1.0))
+    finder = StubFinder({**dict.fromkeys(names, 1.0), **stimulus_lengths()})
     with arf.open_file(path, "r") as fp:
         return kilo.arf_to_trials(fp, finder, sync, **kwargs)
 
