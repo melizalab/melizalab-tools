@@ -70,6 +70,11 @@ SEVERITIES = ("ok", "info", "warn", "fail")
 SYNC_FIX_VERSION = "2026.10.07"
 # lag outliers in more than this fraction of trials make a unit unreliable
 MAX_OUTLIER_FRACTION = 0.5
+# sync events follow their messages by 0.25-1 s; a longer lag isn't plausible
+MAX_SYNC_LAG = 2.0
+# lags usually vary by ~30 ms within a recording; a wider range (5th-95th
+# percentile, s) means the messages were delayed by varying amounts
+MAX_LAG_SPREAD = 0.1
 
 
 def finding(check: str, severity: str, message: str, trials=None) -> dict:
@@ -368,10 +373,48 @@ def entry_stimuli(entry, first_sample: int, sampling_rate: float, oeaudio_log):
     return [stim._replace(start=stim.start - first_sample) for stim in stimuli]
 
 
+def clock_shift(
+    names: list[str], onsets: np.ndarray, stimuli, sampling_rate: float
+) -> tuple[int, float] | None:
+    """Looks for a constant shift between a unit's trials and the stimulus
+    messages: an offset k such that trial i follows message i+k throughout,
+    with its label and with consistent lags (see kilo.sync_lag_range), as when
+    a recording was sorted from some time after its start and the trials (and
+    spikes) were timed from the start of the sort (P388_3_1, P390_3_1).
+    Returns k and the median time from message to onset (s, negative if the
+    onsets come first), or None if there is no such offset."""
+    codes = {}
+    trial_codes = np.array([codes.setdefault(n, len(codes)) for n in names])
+    message_codes = np.array([codes.setdefault(s.name, len(codes)) for s in stimuli])
+    n, m = trial_codes.size, message_codes.size
+    if n < 20 or m < n:
+        return None
+    # every trial must have a message, so k is in [0, m - n]; score the first
+    # trials, then check all of them
+    head = trial_codes[: min(n, 200)]
+    scores = [
+        np.count_nonzero(message_codes[k : k + head.size] == head)
+        for k in range(m - n + 1)
+    ]
+    k = int(np.argmax(scores))
+    if np.mean(message_codes[k : k + n] == trial_codes) < 0.95:
+        return None
+    starts = np.array([s.start for s in stimuli[k : k + n]])
+    lags = (onsets - starts) / sampling_rate
+    lo, hi = kilo.sync_lag_range(lags)
+    # no consistent range (e.g. drifting onsets), or lags of the usual size
+    if lo == hi or (lo >= 0 and hi <= MAX_SYNC_LAG):
+        return None
+    return k, float(np.median(lags))
+
+
 def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     """Checks a unit's trials against the stimulus start messages: each trial's
     onset (its sync event) should follow a start message for its stimulus by a
-    lag consistent with the other trials."""
+    lag consistent with the other trials. If the trials don't fit the messages
+    as they are, but do with a constant shift (see clock_shift), the shift is
+    reported and the trials are checked against the messages it pairs them
+    with."""
     if stimuli is None:
         return [
             finding(
@@ -382,37 +425,60 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
             )
         ]
     trials = unit.trials
+    names = [t["stimulus"]["name"] for t in trials]
     starts = np.array([s.start for s in stimuli])
     onsets = np.array([round(t["offset"] * sampling_rate) for t in trials])
     idx = np.searchsorted(starts, onsets, side="right") - 1
     out = []
+
+    def mislabeled(idx):
+        return [
+            i
+            for i, (name, k) in enumerate(zip(names, idx, strict=True))
+            if k >= 0 and name != stimuli[k].name
+        ]
+
     early = np.flatnonzero(idx < 0)
+    wrong = mislabeled(idx)
+    if early.size or len(wrong) > MAX_OUTLIER_FRACTION * len(trials):
+        shift = clock_shift(names, onsets, stimuli, sampling_rate)
+        if shift is not None:
+            k, lag = shift
+            out.append(
+                finding(
+                    "clock-shift",
+                    "warn",
+                    f"trial i follows message i+{k}, with onsets {abs(lag):.3f} s "
+                    f"{'before' if lag < 0 else 'after'} their messages: the trials "
+                    "are timed from another origin (e.g. the start of a sort of "
+                    "part of the recording); checked against those messages",
+                )
+            )
+            idx = np.arange(len(trials)) + k
+            early = np.array([], dtype=int)
+            wrong = mislabeled(idx)
     if early.size:
+        severity = "fail" if early.size > MAX_OUTLIER_FRACTION * len(trials) else "warn"
         out.append(
             finding(
                 "messages-before",
-                "fail",
+                severity,
                 "trials that start before any stimulus message",
                 early,
             )
         )
-        return out
-    mislabeled = [
-        i
-        for i, (t, k) in enumerate(zip(trials, idx, strict=True))
-        if t["stimulus"]["name"] != stimuli[k].name
-    ]
-    if mislabeled:
+    if wrong:
         out.append(
             finding(
                 "stimulus-labels",
                 "fail",
                 "trials labeled with a different stimulus from the message "
                 "before their onset",
-                mislabeled,
+                wrong,
             )
         )
-    shared = np.flatnonzero(np.diff(idx) == 0) + 1
+    later = np.flatnonzero(idx >= 0)
+    shared = later[1:][np.diff(idx[later]) == 0]
     if shared.size:
         out.append(
             finding(
@@ -422,11 +488,17 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
                 shared,
             )
         )
-    outliers = kilo.sync_lag_outliers(starts[idx], onsets, sampling_rate)
+    lags = (onsets[later] - starts[idx[later]]) / sampling_rate
+    lo, hi = kilo.sync_lag_range(lags) if lags.size else (0.0, 0.0)
+    outliers = later[
+        kilo.sync_lag_outliers(starts[idx[later]], onsets[later], sampling_rate)
+    ]
     if outliers.size:
-        lags = (onsets - starts[idx]) / sampling_rate
         message = (
-            f"trials whose onset lag differs from the median ({np.median(lags):.3f} s) "
+            f"trials whose onset lag is more than 0.1 s outside the range of the "
+            f"others ({lo:.3f}-{hi:.3f} s)"
+            if lo != hi
+            else f"trials whose onset lag differs from the median ({lo:.3f} s) "
             "by more than 0.1 s"
         )
         if old_sync_version(unit.processed_by):
@@ -438,7 +510,18 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
             "fail" if outliers.size > MAX_OUTLIER_FRACTION * len(trials) else "warn"
         )
         out.append(finding("sync-lag", severity, message, outliers))
-    n_dropped = len(stimuli) - np.unique(idx).size
+    if hi - lo > MAX_LAG_SPREAD:
+        out.append(
+            finding(
+                "sync-lag",
+                "info",
+                f"onset lags are spread over {lo:.3f}-{hi:.3f} s (5th-95th "
+                "percentile), not the usual ~30 ms: the stimulus messages were "
+                "delayed by varying amounts (e.g. a large audio buffer); the onsets "
+                "come from the sync track",
+            )
+        )
+    n_dropped = len(stimuli) - np.unique(idx[later]).size
     allowed = max(1, int(0.01 * len(stimuli)))
     if n_dropped > allowed:
         out.append(
@@ -1240,15 +1323,35 @@ def unavailable_reason(locations: list) -> str:
     schemes = {loc.get("scheme") for loc in locations if isinstance(loc, dict)}
     if not schemes:
         return "no locations in the registry"
+    if any(_unreadable(loc) for loc in locations):
+        return "in an archive here that this user can't read (check its permissions)"
     if schemes & set(local_schemes()):
         return "in an archive that isn't on this host"
     return "only on " + ", ".join(sorted(map(str, schemes)))
 
 
+def _unreadable(location) -> bool:
+    """True if location is in a neurobank archive on this host whose
+    directories this user can't read"""
+    from nbank.registry import local_schemes
+    from nbank.util import parse_location
+
+    if not isinstance(location, dict) or location.get("scheme") not in local_schemes():
+        return False
+    try:
+        parse_location(location)
+    except PermissionError:
+        return True
+    except (KeyError, ValueError):
+        pass
+    return False
+
+
 def local_copy(locations: list) -> Path | None:
     """The path of a resource in a neurobank archive on this host, given its
     locations (see fetch_locations), or None. Copies elsewhere (other hosts,
-    http, tape) are not used: the audit scripts never download."""
+    http, tape) are not used: the audit scripts never download. A copy in an
+    archive here that this user can't read doesn't count."""
     from nbank.registry import local_schemes
     from nbank.util import parse_location
 
@@ -1259,7 +1362,8 @@ def local_copy(locations: list) -> Path | None:
             continue
         try:
             resource = parse_location(location)
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, PermissionError):
+            # an unreadable archive is reported by unavailable_reason
             continue
         if resource is not None:
             return resource.path

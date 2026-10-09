@@ -270,49 +270,60 @@ recordings, which are out of scope).
   `audit-findings-2026-10.md`). Checked against the analog stimulus copy
   (`stim`, or ADC2 on the 1.0.2 rig): every deposited label is right and every
   onset within ~1 ms. The failures and warnings came from the audit, apart
-  from E36_2_1 trial 0. Suspected audit bugs, pinned in
-  tests/test_kilo_audit.py:
-  - [ ] `sync-lag`'s fixed 0.1 s tolerance flags the tails of message jitter.
-    In 47 recordings (open-ephys 0.5.3.1, 2026-01-06 to -12 and 2026-04-09 to
-    05-11) the lag is spread evenly over ~0.215 s (median 0.57-0.67 s, against
-    0.369 s and a 28 ms spread otherwise), probably from a larger audio buffer
-    on the presentation machine; the onsets come from the clicks and are
-    right. Every one of the 47 `sync-lag` warnings in problems.txt is this.
-    Options: a tolerance from the spread of the lags, or check onsets against
-    the analog stimulus copy (repeats of a stimulus line up; choose the
-    channel by content, since a click track also lines up and makes the label
-    test meaningless). `test_wide_message_jitter_flags_tails`.
-  - [ ] A constant clock shift is reported as mislabeling. P388_3_1 and
+  from E36_2_1 trial 0. Audit bugs found, now fixed (tests in
+  tests/test_kilo_audit.py; the 8 recordings below re-audited as expected):
+  - [x] `sync-lag`'s fixed 0.1 s tolerance flagged the tails of message
+    jitter. In 47 recordings (open-ephys 0.5.3.1, 2026-01-06 to -12 and
+    2026-04-09 to 05-11) the lag is spread evenly over ~0.215 s (median
+    0.57-0.67 s, against 0.369 s and a 28 ms spread otherwise), probably from
+    a larger audio buffer on the presentation machine; the onsets come from
+    the clicks and are right. Every one of the 47 `sync-lag` warnings in
+    problems.txt was this. Now `kilo.sync_lag_outliers` (shared with
+    group-kilo-spikes) flags lags more than 0.1 s outside the 5th-95th
+    percentile range (`kilo.sync_lag_range`), or of the median if that range
+    is wider than 0.3 s or there are fewer than 20 lags. A range wider than
+    0.1 s is reported as `sync-lag` at info (long, variable delays on one
+    machine are worth knowing about). C165_3_1, C361_1_1, E92_4_1 and
+    P399_4_1 now have only that. `test_wide_message_jitter_is_info`,
+    `test_late_onset_with_wide_jitter`.
+  - [x] A constant clock shift was reported as mislabeling. P388_3_1 and
     P390_3_1 were sorted from 700 s and 500 s into the recording, and
     group-kilo-spikes 2025.09.03 timed their trials (and spikes) from the
     start of the sort: trial i is message i+403 (i+282), with onsets exactly
-    700 s (500 s) early; labels right. The audit reports nearly every trial
-    as mislabeled and lag outliers. Could align the label sequence with the
-    messages and report the shift as its own finding (not a fail for
-    stimulus-locked analyses). The sorted-window annotation (see
-    group-kilo-spikes) would make this explicit for new output.
-    `test_clock_shift_reported_as_mislabeling`.
-  - [ ] `messages-before` returns before the other message checks, so
-    P390_3_1's summary lists one trial though 2897 of 2908 trials don't match
-    their messages. `test_messages_before_hides_other_checks`.
-  - [ ] `messages-before` fails a unit for a single trial whose label is
-    right (E36_2_1 trial 0: the pulse track was high when recording started,
-    and group-klopto-spikes 2026.07.15 put the onset at sample 0), with an
-    explanation (no sync, wrong channel, another recording) that doesn't fit;
-    a single late onset is only a warning.
-    `test_trial_zero_at_recording_start_fails`.
-  - [ ] jpresent sent each `start` message twice in E1 (2026-08-12), so
-    `trials-dropped` warns that half the messages have no trial. The pairs
+    700 s (500 s) early; labels right. Now, if the trials don't fit the
+    messages as they are, `clock_shift` looks for an offset k at which the
+    labels match (95% of trials) and the lags are consistent but far from
+    the usual 0-2 s; it is reported as `clock-shift` (warn), and the other
+    checks use the messages it pairs the trials with. Both recordings now
+    have `clock-shift` and `trials-dropped` (the messages outside the sort).
+    The sorted-window annotation (see group-kilo-spikes) would make this
+    explicit for new output. `test_clock_shift`,
+    `test_clock_shift_with_trials_before_messages`.
+  - [x] `messages-before` returned before the other message checks, so
+    P390_3_1's summary listed one trial though 2897 of 2908 trials don't
+    match their messages. Now the other checks run on the remaining trials.
+    `test_messages_before_with_other_checks`.
+  - [x] `messages-before` failed a unit for a single trial (E36_2_1 trial 0:
+    the pulse track was high when recording started, and
+    group-klopto-spikes 2026.07.15 put the onset at sample 0), with an
+    explanation that didn't fit. Now warn if at most half the trials are
+    listed, fail if more, as for `sync-lag`; the docs give both causes.
+    `test_trial_zero_at_recording_start`,
+    `test_most_trials_before_messages_fail`.
+  - [x] jpresent sent each `start` message twice in E1 (2026-08-12), so
+    `trials-dropped` warned that half the messages have no trial. The pairs
     name the same stimulus, usually at the same sample but up to 948 samples
     (32 ms) apart, and one pair is 30 samples out of order, which
-    `match_sync_events` would reject ("stimulus start times are not in
-    order") if E1 were rerun. Collapse repeated start messages for the same
-    stimulus within ~50 ms (in `messages_to_events`, so group-kilo-spikes
-    benefits too). `test_duplicate_start_messages`.
-  - [ ] find-kilo-units stops with a PermissionError traceback when the
-    archive's directories aren't readable (nbank's `resolve_extension`, via
-    `local_copy`), instead of listing the recording as unavailable with the
-    reason. `test_local_copy_unreadable_archive`.
+    `match_sync_events` would have rejected if E1 were rerun. Now
+    `messages_to_events` drops a start message for the still-open event of
+    the same name within 1500 samples (50 ms at 30 kHz), keeping the earlier
+    time, so group-kilo-spikes is fixed too. E1_1_1 now audits clean.
+    `test_duplicate_start_messages`.
+  - [x] find-kilo-units stopped with a PermissionError traceback when the
+    archive's directories weren't readable (nbank's `resolve_extension`, via
+    `local_copy`). Now `local_copy` skips the copy and `unavailable_reason`
+    says "in an archive here that this user can't read (check its
+    permissions)". `test_local_copy_unreadable_archive`.
   - [ ] Not checked: 311 kilo recordings in cold storage (2024-01 to 2025-12;
     group-kilo-spikes 2023.08.25, 2024.01.29, 2025.09.03). Whether the wide
     jitter or start-trimmed sorts occur there needs their ARF files on this
