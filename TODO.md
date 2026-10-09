@@ -226,6 +226,56 @@ recordings, which are out of scope).
 - [ ] audit-kilo-spikes, still to do:
   - opt-in `--resync`: re-detect onsets on the sync track (from `sync_track`,
     or found by trying channels for older files) and compare per trial.
+- Audit of the `induction` archive (2026-10-08; 170 recordings with their ARF
+  files on the VM, recorded 2026-01-06 to 2026-09-21; see
+  `audit-findings-2026-10.md`). Checked against the analog stimulus copy
+  (`stim`, or ADC2 on the 1.0.2 rig): every deposited label is right and every
+  onset within ~1 ms. The failures and warnings came from the audit, apart
+  from E36_2_1 trial 0. Suspected audit bugs, pinned in
+  tests/test_kilo_audit.py:
+  - [ ] `sync-lag`'s fixed 0.1 s tolerance flags the tails of message jitter.
+    In 47 recordings (open-ephys 0.5.3.1, 2026-01-06 to -12 and 2026-04-09 to
+    05-11) the lag is spread evenly over ~0.215 s (median 0.57-0.67 s, against
+    0.369 s and a 28 ms spread otherwise), probably from a larger audio buffer
+    on the presentation machine; the onsets come from the clicks and are
+    right. Every one of the 47 `sync-lag` warnings in problems.txt is this.
+    Options: a tolerance from the spread of the lags, or check onsets against
+    the analog stimulus copy (repeats of a stimulus line up; choose the
+    channel by content, since a click track also lines up and makes the label
+    test meaningless). `test_wide_message_jitter_flags_tails`.
+  - [ ] A constant clock shift is reported as mislabeling. P388_3_1 and
+    P390_3_1 were sorted from 700 s and 500 s into the recording, and
+    group-kilo-spikes 2025.09.03 timed their trials (and spikes) from the
+    start of the sort: trial i is message i+403 (i+282), with onsets exactly
+    700 s (500 s) early; labels right. The audit reports nearly every trial
+    as mislabeled and lag outliers. Could align the label sequence with the
+    messages and report the shift as its own finding (not a fail for
+    stimulus-locked analyses). `test_clock_shift_reported_as_mislabeling`.
+  - [ ] `messages-before` returns before the other message checks, so
+    P390_3_1's summary lists one trial though 2897 of 2908 trials don't match
+    their messages. `test_messages_before_hides_other_checks`.
+  - [ ] `messages-before` fails a unit for a single trial whose label is
+    right (E36_2_1 trial 0: the pulse track was high when recording started,
+    and group-klopto-spikes 2026.07.15 put the onset at sample 0), with an
+    explanation (no sync, wrong channel, another recording) that doesn't fit;
+    a single late onset is only a warning.
+    `test_trial_zero_at_recording_start_fails`.
+  - [ ] jpresent sent each `start` message twice in E1 (2026-08-12), so
+    `trials-dropped` warns that half the messages have no trial. The pairs
+    name the same stimulus, usually at the same sample but up to 948 samples
+    (32 ms) apart, and one pair is 30 samples out of order, which
+    `match_sync_events` would reject ("stimulus start times are not in
+    order") if E1 were rerun. Collapse repeated start messages for the same
+    stimulus within ~50 ms (in `messages_to_events`, so group-kilo-spikes
+    benefits too). `test_duplicate_start_messages`.
+  - [ ] find-kilo-units stops with a PermissionError traceback when the
+    archive's directories aren't readable (nbank's `resolve_extension`, via
+    `local_copy`), instead of listing the recording as unavailable with the
+    reason. `test_local_copy_unreadable_archive`.
+  - [ ] Not checked: 311 kilo recordings in cold storage (2024-01 to 2025-12;
+    group-kilo-spikes 2023.08.25, 2024.01.29, 2025.09.03). Whether the wide
+    jitter or start-trimmed sorts occur there needs their ARF files on this
+    host.
 - [x] Selection script, `find-kilo-units`: searches the registry for
   `spikes-pprox` and `spikes-hdf5` resources (optionally by `--name`
   fragment, or for the recordings listed in a file or on stdin, e.g. piped

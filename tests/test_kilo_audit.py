@@ -4,10 +4,12 @@
 Most tests audit the output of group-kilo-spikes on the E36 excerpt (see
 test_group_spikes_excerpt.py), which should be clean, after corrupting a copy
 of it in one specific way. The slow tests at the end audit the example
-recordings, whose problems are known (see TODO.md).
+recordings, whose problems are known (see TODO.md). Tests marked PINNED
+record current behavior that looks like a bug; see TODO.md.
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -385,6 +387,149 @@ def test_c401_fails():
         assert {"stimulus-labels", "sync-lag", "waveforms-recording"} <= found
 
 
+# --- message checks on synthetic trial tables (cases from the archive audit)
+
+RATE = 30000.0
+
+
+def message_unit(trials):
+    """A unit from a 2025.09.03 run whose trials are (stimulus, onset in s);
+    check_messages only uses the onsets and names"""
+    pp = {
+        "processed_by": ["group-kilo-spikes 2025.09.03"],
+        "pprox": [
+            {"index": i, "offset": onset, "stimulus": {"name": name}}
+            for i, (name, onset) in enumerate(trials)
+        ],
+    }
+    return kilo_audit.Unit("rec_c1", Path("rec_c1.pprox"), pp)
+
+
+def message_stimuli(names, starts):
+    return [
+        kilo.Stimulus(n, round(s * RATE)) for n, s in zip(names, starts, strict=True)
+    ]
+
+
+def presentation(n, seed=1, lag=(0.355, 0.383)):
+    """n stimuli in random order with the inter-onset intervals of oeaudio-present
+    (multiples of 5120 samples), and their onsets after a lag drawn from a
+    uniform range: (names, message times, onsets) in s"""
+    rng = np.random.default_rng(seed)
+    starts = 2.0 + np.cumsum(rng.integers(6, 13, n) * 5120 / RATE)
+    names = [f"s{i}" for i in rng.integers(0, 30, n)]
+    return names, starts, starts + rng.uniform(*lag, n)
+
+
+def message_checks(trials, stimuli):
+    found = kilo_audit.check_messages(message_unit(trials), stimuli, RATE)
+    return [(f["check"], f["severity"], f.get("trials")) for f in found]
+
+
+def test_tight_lags_are_clean():
+    """Onsets that follow their messages by 0.355-0.383 s, as in most
+    recordings, have no findings."""
+    names, starts, onsets = presentation(200)
+    trials = list(zip(names, onsets, strict=True))
+    assert message_checks(trials, message_stimuli(names, starts)) == []
+
+
+def test_wide_message_jitter_flags_tails():
+    """PINNED (see TODO.md): in 47 recordings from 2026 (e.g. C165_3_1,
+    E92_4_1, P399_4_1), the lag is spread evenly over ~0.215 s, but the onsets
+    are right (each repeat of a stimulus lines up with the others in the
+    analog copy to 0.1 ms). The fixed 0.1 s tolerance flags the tails of the
+    spread as sync-lag warnings."""
+    names, starts, onsets = presentation(200, lag=(0.565, 0.780))
+    trials = list(zip(names, onsets, strict=True))
+    lags = (
+        np.round(onsets * RATE) - np.array([round(s * RATE) for s in starts])
+    ) / RATE
+    tails = np.flatnonzero(np.abs(lags - np.median(lags)) > 0.1).tolist()
+    assert tails, "the spread should reach past the tolerance"
+    assert message_checks(trials, message_stimuli(names, starts)) == [
+        ("sync-lag", "warn", tails)
+    ]
+
+
+def shifted_presentation(shift=100.0, skip=80):
+    """The trials of a sort that started `shift` s into the recording, timed
+    from its start (as in P388_3_1 and P390_3_1): the trials of the messages
+    from `skip` on, `shift` s early. Labels and onsets are otherwise right."""
+    names, starts, onsets = presentation(300)
+    trials = [(names[i], onsets[i] - shift) for i in range(skip, len(names))]
+    return trials, names, starts
+
+
+def test_clock_shift_reported_as_mislabeling():
+    """PINNED (see TODO.md): P388_3_1 was sorted from 700 s into the
+    recording, and its trials are timed from there. Spikes and onsets share
+    that origin, so the labels are right, but the audit compares the onsets
+    with the messages at their face value and reports most trials as
+    mislabeled and out of line; it doesn't look for a constant shift."""
+    trials, names, starts = shifted_presentation()
+    assert trials[0][1] > starts[0]  # no trial before the first message
+    found = message_checks(trials, message_stimuli(names, starts))
+    by_check = {check: (sev, idx) for check, sev, idx in found}
+    assert by_check["stimulus-labels"][0] == "fail"
+    assert len(by_check["stimulus-labels"][1]) > 0.8 * len(trials)
+    assert by_check["sync-lag"][0] == "fail"
+    assert all("shift" not in check for check in by_check)
+    # with the messages moved by the same shift, only the skipped messages
+    # (a sort of part of the recording) remain
+    moved = message_stimuli(names, starts - 100.0)
+    assert [c for c, _, _ in message_checks(trials, moved)] == ["trials-dropped"]
+
+
+def test_messages_before_hides_other_checks():
+    """PINNED (see TODO.md): in P390_3_1 (shifted by 500 s), the first trial
+    comes before any message; the audit stops at messages-before for that one
+    trial, so the summary hides that the labels of the others don't match
+    their messages either."""
+    trials, names, starts = shifted_presentation(shift=100.0, skip=60)
+    stimuli = message_stimuli(names, starts)
+    early = [i for i, (_, onset) in enumerate(trials) if onset < starts[0]]
+    assert early
+    assert message_checks(trials, stimuli) == [("messages-before", "fail", early)]
+    # without the early trials, the others fail the label check
+    later = message_checks(trials[len(early) :], stimuli)
+    assert ("stimulus-labels", "fail") in [(c, s) for c, s, _ in later]
+
+
+def test_trial_zero_at_recording_start_fails():
+    """PINNED (see TODO.md): in E36_2_1 (group-klopto-spikes 2026.07.15) the
+    pulse track was already high when the recording started, so trial 0's
+    onset is at sample 0, 3.07 s early, with the right label. One bad trial
+    fails the unit, with an explanation (no sync signal, wrong channel, or
+    another recording) that doesn't fit, while one late onset is a warning
+    (test_late_onset)."""
+    names, starts, onsets = presentation(100)
+    trials = list(zip(names, onsets, strict=True))
+    trials[0] = (names[0], 0.0)
+    found = kilo_audit.check_messages(
+        message_unit(trials), message_stimuli(names, starts), RATE
+    )
+    assert [(f["check"], f["severity"], f["trials"]) for f in found] == [
+        ("messages-before", "fail", [0])
+    ]
+    assert kilo_audit.worst(found) == "fail"
+
+
+def test_duplicate_start_messages():
+    """PINNED (see TODO.md): jpresent sent each start message twice in E1
+    (2026-08-12), so half the messages have no trial and the audit warns that
+    trials were dropped, though none were."""
+    names, starts, onsets = presentation(100, lag=(0.22, 0.32))
+    trials = list(zip(names, onsets, strict=True))
+    doubled = message_stimuli(
+        [n for n in names for _ in (0, 1)],
+        [s for s in starts for _ in (0, 1)],
+    )
+    found = kilo_audit.check_messages(message_unit(trials), doubled, RATE)
+    assert [(f["check"], f["severity"]) for f in found] == [("trials-dropped", "warn")]
+    assert found[0]["message"] == "100 of 200 stimulus messages have no trial"
+
+
 # --- selection
 
 
@@ -592,6 +737,27 @@ def test_local_copy(tmp_path):
     assert kilo_audit.local_copy([]) is None
     # locations as the resource records give them (strings) are ignored
     assert kilo_audit.local_copy(["neurobank://archive/A_1"]) is None
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root reads anything"
+)
+def test_local_copy_unreadable_archive(tmp_path):
+    """PINNED (see TODO.md): if this host's user can't read the archive's
+    directories (on the VM, before it was given the archive's group), nbank's
+    lookup raises PermissionError, which local_copy passes on, so
+    find-kilo-units stops with a traceback instead of listing the recording
+    as unavailable."""
+    from nbank import archive
+
+    root = local_archive(tmp_path / "archive", "A_1")
+    shard = archive.resource_path(root, "A_1").parent
+    shard.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            kilo_audit.local_copy([archived("A_1", root)])
+    finally:
+        shard.chmod(0o755)
 
 
 def test_unavailable_reason(tmp_path):
