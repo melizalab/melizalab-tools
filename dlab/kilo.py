@@ -493,11 +493,19 @@ def arf_to_trials(
             log.info(
                 "    - sync events follow start messages by %.3f s", np.median(lags)
             )
+            if not 0 <= np.median(lags) <= 2.0:
+                log.warning(
+                    "  - WARNING: sync events follow their start messages by %.3f s; "
+                    "the message times don't line up with the sync track. The "
+                    "stimuli are paired with the sync events in order.",
+                    np.median(lags),
+                )
             lo, hi = sync_lag_range(lags)
             for i in sync_lag_outliers(starts, stim_onsets, sampling_rate):
                 log.warning(
                     "  - WARNING: sync event for stimulus %d (%s) is %.3f s after its "
-                    "start message (others %.3f-%.3f s). Check the sync track.",
+                    "start message (others %.3f-%.3f s); message timing only, "
+                    "the stimulus lengths check the pairing.",
                     i,
                     entry_stimuli[i].name,
                     lags[i],
@@ -786,32 +794,32 @@ def match_sync_events(
 ) -> list[Stimulus]:
     """Match sync events to stimuli, returning the stimulus for each sync event.
 
+    The start messages give the order of the stimuli, and the sync events
+    their onsets, so the events are paired with the stimuli in order. If there
+    are fewer sync events than stimuli (e.g. a sync event that was not
+    detected), the stimuli without one are dropped with a warning. Which ones
+    they are is found from the message times: of the pairings in order that
+    skip that many stimuli, the one whose lags (sync event after message) are
+    closest overall to the recording's typical lag. The messages need not be in
+    time order, and a message may come after its sync event. More sync events
+    than stimuli is a ValueError. The pairing is checked against the stimulus
+    lengths afterwards (see check_stimulus_lengths).
+
     Stimulus start times and sync onsets must be in the same units (samples
-    from the start of the sync track). The presentation script sends each
-    stimulus's start message before the sound, and its sync event, comes out
-    of the audio buffer, so each sync event is matched to the last stimulus
-    that started at or before it. Stimuli with no sync event (e.g. a sync
-    event that was not detected) are dropped with a warning. A sync event
-    before any stimulus, or two sync events after the same stimulus, can't be
-    resolved and raise ValueError.
+    from the start of the sync track).
 
     """
-    starts = np.array([stim.start for stim in entry_stimuli])
-    if np.any(np.diff(starts) < 0):
-        raise ValueError("stimulus start times are not in order")
-    idx = np.searchsorted(starts, stim_onsets, side="right") - 1
-    if np.any(idx < 0):
+    onsets = np.asarray(stim_onsets)
+    n, m = onsets.size, len(entry_stimuli) - onsets.size
+    if m < 0:
         raise ValueError(
-            f"sync event at sample {stim_onsets[idx < 0][0]} comes before any "
-            "stimulus. Check --sync-thresh, or discard the recording."
+            f"{n} sync events but only {len(entry_stimuli)} stimuli. Check "
+            "--sync-thresh, or discard the recording."
         )
-    repeated = np.flatnonzero(np.diff(idx) == 0)
-    if repeated.size > 0:
-        i = idx[repeated[0]]
-        raise ValueError(
-            f"more than one sync event after stimulus {i} ({entry_stimuli[i].name}). "
-            "Check --sync-thresh, or discard the recording."
-        )
+    if m == 0 or n == 0:
+        idx = np.arange(n)
+    else:
+        idx = _skip_unmatched(np.array([s.start for s in entry_stimuli]), onsets, m)
     for i in sorted(set(range(len(entry_stimuli))) - set(idx.tolist())):
         log.warning(
             "  - no sync event for stimulus %d (%s); dropping the trial",
@@ -819,6 +827,34 @@ def match_sync_events(
             entry_stimuli[i].name,
         )
     return [entry_stimuli[i] for i in idx]
+
+
+def _skip_unmatched(starts: np.ndarray, onsets: np.ndarray, m: int) -> np.ndarray:
+    """The indices of the stimuli paired with the sync events, in order,
+    skipping m stimuli: the pairing whose lags are closest in total to the
+    typical lag (the median lag from each sync event back to the last message
+    before it, or if no message comes before any sync event, of the pairing in
+    order without skips). Dynamic programming over the number of stimuli
+    skipped before each event."""
+    ordered = np.sort(starts)
+    before = np.searchsorted(ordered, onsets, side="right") - 1
+    if np.any(before >= 0):
+        typical = np.median(onsets[before >= 0] - ordered[before[before >= 0]])
+    else:
+        typical = np.median(onsets - starts[: onsets.size])
+    n = onsets.size
+    # cost[i, k]: event i paired with stimulus i + k
+    k = np.arange(m + 1)
+    cost = np.abs(onsets[:, None] - starts[np.arange(n)[:, None] + k] - typical)
+    total = np.zeros((n + 1, m + 1))
+    for i in range(n):
+        total[i + 1] = np.minimum.accumulate(total[i]) + cost[i]
+    skips = np.empty(n, dtype=int)
+    limit = m
+    for i in range(n, 0, -1):
+        skips[i - 1] = int(np.argmin(total[i][: limit + 1]))
+        limit = skips[i - 1]
+    return np.arange(n) + skips
 
 
 def match_log_stimuli(

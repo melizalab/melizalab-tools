@@ -344,13 +344,17 @@ def test_trials_missing_click_drops_that_stimulus(make_arf, first_sample):
     ], "b should be dropped"
 
 
-def test_trials_messages_after_recording_are_an_error(make_arf):
+def test_trials_messages_after_clicks_paired_in_order(make_arf, caplog):
     """If message times don't line up with the sync track (here, all logged
-    after the last click), matching fails with a clear error rather than
-    mislabeling trials."""
-    late = oeaudio_messages(STIMULI, lead=-200000)  # messages 6.7 s after clicks
-    with pytest.raises(ValueError, match="comes before any stimulus"):
-        trials(make_arf(one_entry(messages=late)))
+    6.7 s after their clicks), the stimuli are still paired with the clicks in
+    order, which the stimulus lengths confirm, and a warning says so."""
+    late = oeaudio_messages(STIMULI, lead=-200000)
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(one_entry(messages=late)))
+    assert [(t.stimulus_name, t.stimulus_start) for t in result] == [
+        (name, onset) for name, onset, _ in STIMULI
+    ]
+    assert "the message times don't line up with the sync track" in caplog.text
 
 
 # --- sync track styles

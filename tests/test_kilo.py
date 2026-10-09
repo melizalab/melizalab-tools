@@ -251,23 +251,36 @@ def test_match_sync_events_drops_stimulus_without_a_click(clicks, expected, capl
 
 
 def test_match_sync_events_extra_click_is_an_error():
-    """Two clicks after the same message can't be resolved."""
-    with pytest.raises(
-        ValueError, match=r"more than one sync event after stimulus 1 \(b\)"
-    ):
+    """More sync events than stimuli can't be paired."""
+    with pytest.raises(ValueError, match="4 sync events but only 3 stimuli"):
         kilo.match_sync_events(stims(100, 200, 300), np.array([110, 210, 250, 310]))
 
 
-def test_match_sync_events_click_before_any_stimulus_is_an_error():
-    """A click before the first message can't belong to any stimulus."""
-    with pytest.raises(ValueError, match="sync event at sample 50 comes before"):
-        kilo.match_sync_events(stims(100, 200), np.array([50, 110, 210]))
+def test_match_sync_events_message_after_its_click():
+    """The messages give the order of the stimuli, so a click before its
+    message (a message delayed past it) still gets that message's stimulus."""
+    out = kilo.match_sync_events(stims(100, 200), np.array([90, 210]))
+    assert names(out) == ["a", "b"]
 
 
-def test_match_sync_events_stimuli_must_be_in_order():
-    """Stimulus start times out of order indicate a problem with the log."""
-    with pytest.raises(ValueError, match="not in order"):
-        kilo.match_sync_events(stims(200, 100), np.array([110, 210]))
+def test_match_sync_events_messages_out_of_time_order():
+    """Messages are paired in the order they were sent, even if their times
+    are out of order."""
+    out = kilo.match_sync_events(stims(200, 100), np.array([110, 210]))
+    assert names(out) == ["a", "b"]
+
+
+def test_match_sync_events_missed_click_with_jittered_messages():
+    """With messages that jitter by more than the gap between stimuli (so some
+    come after their own click), a missed click is still placed: the stimuli
+    are paired in order, skipping the one that keeps the lags most
+    consistent."""
+    rng = np.random.default_rng(5)
+    starts = np.cumsum(rng.uniform(900, 1100, 40)).astype(int)
+    clicks = starts + 300 + rng.integers(-450, 450, 40)  # some before their message
+    stimuli = [kilo.Stimulus(f"s{i}", start) for i, start in enumerate(starts)]
+    out = kilo.match_sync_events(stimuli, np.delete(clicks, 17))
+    assert out == stimuli[:17] + stimuli[18:]
 
 
 # --- trials_to_pprox

@@ -638,8 +638,9 @@ failure, check `recording-mismatch` first; if the recording is right, re-sync.
 **Problem:** The listed trials are labeled with a different stimulus from the
 last start message before their onset, so their responses are attributed to
 the wrong stimulus.
-- Versions before 2026.10.07 matched sync events to messages in order, so
-  one missed sync event mislabeled every later trial.
+- Versions before 2026.10.07 matched sync events to messages in order
+  without allowing for a missed sync event, so one missed event mislabeled
+  every later trial.
 - A recording without a working sync line has the same effect, as in
   C401_1_1b.
 
@@ -679,9 +680,9 @@ stimulus. The stimulus lengths check that pairing:
   must be the rise of a pulse within 10 ms as long as its stimulus.
 
 A listed trial has the wrong stimulus, or an onset that isn't its sync event.
-- Versions before 2026.10.07 paired sync events with stimuli in order, so
-  after a missed sync event every later trial had the next trial's stimulus;
-  many of those trials don't fit.
+- Versions before 2026.10.07 paired sync events with stimuli in order without
+  allowing for a missed sync event, so after one every later trial had the
+  next trial's stimulus; many of those trials don't fit.
 - Versions before 2026.10.07 reported some pulse onsets at the end of the
   pulse, 1.2–1.5 s late, so they aren't the rise of a pulse (e.g. trials 0, 3
   and 12 of E36_5_1 in the old run); the message notes this case. So was trial
