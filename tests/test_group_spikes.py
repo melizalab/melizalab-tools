@@ -25,7 +25,7 @@ from conftest import (
     oeaudio_messages,
 )
 
-from dlab import kilo
+from dlab import kilo, spikes
 
 REGISTRY = "http://registry.test/"
 NSAMPLES = 210000
@@ -186,6 +186,9 @@ def test_waveforms(make_recording):
         assert fp.attrs["recording"] == f"{REGISTRY}resources/rec/"
     assert waveforms.mean(0).argmin() == N_BEFORE, "spike trough at peak_index"
     assert waveforms.mean(0).min() == pytest.approx(SPIKE.min(), rel=0.1)
+    mean = spikes.load_mean_waveform(out / "rec_c1_spikes.h5")
+    assert mean.n_spikes == 4 and mean.aligned_to == "trough"
+    assert mean.mean.argmin() == mean.peak_index
 
 
 def test_mua_option(make_recording):

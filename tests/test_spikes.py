@@ -72,6 +72,86 @@ def test_waveforms_round_trip(tmp_path):
     assert loaded.attrs["unit"] == "c1"
 
 
+def jittered_spikes(n, *, sign=-1, seed=1):
+    """n spikes of 30 samples, a narrow trough (or peak) nominally at sample
+    10, each shifted by up to one sample (the sub-sample jitter of spike times),
+    with a little noise"""
+    rng = np.random.default_rng(seed)
+    t = np.arange(30)[None, :] - 10 - rng.uniform(-1, 1, (n, 1))
+    return sign * np.exp(-0.5 * (t / 1.2) ** 2) + rng.normal(0, 0.02, (n, 30))
+
+
+def save(path, waveforms):
+    times = np.arange(waveforms.shape[0]) * 100
+    spikes.save_waveforms(path, spikes.SpikeWaveforms(waveforms, times, 30000, 10))
+
+
+def test_mean_waveform_stored(tmp_path):
+    """The mean and standard deviation of the upsampled, realigned waveforms
+    are stored with them (schema version 2), and load_mean_waveform returns
+    them: upsampled 3x, shorter by 3 samples at each end, with the trough at
+    peak_index. Realigning removes the jitter, so the mean is deeper than the
+    plain average."""
+    waveforms = jittered_spikes(200)
+    path = tmp_path / "spikes.h5"
+    save(path, waveforms)
+    mean = spikes.load_mean_waveform(path)
+    assert (mean.n_spikes, mean.sampling_rate, mean.upsample) == (200, 90000, 3)
+    assert mean.mean.shape == mean.sd.shape == ((30 - 2 * 3) * 3,)
+    assert (mean.peak_index, mean.aligned_to) == ((10 - 3) * 3, "trough")
+    assert mean.mean.argmin() == mean.peak_index
+    assert mean.mean.min() < waveforms.mean(0).min() - 0.05
+    assert mean.mean.min() == pytest.approx(-1, abs=0.05)
+    assert spikes.load_waveforms(path).attrs["schema_ver"] == 2
+
+
+def test_mean_waveform_of_old_file(tmp_path):
+    """For files without a stored mean (schema version 1), load_mean_waveform
+    computes it in the same way."""
+    import h5py
+
+    waveforms = jittered_spikes(50, seed=2)
+    path = tmp_path / "spikes.h5"
+    save(path, waveforms)
+    stored = spikes.load_mean_waveform(path)
+    with h5py.File(path, "r+") as fp:
+        del fp["mean_waveform"], fp["sd_waveform"]
+        fp.attrs["schema_ver"] = 1
+    computed = spikes.load_mean_waveform(path)
+    np.testing.assert_allclose(computed.mean, stored.mean)
+    np.testing.assert_allclose(computed.sd, stored.sd)
+    assert (computed.n_spikes, computed.peak_index) == (50, stored.peak_index)
+
+
+def test_mean_waveform_in_chunks(monkeypatch):
+    """The mean is the same whether the spikes are processed at once or in
+    chunks."""
+    waveforms = jittered_spikes(70, seed=3)
+    whole = spikes.mean_waveform(waveforms, 30000, 10)
+    monkeypatch.setattr(spikes, "MEAN_CHUNK", 16)
+    chunked = spikes.mean_waveform(waveforms, 30000, 10)
+    np.testing.assert_allclose(chunked.mean, whole.mean)
+    np.testing.assert_allclose(chunked.sd, whole.sd)
+
+
+def test_mean_waveform_positive_spikes():
+    """Spikes that are positive at peak_index are aligned to their peak."""
+    mean = spikes.mean_waveform(jittered_spikes(50, sign=1), 30000, 10)
+    assert mean.aligned_to == "peak" and mean.mean.argmax() == mean.peak_index
+
+
+def test_no_mean_without_spikes(tmp_path):
+    """A file with no spikes has no mean waveform."""
+    import h5py
+
+    path = tmp_path / "spikes.h5"
+    spikes.save_waveforms(
+        path, spikes.SpikeWaveforms(np.zeros((0, 30)), np.zeros(0), 30000, 10)
+    )
+    with h5py.File(path, "r") as fp:
+        assert "mean_waveform" not in fp
+
+
 def test_save_waveforms_checks_spike_count(tmp_path):
     """The number of waveforms (rows) must match the number of spike times."""
     waveforms = np.zeros((5, 30))
