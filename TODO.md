@@ -24,7 +24,18 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   neither a sync track nor messages (none known). `--audio-sync` needs the
   messages, or a log, to know where to look.
 
-## Provenance in the outputs (group-kilo-spikes)
+## Outputs (group-kilo-spikes)
+
+- [ ] Store the unit's mean spike waveform in the `_spikes.h5` file (e.g. a
+  `mean_waveform` dataset next to `waveforms`, on the same source channel and
+  window, with `peak_index`, plus the standard deviation and the number of
+  spikes averaged, after artifact rejection), so analyses that classify units
+  by spike shape don't have to load and average every spike. Deposited files
+  can't change; this is for new output. `spikes.load_waveforms` (or a
+  `load_mean_waveform`) should return the stored mean when present and compute
+  it otherwise, so downstream code works on old and new files alike. Bump the
+  file's `schema_ver` (`meliza-org.spikewaveforms`, now 1) to 2, and check
+  that regenerate-pprox and the audit ignore (or check) the new dataset.
 
 - [ ] Sorting part of a recording: merge in the code the student used to sort
   a time window (deliberate exclusions, confirmed 2026-10-09), and record the
