@@ -41,7 +41,10 @@ console scripts
    `phy2 <https://github.com/cortex-lab/phy/>`__ into pprox files
    (`stimtrial <https://meliza.org/spec:2/stimtrial/>`__ format), optionally
    recording pulses on auxiliary channels such as optogenetic stimulation
-   (``--aux``).
+   (``--aux``). For recordings without a sync track, ``--audio-sync CHANNEL``
+   finds the stimulus onsets on a copy of the audio by cross-correlation
+   (``python -m dlab.audio_sync`` does this on its own, for checking a
+   recording).
 -  ``audit-kilo-spikes``: check the ``group-kilo-spikes`` output for one
    recording against its waveform files, the stimulus messages in the ARF
    file, and each other, and write a JSON report. Changes nothing.

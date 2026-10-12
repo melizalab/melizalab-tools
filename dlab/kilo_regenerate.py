@@ -225,7 +225,10 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
             )
         return values.pop()
 
-    sync = option("sync_track", "--sync", args.sync)
+    # units processed with --audio-sync record the audio channel instead
+    audio = {w.attrs.get("audio_sync_track") for w in waveforms}
+    audio_sync = audio.pop() if args.sync is None and len(audio) == 1 else None
+    sync = None if audio_sync else option("sync_track", "--sync", args.sync)
     prepad = option("prepad", "--prepad", args.prepad)
     sync_thresh = args.sync_thresh
     if sync_thresh is None:
@@ -235,11 +238,21 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         arf_path = find_local(args.recording, args.registry_url)
     finder = kilo.StimulusFinder(args.registry_url, args.local_stim_dir)
     log.info(
-        "- splitting '%s' into trials (sync %s, prepad %.2f s):", arf_path, sync, prepad
+        "- splitting '%s' into trials (%s %s, prepad %.2f s):",
+        arf_path,
+        "audio sync" if audio_sync else "sync",
+        audio_sync or sync,
+        prepad,
     )
     with h5.File(arf_path, "r") as afp:
         trials = kilo.arf_to_trials(
-            afp, finder, sync, sync_thresh, prepad, oeaudio_log=args.oeaudio_log
+            afp,
+            finder,
+            sync,
+            sync_thresh,
+            prepad,
+            oeaudio_log=args.oeaudio_log,
+            audio_sync=audio_sync,
         )
         entry_attrs = tuple(
             kilo.entry_to_metadata(e) for _, e in kilo.iter_entries(afp)
@@ -254,7 +267,10 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         # describe() returns None for an unregistered recording
         log.warning("  - recording metadata not found in the registry (%s)", err)
         metadata, url = {}, waveforms[0].attrs.get("recording")
-    trial_options = {"sync_track": sync, "prepad": prepad}
+    if audio_sync:
+        trial_options = {"audio_sync_track": audio_sync, "prepad": prepad}
+    else:
+        trial_options = {"sync_track": sync, "prepad": prepad}
     if sync_thresh is not None:
         trial_options["sync_thresh"] = sync_thresh
     if args.oeaudio_log is not None:

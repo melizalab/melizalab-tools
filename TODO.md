@@ -19,51 +19,10 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   files exist yet, but they may; fixing it won't change single-entry output.
   Needs: how the kilosort input (temp_wh.dat) is assembled from several
   entries (order, and any gaps between them).
-- [ ] `--audio-sync CHANNEL`, in place of `--sync`: stimulus onsets from
-  cross-correlating each stimulus file with an analog copy of the audio (a
-  hardwired copy, or the microphone), only where the messages say it was
-  presented. For recordings without a working sync line, e.g. C401_1_1b
-  (no sync connected; hardwired copy on ADC2). Scoped 2026-10-09 with probes
-  on C165_3_1, P353_1_1 (both with clicks) and C401_1_1b:
-  - Match on amplitude envelopes (square, ~1 ms smoothing, square root) with
-    a correlation normalized at each lag: insensitive to the channel's
-    polarity (the microphone is inverted) and to playback/recording timing
-    jitter. On the hardwired copy this matched the clicks to within one sample
-    on 150/150 stimuli, where the raw waveform locked onto the wrong place for
-    a stimulus with a repeated motif (P353) and failed on a 29 s stimulus in
-    C401 (r 0.998 with the envelope). Power envelopes did worse on the
-    microphone. Refine to the sample on the raw waveform's |correlation|
-    within +-2 ms of the envelope peak (hardwired copy).
-  - Calibrate the lag from unambiguous matches in a wide first window (message
-    to +2 s), then search each stimulus in the calibrated lag range plus a
-    margin, never reaching the next stimulus's expected onset.
-  - Stringent acceptance: r above a floor relative to the recording's
-    distribution (~0.75 on `stim`, ~0.2-0.4 on `mic` and C401's ADC2),
-    peak-to-next-best ratio (next best outside +-20 ms; clean matches 4-20+),
-    lag within the calibrated range. For stimuli with close relatives in the
-    stimulus set (found beforehand by correlating the files), the expected
-    file must not be beaten by a relative: clearly beaten fails the trial;
-    within a small margin is "indistinguishable" (level variants of one
-    chorus scene in C401 differ by r 0.998 vs 0.982), recorded but not an
-    error, since the onset is the same and the label comes from the messages.
-  - Silence (and other stimuli with no signal to match): onset from the
-    message plus the typical lag, with a warning, marked as estimated.
-  - Unmatched stimuli are dropped with a warning; more than 1% is an error
-    (as for `--sync`). The stimulus length check then runs as for clicks.
-  - Record `audio_sync_track` (in place of `sync_track`) and the method's
-    parameters at the top level, and match quality in each trial (e.g.
-    method audio/estimated, r, peak ratio, lag, any indistinguishable
-    variant); the schemas allow extra fields.
-  - The microphone works as a "your mileage may vary" option: it lags the
-    hardwired copy by ~1.3-2.6 ms (acoustic path) with a few ms of spread;
-    document it, uncorrected.
-  - Needs: `StimulusFinder` to return the audio (resampled to the recording's
-    rate); synthetic fixtures with an analog copy (inverted, noisy and
-    filtered, repeated motif, near-identical variants, silence) and a stub
-    finder that serves audio; validation that `--audio-sync stim`
-    reproduces `--sync` on recordings with both, then C401_1_1b.
-  - Later: an exhaustive search for recordings with no messages at all (none
-    known).
+- [ ] Find stimulus onsets on an audio channel without messages (an exhaustive
+  search for every stimulus anywhere in the recording), for recordings with
+  neither a sync track nor messages (none known). `--audio-sync` needs the
+  messages, or a log, to know where to look.
 
 ## Provenance in the outputs (group-kilo-spikes)
 

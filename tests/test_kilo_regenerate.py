@@ -110,6 +110,39 @@ def test_from_arf_needs_sync_track(output):
     assert exc.value.code == 1
 
 
+def test_from_arf_follows_audio_sync_track(output, monkeypatch):
+    """For units processed with --audio-sync, --from-arf finds the onsets on
+    the same audio channel, and records it."""
+    nb = json.loads((DATA / "E36_excerpt_neurobank.json").read_text())
+    monkeypatch.setattr(
+        kilo_regenerate.nbank, "describe", lambda url, name: nb["record"]
+    )
+    monkeypatch.setattr(
+        kilo.StimulusFinder,
+        "get_durations",
+        lambda self, names: {name: nb["durations"][name] for name in names},
+    )
+    calls = []
+    split = kilo.arf_to_trials
+
+    def arf_to_trials(fp, finder, sync, *args, audio_sync=None, **kwargs):
+        # the excerpt has no audio copy: record the channel, split on the sync track
+        calls.append((sync, audio_sync))
+        return split(fp, finder, "ADC3", *args, **kwargs)
+
+    monkeypatch.setattr(kilo, "arf_to_trials", arf_to_trials)
+    path = output / f"{UNIT}_spikes.h5"
+    with h5py.File(path, "r+") as fp:
+        del fp.attrs["sync_track"]
+        fp.attrs["audio_sync_track"] = "ADC2"
+    arf = shutil.copy(DATA / "E36_excerpt.arf", output.parent / "E36_5_1.arf")
+    doc = load(
+        regenerate(output, "-r", nb["registry"], "--from-arf", recording=str(arf))
+    )
+    assert calls == [(None, "ADC2")]
+    assert doc["audio_sync_track"] == "ADC2" and "sync_track" not in doc
+
+
 def test_siblings_from_registry(output, monkeypatch):
     """Units given as neurobank ids take their trials from the recording's
     other units in the registry; derived_from is the waveform file's URL."""

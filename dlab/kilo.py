@@ -41,6 +41,8 @@ class Trial(NamedTuple):
 
     aux is None if no auxiliary channels were requested; otherwise it holds a
     (name, start, end) tuple for each auxiliary pulse that starts in the trial.
+    audio_sync is None unless the onset was found on an audio channel; then it
+    describes the match (see audio_sync_trials).
     """
 
     recording_entry: int
@@ -50,6 +52,7 @@ class Trial(NamedTuple):
     stimulus_start: int
     stimulus_end: int
     aux: tuple | None = None
+    audio_sync: dict | None = None
 
 
 class Stimulus(NamedTuple):
@@ -331,12 +334,10 @@ class StimulusFinder:
         self.registry_url = nbank_registry_url
         self.alt_base = alt_base
 
-    def get_durations(self, names: Iterable[str]) -> dict[str, float]:
-        """Looks up durations (in s) for a sequence of stimuli. Searches
-        neurobank first and then tries local directory.
-
-        """
-        output = {}
+    def find(self, names: Iterable[str]) -> Iterator[tuple[str, Path]]:
+        """Yields the name and path of each stimulus file. Searches neurobank
+        first and then the local directory; raises FileNotFoundError if a
+        stimulus can't be found."""
         for name, res in nbank.find_resources(*names, registry_url=self.registry_url):
             if isinstance(res, FileNotFoundError):
                 if self.alt_base is None:
@@ -347,8 +348,36 @@ class StimulusFinder:
             else:
                 path = res
             log.debug("  - found '%s' at %s", name, path)
+            yield name, path
+
+    def get_durations(self, names: Iterable[str]) -> dict[str, float]:
+        """Looks up durations (in s) for a sequence of stimuli (see find)"""
+        output = {}
+        for name, path in self.find(names):
             with ewave.wavfile(path) as fp:
                 output[name] = 1.0 * fp.nframes / fp.sampling_rate
+        return output
+
+    def get_waveforms(
+        self, names: Iterable[str], sampling_rate: float
+    ) -> dict[str, np.ndarray]:
+        """Reads a sequence of stimuli (see find), resampled to sampling_rate.
+        Multichannel files are mixed down to one channel."""
+        from fractions import Fraction
+
+        from scipy.signal import resample_poly
+
+        output = {}
+        for name, path in self.find(names):
+            with ewave.wavfile(path) as fp:
+                data = fp.read().astype("d")
+                rate = fp.sampling_rate
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            ratio = Fraction(sampling_rate / rate).limit_denominator(1000)
+            if ratio != 1:
+                data = resample_poly(data, ratio.numerator, ratio.denominator)
+            output[name] = data
         return output
 
 
@@ -361,6 +390,7 @@ def arf_to_trials(
     *,
     oeaudio_log: Path | None,
     aux: Mapping[str, str] | None = None,
+    audio_sync: str | None = None,
 ) -> list[Trial]:
     """Extracts trial information from an ARF file recorded with a stimulus
     presentation script (oeaudio-present or jpresent)
@@ -391,6 +421,11 @@ def arf_to_trials(
 
     If oeaudio_log is set, it's used instead of the network event datasets.
 
+    If audio_sync names a channel with a copy of the audio (instead of a sync
+    track, which sync_dset and sync_thresh then don't apply to), each stimulus
+    is found on it by cross-correlation, near where its message says it was
+    presented (see audio_sync_trials and dlab.audio_sync).
+
     aux maps names to the datasets of auxiliary channels (e.g. {"led":
     "ADC4"}) carrying pulses from other devices, such as an optogenetic light
     source or a sensor's TTL output. Pulses are detected as for the sync
@@ -414,24 +449,29 @@ def arf_to_trials(
         if expt_start is None:
             expt_start = entry_start
 
-        log.info("  - sync track: '%s'", sync_dset)
+        track, flag = (
+            (audio_sync, "--audio-sync") if audio_sync else (sync_dset, "--sync")
+        )
+        log.info("  - %s track: '%s'", "audio" if audio_sync else "sync", track)
         try:
-            sync = entry[sync_dset]
+            sync = entry[track]
         except KeyError as err:
             available_tracks = ", ".join(entry.keys())
             raise RuntimeError(
-                f"unable to find sync track. Use --sync to configure. Options are: {available_tracks}"
+                f"unable to find the {'audio' if audio_sync else 'sync'} track. Use "
+                f"{flag} to configure. Options are: {available_tracks}"
             ) from err
 
-        sync_pulses = detect_pulses(sync[:], level=sync_thresh)
-        stim_onsets = sync_pulses[:, 0]
-        log.info("    - detected %d sync events", stim_onsets.size)
-        if stim_onsets.size == 0:
-            raise RuntimeError(
-                f"no sync events detected in '{sync_dset}': it may not be the sync "
-                "track, or the sync signal may not have been recorded. Check --sync, "
-                "or set --sync-thresh."
-            )
+        if audio_sync is None:
+            sync_pulses = detect_pulses(sync[:], level=sync_thresh)
+            stim_onsets = sync_pulses[:, 0]
+            log.info("    - detected %d sync events", stim_onsets.size)
+            if stim_onsets.size == 0:
+                raise RuntimeError(
+                    f"no sync events detected in '{sync_dset}': it may not be the "
+                    "sync track, or the sync signal may not have been recorded. "
+                    "Check --sync, or set --sync-thresh."
+                )
         dset_offset = sync.attrs["offset"]
         dset_end = sync.size
         sampling_rate = sync.attrs["sampling_rate"]
@@ -475,12 +515,21 @@ def arf_to_trials(
             stim._replace(start=stim.start - stim_sample_offset)
             for stim in entry_stimuli
         ]
-        check_sync_count(stim_onsets.size, len(entry_stimuli), sync_dset)
-        if oeaudio_log is not None:
+        quality = None
+        if audio_sync is not None:
+            entry_stimuli, stim_onsets, quality = audio_sync_trials(
+                sync, entry_stimuli, stim_finder, sampling_rate
+            )
+            # one-sample events, so the stimulus length check treats them as clicks
+            sync_pulses = np.column_stack([stim_onsets, stim_onsets + 1])
+            times_fit = True
+        elif oeaudio_log is not None:
+            check_sync_count(stim_onsets.size, len(entry_stimuli), sync_dset)
             entry_stimuli, times_fit = match_log_stimuli(
                 entry_stimuli, stim_onsets, sampling_rate
             )
         else:
+            check_sync_count(stim_onsets.size, len(entry_stimuli), sync_dset)
             entry_stimuli, times_fit = (
                 match_sync_events(entry_stimuli, stim_onsets),
                 True,
@@ -519,11 +568,13 @@ def arf_to_trials(
 
         padding_samples = int(prepad * sampling_rate)
         entry_trials = []
-        for stim, onset, offset in zip_longest(
-            entry_stimuli,
-            stim_onsets,
-            stim_onsets[1:],
-            fillvalue=dset_end + padding_samples,
+        for i, (stim, onset, offset) in enumerate(
+            zip_longest(
+                entry_stimuli,
+                stim_onsets,
+                stim_onsets[1:],
+                fillvalue=dset_end + padding_samples,
+            )
         ):
             stim_seconds = stim_durations[stim.name]
             stim_samples = int(stim_seconds * sampling_rate)
@@ -540,6 +591,7 @@ def arf_to_trials(
                     stim.name,
                     onset,
                     onset + stim_samples,
+                    audio_sync=None if quality is None else quality[i],
                 )
             )
         if aux:
@@ -572,6 +624,68 @@ def arf_to_trials(
                 )
         trials.extend(entry_trials)
     return trials
+
+
+def audio_sync_trials(
+    channel: h5.Dataset,
+    stimuli: list[Stimulus],
+    stim_finder: StimulusFinder,
+    sampling_rate: float,
+    max_missing: float = 0.01,
+) -> tuple[list[Stimulus], np.ndarray, list[dict]]:
+    """Finds the stimuli (with start times in samples on the channel) on a
+    channel with a copy of the audio (see dlab.audio_sync.audio_sync_onsets).
+    Returns the stimuli that were found, their onsets, and a description of
+    each match for the pprox: how the onset was found ('audio', or 'estimated'
+    for silent stimuli, placed at the message plus the typical lag, with a
+    warning), the lag from the message (s), the correlation and its contrast,
+    the stimuli of the same length it couldn't be told from, and the best of
+    them (rival). Stimuli that weren't found are dropped with a warning;
+    raises RuntimeError if more than max_missing of them (at least one)
+    weren't, as for a sync track (see check_sync_count)."""
+    from dlab import audio_sync
+
+    waveforms = stim_finder.get_waveforms({s.name for s in stimuli}, sampling_rate)
+    matches = audio_sync.audio_sync_onsets(
+        lambda a, b: channel[a:b].astype("d"), stimuli, waveforms, sampling_rate
+    )
+    found, onsets, quality = [], [], []
+    for i, (stim, m) in enumerate(zip(stimuli, matches, strict=True)):
+        if m.method == "unmatched":
+            log.warning(
+                "  - stimulus %d (%s) not found on the audio channel (%s); "
+                "dropping the trial",
+                i,
+                stim.name,
+                m.reason,
+            )
+            continue
+        if m.method == "estimated":
+            log.warning(
+                "  - WARNING: stimulus %d (%s) is silent; its onset is estimated from "
+                "its message and the typical lag (%.3f s)",
+                i,
+                stim.name,
+                m.lag,
+            )
+        record = {"method": m.method, "lag": round(m.lag, 6)}
+        if m.method == "audio":
+            record.update(r=round(m.r, 4), contrast=round(m.contrast, 4))
+            if m.variants:
+                record["variants"] = list(m.variants)
+            if m.rival is not None:
+                record["rival"] = {"name": m.rival, "r": round(m.rival_r, 4)}
+        found.append(stim)
+        onsets.append(m.onset)
+        quality.append(record)
+    allowed = max(1, int(len(stimuli) * max_missing))
+    if len(stimuli) - len(found) > allowed:
+        raise RuntimeError(
+            f"{len(stimuli) - len(found)} of {len(stimuli)} stimuli weren't found on "
+            f"the audio channel (at most {allowed} may be missing): it may not be the "
+            "copy of the audio. Check --audio-sync."
+        )
+    return found, np.array(onsets, dtype=int), quality
 
 
 def check_stimulus_lengths(
@@ -1045,7 +1159,9 @@ def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
     stimulus onset; `offset` is the onset, in seconds from the start of the
     recording; `interval` is the trial (and `stimulus.interval` the stimulus)
     relative to the onset; `recording` gives the entry and the trial's sample
-    range; and `aux` lists any auxiliary pulses, if they were requested.
+    range; `aux` lists any auxiliary pulses, if they were requested; and
+    `audio_sync` describes how the onset was found on an audio channel, if one
+    was used (see audio_sync_trials).
     """
     for trial in trials.itertuples():
         if isinstance(trial.events, float):
@@ -1073,6 +1189,9 @@ def trials_to_pprox(trials: pd.DataFrame, sampling_rate: float):
                 "end": trial.recording_end,
             },
         }
+        audio = getattr(trial, "audio_sync", None)
+        if isinstance(audio, dict):
+            pproc["audio_sync"] = audio
         aux = getattr(trial, "aux", None)
         if isinstance(aux, tuple):
             pproc["aux"] = [
@@ -1128,6 +1247,16 @@ def group_spikes_script(argv=None):
         help="threshold for detecting sync events, in the units of the sync channel "
         "(default: halfway between the channel's baseline and its peak, with checks "
         "that the channel has clear events). Only needed to override the default.",
+    )
+    p.add_argument(
+        "--audio-sync",
+        metavar="CHANNEL",
+        help="find the stimulus onsets on this channel, a copy of the audio sent to "
+        "the speaker, by cross-correlation with the stimulus files, instead of using "
+        "a sync track (for recordings without one). A hardwired copy is best: its "
+        "onsets match a sync track's to the sample. A microphone also works, YMMV: "
+        "its onsets are later by the acoustic path (~1.3-2.6 ms in our rigs) and "
+        "vary by a few ms.",
     )
     p.add_argument(
         "--aux",
@@ -1214,6 +1343,8 @@ def group_spikes_script(argv=None):
         " 'cluster_info.tsv', and 'temp_wh.dat'",
     )
     args = p.parse_args(argv)
+    if args.audio_sync and args.sync_thresh is not None:
+        p.error("--sync-thresh doesn't apply to --audio-sync")
     setup_log(args.debug, args.debug_http)
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     log.info("- %s version %s", p.prog, version)
@@ -1304,6 +1435,7 @@ def group_spikes_script(argv=None):
                 args.prepad,
                 oeaudio_log=args.oeaudio_log,
                 aux=args.aux,
+                audio_sync=args.audio_sync,
             )
         )
         entry_attrs = tuple(entry_to_metadata(e) for _, e in iter_entries(afp))
@@ -1320,7 +1452,10 @@ def group_spikes_script(argv=None):
 
     # the options that determine the trials, so they can be reconstructed;
     # written to the pprox and waveform files (flat, for hdf5 attributes)
-    trial_options = {"sync_track": args.sync, "prepad": args.prepad}
+    if args.audio_sync:
+        trial_options = {"audio_sync_track": args.audio_sync, "prepad": args.prepad}
+    else:
+        trial_options = {"sync_track": args.sync, "prepad": args.prepad}
     if args.sync_thresh is not None:
         trial_options["sync_thresh"] = args.sync_thresh
     if args.oeaudio_log is not None:
@@ -1335,6 +1470,12 @@ def group_spikes_script(argv=None):
             if stream:
                 track["stream"] = stream
             aux_tracks["aux_tracks"][name] = track
+    # how the onsets were found on the audio channel; only in the pprox
+    audio_parameters = {}
+    if args.audio_sync:
+        from dlab import audio_sync
+
+        audio_parameters = {"audio_sync_parameters": audio_sync.parameters()}
     total_spikes = 0
     total_clusters = 0
     good_clust_types = ("good",)
@@ -1421,6 +1562,7 @@ def group_spikes_script(argv=None):
             entry_metadata=entry_attrs,
             **trial_options,
             **aux_tracks,
+            **audio_parameters,
             **resource_info["metadata"],
         )
         if not args.dry_run:
