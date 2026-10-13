@@ -61,6 +61,11 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   - the sort: the sort directory's name, `params.py` (dtype, channel count,
     sampling rate) and the number of samples in temp_wh.dat. The sample
     count also shows whether a window was sorted (see the item above);
+  - the sorter and its version, which nothing records now (`processed_by`
+    names only group-kilo-spikes). Kilosort 4 probably logs its version in
+    `kilosort4.log` in the sort directory (check); otherwise, and for older
+    kilosorts, which don't record it, it has to be given as an option. The
+    version can't be recovered for deposited units;
   - `--local-stim-dir`, when stimulus durations came from local files
     instead of neurobank.
   The trial options already recorded (`sync_track`, `prepad`, `sync_thresh`,
