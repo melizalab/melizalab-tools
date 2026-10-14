@@ -232,7 +232,7 @@ The trial table comes from one of three places:
 3. **`--from-arf`:** the trials made from the ARF file by the current version
    of `group-kilo-spikes`, for recordings with no pprox from the same run.
    - The sync track and prepad are taken from the waveform file (files from
-     after 2026.10.07 record them), or manually specified with `--sync` and `--prepad`. Add
+     2026.10.14 and later record them), or manually specified with `--sync` and `--prepad`. Add
      `--oeaudio-log` and `--local-stim-dir` as for `group-kilo-spikes`.
    - The onsets may differ by a few samples from what the original version
      made, or more for pulse sync before 2026.10.07.

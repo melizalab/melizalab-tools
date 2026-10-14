@@ -89,7 +89,7 @@ EXAMPLES = sorted(
 # the largest change in stimulus onset accepted (s); old-style clicks move by
 # 0-2 samples, pulses by up to ~7.4 ms (P352) or 9.8 ms (E36)
 MAX_ONSET_SHIFT = 0.010
-# the options that determine the trials, recorded since 2026.10.07
+# the options that determine the trials, recorded since 2026.10.14
 TRIAL_OPTIONS = {"sync_track", "prepad", "sync_thresh", "oeaudio_log"}
 # pprox fields that are known to change
 CHANGED = {"entry_metadata", *TRIAL_OPTIONS}
