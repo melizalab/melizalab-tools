@@ -276,6 +276,7 @@ numbers are indexes into the pprox's `pprox` array.
 | [`waveforms-before-first-trial`](#waveforms-before-first-trial) | info       | —         | none needed                                             |
 | [`messages-unchecked`](#messages-unchecked)                     | info       | yes       | audit with `--oeaudio-log`                              |
 | [`clock-shift`](#clock-shift)                                   | warn       | yes       | note the shift; correct times if the ARF is needed      |
+| [`message-clock-offset`](#message-clock-offset)                 | info       | —         | none needed                                             |
 | [`trials-before-messages`](#trials-before-messages)             | warn, fail | sometimes | exclude trials (warn), re-sync (fail)                   |
 | [`stimulus-mislabeled`](#stimulus-mislabeled)                   | fail       | sometimes | re-sync                                                 |
 | [`trials-share-message`](#trials-share-message)                 | fail       | sometimes | re-sync                                                 |
@@ -614,6 +615,22 @@ spikes and onsets share the origin. The absolute times (`offset`,
 `recording.start` and `end`) are off relative to the ARF file, which matters
 only for analyses that refer back to it (LFP, other channels, other
 recordings); correct them by the shift there.
+
+#### `message-clock-offset`
+
+**Severity:** info
+
+**Problem:** None for the trials. Each trial follows the next message for its
+stimulus (in order) by a consistent lag of more than 2 s: the messages are on
+another clock from the recording. In C182_4_1 the acquisition board's sample
+counter reset 1.9 s into the recording, and arfx-oephys took the ARF's offset
+from the first sample number, so the messages appear 2986 s before their sync
+events. The onsets come from the sync track, which shares the neural data's
+clock (`stimulus-duration-mismatch` checks them), so the trials are right.
+The other message checks, and the aux checks against message streams, use the
+messages shifted to 0.25 s before the onsets, as group-kilo-spikes does.
+
+**Fixable:** —. Analyses that use the message times directly need the shift.
 
 #### `trials-before-messages`
 

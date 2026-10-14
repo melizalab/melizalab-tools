@@ -1525,3 +1525,68 @@ def test_entry_stimuli_renamed(tmp_path):
     assert [s.name for s in plain] == ["a", "b"]
     assert [s.name for s in renamed] == ["x", "b"]
     assert [s.start for s in renamed] == [s.start for s in plain]
+
+
+# --- messages on another clock (C182_4_1)
+
+
+def offset_presentation(offset=2984.0, dropped=(40, 120)):
+    """A recording whose messages are `offset` s early (the sample counter
+    reset), with the trials of some stimuli dropped (presentations stopped
+    early): the trials, and the messages"""
+    names, starts, onsets = presentation(300)
+    trials = [(names[i], onsets[i]) for i in range(len(names)) if i not in dropped]
+    return trials, message_stimuli(names, starts - offset)
+
+
+def test_message_clock_offset():
+    """The trials follow the next message for their stimulus by a consistent
+    lag of ~2984 s; the shift puts the messages 0.25 s before the onsets."""
+    trials, stimuli = offset_presentation()
+    shift, lag = kilo_audit.message_clock_offset(message_unit(trials), stimuli, RATE)
+    assert lag == pytest.approx(2984.37, abs=0.02)
+    assert shift == pytest.approx((lag - kilo.NOMINAL_SYNC_LAG) * RATE, abs=1)
+    found = message_checks(trials, kilo_audit.shift_events(stimuli, shift))
+    assert found == [("trials-dropped", "info", None)]
+
+
+def test_no_message_clock_offset():
+    """Messages on the recording's clock, or trials timed from another origin
+    (onsets before their messages, as in P388_3_1), aren't an offset clock."""
+    names, starts, onsets = presentation(300)
+    trials = list(zip(names, onsets, strict=True))
+    stimuli = message_stimuli(names, starts)
+    assert kilo_audit.message_clock_offset(message_unit(trials), stimuli, RATE) is None
+    trials, names, starts = shifted_presentation()
+    stimuli = message_stimuli(names, starts)
+    assert kilo_audit.message_clock_offset(message_unit(trials), stimuli, RATE) is None
+
+
+def test_mislabeled_trials_are_not_an_offset_clock():
+    """If the labels don't follow the messages in order, there is no offset."""
+    trials, stimuli = offset_presentation()
+    trials = trials[::-1]
+    assert kilo_audit.message_clock_offset(message_unit(trials), stimuli, RATE) is None
+
+
+def test_aux_pulse_in_dropped_trial_not_expected():
+    """A pulse on the channel after the end of the trial before it (in a
+    dropped trial) isn't expected in the pprox."""
+    pp = {
+        "pprox": [
+            {
+                "offset": 1.0,
+                "recording": {"start": 0, "end": 60000},
+                "aux": [{"name": "led", "interval": [0.0, 0.5]}],
+            },
+            {"offset": 5.0, "recording": {"start": 120000, "end": 180000}, "aux": []},
+        ]
+    }
+    unit = kilo_audit.Unit("rec_c1", Path("rec_c1.pprox"), pp)
+    detected = np.array([(30000, 45000), (90000, 100000)])
+    assert kilo_audit.check_aux_channel(unit, "led", "ADC4", detected, RATE) == []
+    detected = np.array([(30000, 45000), (90000, 100000), (150000, 151000)])
+    found = kilo_audit.check_aux_channel(unit, "led", "ADC4", detected, RATE)
+    assert [(f["check"], f.get("trials")) for f in found] == [
+        ("aux-pulses-mismatch", [1])
+    ]

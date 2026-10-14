@@ -421,6 +421,53 @@ def clock_shift(
     return k, float(np.median(lags))
 
 
+def message_clock_offset(
+    unit: Unit, stimuli, sampling_rate: float
+) -> tuple[int, float] | None:
+    """Looks for stimulus messages on another clock from the sync track: each
+    trial follows the next message for its stimulus (in order; trials may have
+    been dropped, but never added) by a consistent lag longer than
+    MAX_SYNC_LAG, as when the acquisition board's sample counter reset during
+    the recording (C182_4_1). The onsets come from the sync track, which
+    shares the neural data's clock, and check_stimulus_durations checks them,
+    so the trials are right. Returns the shift (samples) that puts the
+    messages kilo.NOMINAL_SYNC_LAG before their trials' onsets, as
+    group-kilo-spikes does for its aux checks, and the median lag (s); None if
+    the messages aren't offset."""
+    names = [t["stimulus"]["name"] for t in unit.trials]
+    if not names:
+        return None
+    paired, j = [], 0
+    for name in names:
+        while j < len(stimuli) and stimuli[j].name != name:
+            j += 1
+        if j == len(stimuli):
+            return None
+        paired.append(j)
+        j += 1
+    starts = np.array([stimuli[k].start for k in paired])
+    onsets = np.array([round(t["offset"] * sampling_rate) for t in unit.trials])
+    lags = (onsets - starts) / sampling_rate
+    lo, hi = kilo.sync_lag_range(lags)
+    if lo == hi or np.median(lags) <= MAX_SYNC_LAG:
+        return None
+    outliers = kilo.sync_lag_outliers(starts, onsets, sampling_rate)
+    if outliers.size > MAX_OUTLIER_FRACTION * len(names):
+        return None
+    shift = round(np.median(onsets - starts) - kilo.NOMINAL_SYNC_LAG * sampling_rate)
+    return shift, float(np.median(lags))
+
+
+def shift_events(events: list, shift: int) -> list:
+    """Message events (Stimulus) shifted by shift samples"""
+    return [
+        ev._replace(
+            start=ev.start + shift, end=None if ev.end is None else ev.end + shift
+        )
+        for ev in events
+    ]
+
+
 def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     """Checks a unit's trials against the stimulus start messages: each trial's
     onset (its sync event) should follow a start message for its stimulus by a
@@ -755,10 +802,12 @@ def check_aux_channel(
     unit: Unit, name: str, channel: str, detected: np.ndarray, sampling_rate: float
 ) -> list[dict]:
     """Checks a unit's aux pulses against the pulses detected on their channel
-    (onsets and offsets, to within a sample). Pulses before the first trial
-    are not expected in the pprox."""
+    (onsets and offsets, to within a sample). Pulses before the first trial, or
+    after the end of the trial before them (in a dropped trial, or after the
+    last trial of a sorted window), are not expected in the pprox."""
     first = unit.trials[0]["recording"]["start"] if unit.trials else 0
     starts = np.array([t["recording"]["start"] for t in unit.trials])
+    ends = np.array([t["recording"]["end"] for t in unit.trials])
     on_channel = [(int(on), int(off)) for on, off in detected if on >= first]
     in_pprox = unit_aux_pulses(unit, sampling_rate).get(name, [])
     channel_onsets = np.array([on for on, _ in on_channel])
@@ -771,11 +820,12 @@ def check_aux_channel(
         matched.add(int(k[0]))
         if abs(on_channel[k[0]][1] - off) > 1:
             durations.append(trial)
+    trial_of = np.searchsorted(starts, channel_onsets, side="right") - 1
     not_in_pprox = sorted(
         {
-            int(np.searchsorted(starts, on, side="right") - 1)
+            int(trial_of[k])
             for k, (on, _) in enumerate(on_channel)
-            if k not in matched
+            if k not in matched and on < ends[trial_of[k]]
         }
     )
     out = []
@@ -884,11 +934,19 @@ def entry_events(entry, first_sample: int) -> dict[str, list] | None:
     }
 
 
-def check_aux(unit: Unit, entry, first_sample: int, sampling_rate: float, cache: dict):
+def check_aux(
+    unit: Unit,
+    entry,
+    first_sample: int,
+    sampling_rate: float,
+    cache: dict,
+    message_shift: int = 0,
+):
     """Checks a unit's aux pulses: their fields, against their channels in the
-    ARF file, and against the message streams named in aux_tracks. cache holds
-    the pulses detected on each channel and the messages of each entry, which
-    are shared by the units of a recording."""
+    ARF file, and against the message streams named in aux_tracks (shifted by
+    message_shift samples; see message_clock_offset). cache holds the pulses
+    detected on each channel and the messages of each entry, which are shared
+    by the units of a recording."""
     out = check_aux_fields(unit)
     tracks = unit.pprox.get("aux_tracks") or {}
     # pulses are compared by sample, which needs the trials' sample ranges
@@ -927,6 +985,8 @@ def check_aux(unit: Unit, entry, first_sample: int, sampling_rate: float, cache:
             if key not in cache:
                 cache[key] = entry_events(entry, first_sample)
             messages = (cache[key] or {}).get(stream)
+            if messages and message_shift:
+                messages = shift_events(messages, message_shift)
             out.extend(
                 check_aux_stream(unit, name, stream, detected, messages, sampling_rate)
             )
@@ -1222,9 +1282,25 @@ def audit_recording(
                 stimuli_cache[key] = entry_stimuli(
                     entry, first_sample, sampling_rate, oeaudio_log, names
                 )
-            unit.findings.extend(
-                check_messages(unit, stimuli_cache[key], sampling_rate)
+            stimuli = stimuli_cache[key]
+            offset = (
+                message_clock_offset(unit, stimuli, sampling_rate) if stimuli else None
             )
+            message_shift = 0
+            if offset is not None:
+                message_shift, lag = offset
+                unit.findings.append(
+                    finding(
+                        "message-clock-offset",
+                        "info",
+                        f"the trials follow their stimulus messages by {lag:.3f} s: "
+                        "the messages are on another clock from the recording (e.g. "
+                        "the sample counter reset); checked against the messages "
+                        f"shifted to {kilo.NOMINAL_SYNC_LAG:.2f} s before the onsets",
+                    )
+                )
+                stimuli = shift_events(stimuli, message_shift)
+            unit.findings.extend(check_messages(unit, stimuli, sampling_rate))
             unit.findings.extend(
                 check_stimulus_durations(
                     unit,
@@ -1234,7 +1310,14 @@ def audit_recording(
             )
             if "aux_tracks" in unit.pprox or any("aux" in t for t in unit.trials):
                 unit.findings.extend(
-                    check_aux(unit, entry, first_sample, sampling_rate, aux_cache)
+                    check_aux(
+                        unit,
+                        entry,
+                        first_sample,
+                        sampling_rate,
+                        aux_cache,
+                        message_shift,
+                    )
                 )
     status = worst([*findings, *(f for u in units for f in u.findings)])
     return {
