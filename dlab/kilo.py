@@ -344,7 +344,7 @@ class StimulusFinder:
                     raise res
                 path = (self.alt_base / name).with_suffix(".wav")
                 if not path.exists():
-                    raise res
+                    raise FileNotFoundError(f"{res}; {path} does not exist") from res
             else:
                 path = res
             log.debug("  - found '%s' at %s", name, path)
@@ -504,7 +504,8 @@ def arf_to_trials(
             )
         except FileNotFoundError as err:
             raise RuntimeError(
-                "unable to find a stimulus to look up duration. Was it deposited in neurobank?"
+                f"unable to look up a stimulus's duration: {err}. Stimuli must be"
+                " deposited in neurobank (or given with --local-stim-dir)"
             ) from err
         log.info("    - detected %d stimuli", len(entry_stimuli))
 

@@ -465,9 +465,10 @@ def test_stimulus_finder_falls_back_to_alt_base(tmp_path, fake_find_resources):
 
 
 def test_stimulus_finder_missing_from_alt_base_raises(tmp_path, fake_find_resources):
-    """If the fallback file does not exist either, FileNotFoundError is raised."""
+    """If the fallback file does not exist either, FileNotFoundError is raised,
+    naming the file that was looked for."""
     finder = kilo.StimulusFinder("http://registry/", alt_base=tmp_path)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match=r"missing\.wav does not exist"):
         finder.get_durations(["missing"])
 
 

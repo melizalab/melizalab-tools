@@ -151,7 +151,8 @@ def fetch_resource(
                     err.response.status_code,
                 )
     raise FileNotFoundError(
-        "resource not found in local archive, cache, or downloadable remote"
+        f"{resource_id} is registered, but is not in a local archive or the cache,"
+        " and could not be downloaded"
     )
 
 

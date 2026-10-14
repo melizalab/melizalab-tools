@@ -432,6 +432,9 @@ def test_http_error_is_reported_and_logged(registry, caplog):
     assert isinstance(result["abcd1234"], FileNotFoundError)
     assert "abcd1234" in caplog.text, "warning should name the resource"
     assert "404" in caplog.text, "warning should include the http status"
+    assert "abcd1234 is registered" in str(result["abcd1234"]), (
+        "the error should say the resource is registered but unavailable"
+    )
 
 
 def test_failed_download_leaves_no_cache_entry(registry, remote_cache):

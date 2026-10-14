@@ -238,11 +238,14 @@ def test_trials_missing_message_dataset(make_arf):
 
 def test_trials_unknown_stimulus(make_arf):
     """A stimulus whose duration can't be found is a RuntimeError, chained from
-    the FileNotFoundError."""
+    the FileNotFoundError, that includes the lookup's error."""
     finder = StubFinder({"a": 0.5, "b": 0.5})
     with pytest.raises(RuntimeError, match="neurobank") as excinfo:
         trials(make_arf(one_entry()), finder)
     assert isinstance(excinfo.value.__cause__, FileNotFoundError)
+    assert str(excinfo.value.__cause__) in str(excinfo.value), (
+        "the message should say why the stimulus wasn't found"
+    )
 
 
 RENAMED = [(new, on, off) for new, (_, on, off) in zip("xyz", STIMULI, strict=True)]
