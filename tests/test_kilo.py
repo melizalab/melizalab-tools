@@ -484,3 +484,28 @@ def test_stimulus_finder_prefers_neurobank_over_alt_base(tmp_path, fake_find_res
     assert finder.get_durations(["a"]) == {"a": 1.0}, (
         "neurobank's 1 s file should win over alt_base's 3 s file"
     )
+
+
+def test_yaml_to_stimulus_names(tmp_path):
+    """The names file is a mapping of strings to strings."""
+    path = tmp_path / "names.yml"
+    path.write_text("a: x\n'001': y\n")
+    assert kilo.yaml_to_stimulus_names(path) == {"a": "x", "001": "y"}
+
+
+@pytest.mark.parametrize("text", ["- a\n- x\n", "001: y\n", "a: 2\n", ""])
+def test_yaml_to_stimulus_names_rejects_other_content(tmp_path, text):
+    """A list, a name YAML reads as a number, or an empty file is an error."""
+    path = tmp_path / "names.yml"
+    path.write_text(text)
+    with pytest.raises(ValueError, match="should map stimulus names"):
+        kilo.yaml_to_stimulus_names(path)
+
+
+def test_rename_stimuli():
+    """Stimuli in the mapping are renamed; others keep their names and times."""
+    stimuli = [kilo.Stimulus("a", 10, 20), kilo.Stimulus("b", 30)]
+    assert kilo.rename_stimuli(stimuli, {"a": "x", "z": "y"}) == [
+        kilo.Stimulus("x", 10, 20),
+        kilo.Stimulus("b", 30),
+    ]

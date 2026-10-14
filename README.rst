@@ -47,7 +47,9 @@ console scripts
    recording). If only part of the recording was sorted, ``--sort-start`` and
    ``--sort-stop`` give the part. Where kilosort's output for it starts is
    found by checking it against the recording's neural channels, to the
-   sample, and the output is timed from the recording's start.
+   sample, and the output is timed from the recording's start. Stimuli
+   presented under other names than they were deposited under are mapped with
+   ``--alt-stim-names``.
 -  ``audit-kilo-spikes``: check the ``group-kilo-spikes`` output for one
    recording against its waveform files, the stimulus messages in the ARF
    file, and each other, and write a JSON report. Changes nothing.

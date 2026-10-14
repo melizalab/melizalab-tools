@@ -370,6 +370,13 @@ def main(argv=None):
         help="look for stimulus files here if they aren't in neurobank",
     )
     p.add_argument(
+        "--alt-stim-names",
+        type=Path,
+        metavar="YAML",
+        help="YAML file mapping the names of stimuli in the messages (or log) to "
+        "the names they were deposited under in neurobank",
+    )
+    p.add_argument(
         "--no-refine",
         action="store_true",
         help="don't refine the onsets on the raw waveform (for a microphone)",
@@ -385,6 +392,9 @@ def main(argv=None):
     args = p.parse_args(argv)
     setup_log(args.debug, args.debug_http)
     finder = kilo.StimulusFinder(args.registry_url, args.local_stim_dir)
+    names = {}
+    if args.alt_stim_names is not None:
+        names = kilo.yaml_to_stimulus_names(args.alt_stim_names)
     rows = []
     with h5py.File(args.recording, "r") as fp:
         for entry_num, entry in kilo.iter_entries(fp):
@@ -401,7 +411,10 @@ def main(argv=None):
                         1, f"{entry.name}: no stimulus messages; use --oeaudio-log\n"
                     )
                 stimuli = kilo.messages_to_stimuli(messages)
-            stimuli = [s._replace(start=s.start - first) for s in stimuli]
+            stimuli = [
+                s._replace(start=s.start - first)
+                for s in kilo.rename_stimuli(stimuli, names)
+            ]
             log.info("- %s: %d stimuli on %s", entry.name, len(stimuli), args.channel)
             waveforms = finder.get_waveforms({s.name for s in stimuli}, rate)
             matches = audio_sync_onsets(

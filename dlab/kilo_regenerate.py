@@ -233,22 +233,30 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
     sync_thresh = args.sync_thresh
     if sync_thresh is None:
         sync_thresh = {w.attrs.get("sync_thresh") for w in waveforms}.pop()
+
+    def recorded(prefix, what):
+        # a dict written to the waveform files as attributes named prefix + key
+        values = {
+            tuple(
+                sorted(
+                    (k[len(prefix) :], _plain(v))
+                    for k, v in w.attrs.items()
+                    if k.startswith(prefix)
+                )
+            )
+            for w in waveforms
+        }
+        if len(values) != 1:
+            raise RuntimeError(f"the waveform files record different {what}")
+        return dict(values.pop())
+
     # units from a sort of part of the recording record the window, and only
     # the trials within it are kept (see dlab.kilo_window)
-    prefix = "sorted_window_"
-    windows = {
-        tuple(
-            sorted(
-                (k[len(prefix) :], _plain(v))
-                for k, v in w.attrs.items()
-                if k.startswith(prefix)
-            )
-        )
-        for w in waveforms
-    }
-    if len(windows) != 1:
-        raise RuntimeError("the waveform files record different sorted windows")
-    sorted_window = dict(windows.pop())
+    sorted_window = recorded("sorted_window_", "sorted windows")
+    if args.alt_stim_names is not None:
+        stimulus_names = kilo.yaml_to_stimulus_names(args.alt_stim_names)
+    else:
+        stimulus_names = recorded("stimulus_names_", "stimulus names")
     arf_path = Path(args.recording)
     if not arf_path.exists():
         arf_path = find_local(args.recording, args.registry_url)
@@ -269,6 +277,7 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
             prepad,
             oeaudio_log=args.oeaudio_log,
             audio_sync=audio_sync,
+            stimulus_names=stimulus_names,
         )
         entry_attrs = tuple(
             kilo.entry_to_metadata(e) for _, e in kilo.iter_entries(afp)
@@ -308,6 +317,7 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         entry_metadata=entry_attrs,
         **trial_options,
         **({"sorted_window": sorted_window} if sorted_window else {}),
+        **({"stimulus_names": stimulus_names} if stimulus_names else {}),
         **metadata,
     )
     return TrialSource(f"{arf_path.name} ({PROG} {__version__})", doc)
@@ -410,6 +420,13 @@ def script(argv=None):
     arf.add_argument("--oeaudio-log", type=Path, help="open-ephys-audio log")
     arf.add_argument(
         "--local-stim-dir", type=Path, help="fallback directory for stimulus files"
+    )
+    arf.add_argument(
+        "--alt-stim-names",
+        type=Path,
+        metavar="YAML",
+        help="neurobank names of stimuli presented under other names (default: "
+        "from the waveform files)",
     )
     p.add_argument("recording", help="the recording: neurobank id or ARF file")
     args = p.parse_args(argv)

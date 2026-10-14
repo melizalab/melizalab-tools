@@ -1499,3 +1499,29 @@ def test_e36_aux_pulses_clean():
     assert [f["check"] for f in unit_report(report, "E36_5_1_c0")["findings"]] == [
         "waveforms-missing"
     ]
+
+
+def test_entry_stimuli_renamed(tmp_path):
+    """The messages are renamed with the stimulus_names recorded in the pprox,
+    so trials labeled with neurobank names match them."""
+    import arf
+    from conftest import FIRST_SAMPLE, add_entry, oeaudio_messages
+
+    stimuli = [("a", 30000, 45000), ("b", 90000, 105000)]
+    with arf.open_file(tmp_path / "rec.arf", "w") as fp:
+        add_entry(
+            fp,
+            "entry_0",
+            1000.0,
+            nsamples=120000,
+            clicks=[30000, 90000],
+            messages=oeaudio_messages(stimuli),
+        )
+        entry = fp["entry_0"]
+        plain = kilo_audit.entry_stimuli(entry, FIRST_SAMPLE, 30000.0, None)
+        renamed = kilo_audit.entry_stimuli(
+            entry, FIRST_SAMPLE, 30000.0, None, {"a": "x"}
+        )
+    assert [s.name for s in plain] == ["a", "b"]
+    assert [s.name for s in renamed] == ["x", "b"]
+    assert [s.start for s in renamed] == [s.start for s in plain]

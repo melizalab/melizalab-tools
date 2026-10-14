@@ -366,10 +366,13 @@ def entry_clock(entry, channel: str | None = None) -> tuple[float, int]:
     raise RuntimeError(f"no channel in {entry.name} has the recording clock")
 
 
-def entry_stimuli(entry, first_sample: int, sampling_rate: float, oeaudio_log):
+def entry_stimuli(
+    entry, first_sample: int, sampling_rate: float, oeaudio_log, stimulus_names=None
+):
     """The stimuli presented during an entry, with start times in samples from
     the start of the recording, from the message dataset or else the oeaudio
-    log. Returns None if neither is available."""
+    log, renamed with stimulus_names (as recorded in the pprox) if given.
+    Returns None if neither is available."""
     dset = kilo.find_message_dset(entry)
     if dset is not None:
         stimuli = kilo.messages_to_stimuli(dset)
@@ -378,6 +381,8 @@ def entry_stimuli(entry, first_sample: int, sampling_rate: float, oeaudio_log):
             stimuli = list(kilo.oeaudio_log_to_stimuli(fp, sampling_rate))
     else:
         return None
+    if stimulus_names:
+        stimuli = kilo.rename_stimuli(stimuli, stimulus_names)
     return [stim._replace(start=stim.start - first_sample) for stim in stimuli]
 
 
@@ -1211,10 +1216,11 @@ def audit_recording(
                     )
                 )
                 continue
-            key = (entry.name, first_sample)
+            names = unit.pprox.get("stimulus_names") or {}
+            key = (entry.name, first_sample, tuple(sorted(names.items())))
             if key not in stimuli_cache:
                 stimuli_cache[key] = entry_stimuli(
-                    entry, first_sample, sampling_rate, oeaudio_log
+                    entry, first_sample, sampling_rate, oeaudio_log, names
                 )
             unit.findings.extend(
                 check_messages(unit, stimuli_cache[key], sampling_rate)

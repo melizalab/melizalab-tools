@@ -136,6 +136,32 @@ def messages_to_events(
     return events
 
 
+def yaml_to_stimulus_names(path: Path) -> dict[str, str]:
+    """Reads a YAML file that maps the names of stimuli as presented (the stems
+    in the messages or the log) to the names they were deposited under in
+    neurobank. Names must be strings; quote ones that YAML would read as
+    numbers."""
+    import yaml
+
+    with open(path) as fp:
+        names = yaml.safe_load(fp)
+    if not isinstance(names, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in names.items()
+    ):
+        raise ValueError(
+            f"{path} should map stimulus names to neurobank names (quote any "
+            "names YAML would read as numbers)"
+        )
+    return names
+
+
+def rename_stimuli(
+    stimuli: Iterable[Stimulus], names: Mapping[str, str]
+) -> list[Stimulus]:
+    """Replaces the names of stimuli that are keys of names with their values"""
+    return [stim._replace(name=names.get(stim.name, stim.name)) for stim in stimuli]
+
+
 def messages_to_stimuli(dset: h5.Dataset) -> list[Stimulus]:
     """The stimulus events in the message dataset (see messages_to_events).
     arf_to_trials converts their times to samples from the start of the
@@ -391,6 +417,7 @@ def arf_to_trials(
     oeaudio_log: Path | None,
     aux: Mapping[str, str] | None = None,
     audio_sync: str | None = None,
+    stimulus_names: Mapping[str, str] | None = None,
 ) -> list[Trial]:
     """Extracts trial information from an ARF file recorded with a stimulus
     presentation script (oeaudio-present or jpresent)
@@ -420,6 +447,11 @@ def arf_to_trials(
     stimulus onset. The default is 1.0 s.
 
     If oeaudio_log is set, it's used instead of the network event datasets.
+
+    stimulus_names maps the names of stimuli in the messages (or log) to the
+    names they were deposited under in neurobank, which are used to look them
+    up and to label the trials (see rename_stimuli). Stimuli not in it keep
+    their names.
 
     If audio_sync names a channel with a copy of the audio (instead of a sync
     track, which sync_dset and sync_thresh then don't apply to), each stimulus
@@ -498,6 +530,10 @@ def arf_to_trials(
                 ", ".join(f"{len(v)} {k}" for k, v in events.items()),
             )
             entry_stimuli = events.get("stimulus", [])
+        if stimulus_names:
+            renamed = sum(stim.name in stimulus_names for stim in entry_stimuli)
+            entry_stimuli = rename_stimuli(entry_stimuli, stimulus_names)
+            log.info("    - %d stimuli renamed to their neurobank names", renamed)
         try:
             stim_durations = stim_finder.get_durations(
                 stim.name for stim in entry_stimuli
@@ -1370,6 +1406,14 @@ def group_spikes_script(argv=None):
         type=Path,
         help="DEBUG/TESTING ONLY. Search this directory for stimulus files.",
     )
+    p.add_argument(
+        "--alt-stim-names",
+        type=Path,
+        metavar="YAML",
+        help="YAML file mapping the names of stimuli in the messages (or log) to "
+        "the names they were deposited under in neurobank, for stimuli presented "
+        "under other names. Trials are labeled with the neurobank names.",
+    )
     p.add_argument("recording", type=Path, help="path of ARF recording file")
     p.add_argument(
         "sortdir",
@@ -1408,6 +1452,14 @@ def group_spikes_script(argv=None):
 
     if args.local_stim_dir is not None:
         log.info("  - using %s as fallback for looking up stimuli", args.local_stim_dir)
+    stimulus_names = {}
+    if args.alt_stim_names is not None:
+        stimulus_names = yaml_to_stimulus_names(args.alt_stim_names)
+        log.info(
+            "  - using %s for the neurobank names of %d stimuli",
+            args.alt_stim_names,
+            len(stimulus_names),
+        )
     stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
 
     log.info("- kilosort output directory: %s", args.sortdir)
@@ -1480,6 +1532,7 @@ def group_spikes_script(argv=None):
             oeaudio_log=args.oeaudio_log,
             aux=args.aux,
             audio_sync=args.audio_sync,
+            stimulus_names=stimulus_names,
         )
         entry_attrs = tuple(entry_to_metadata(e) for _, e in iter_entries(afp))
         entries = [entry for _, entry in iter_entries(afp)]
@@ -1598,6 +1651,8 @@ def group_spikes_script(argv=None):
         trial_options["sync_thresh"] = args.sync_thresh
     if args.oeaudio_log is not None:
         trial_options["oeaudio_log"] = args.oeaudio_log.name
+    # the stimuli presented under other names; only written if there are any
+    alt_stim_names = {"stimulus_names": stimulus_names} if stimulus_names else {}
     # describes the auxiliary channels; only written if there are any
     aux_tracks = {}
     if args.aux:
@@ -1698,6 +1753,7 @@ def group_spikes_script(argv=None):
             entry_metadata=entry_attrs,
             **trial_options,
             **sorted_window,
+            **alt_stim_names,
             **aux_tracks,
             **audio_parameters,
             **resource_info["metadata"],
@@ -1732,6 +1788,7 @@ def group_spikes_script(argv=None):
                         f"sorted_window_{k}": v
                         for k, v in sorted_window.get("sorted_window", {}).items()
                     },
+                    **{f"stimulus_names_{k}": v for k, v in stimulus_names.items()},
                 )
 
     log.info(

@@ -65,10 +65,6 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
     from the window's start; the other deposited examples (C110_1_1,
     C122_1_1, P388_4_1, E82_1_1, E82_2_1) end early and keep the
     recording's origin.
-- [ ] The student's fork also has `--alt-stim-names` (a YAML file mapping
-  stimulus names to the names deposited in neurobank) and `--temp-wh` (another
-  name for temp_wh.dat). Fold in separately if wanted; its spike-interface
-  column names (`amp`, `rp_contamination`) are not needed.
 - [ ] Store the other parameters that determine group-kilo-spikes output in
   the pprox (and waveform files where they apply), so a unit can be
   reproduced and audited without the command line. Not recorded now:

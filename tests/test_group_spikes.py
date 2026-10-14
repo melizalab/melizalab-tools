@@ -477,3 +477,74 @@ def test_waveform_file_records_program(make_recording):
     """The waveform file records the program name, whatever the invocation."""
     with h5py.File(make_recording()() / "rec_c1_spikes.h5") as fp:
         assert fp.attrs["processed_by"] == f"group-kilo-spikes {kilo.SCRIPT_VERSION}"
+
+
+@pytest.fixture
+def renamed(make_recording, tmp_path):
+    """A recording whose stimulus 'a' was deposited as 'x' (stims/a.wav is
+    renamed, so looking 'a' up fails), and a names file mapping a to x."""
+    run = make_recording()
+    stims = tmp_path / "stims"
+    (stims / "a.wav").rename(stims / "x.wav")
+    names = tmp_path / "names.yml"
+    names.write_text("a: x\n")
+    return run, names
+
+
+def test_alt_stim_names(renamed):
+    """--alt-stim-names looks up and labels stimuli by their neurobank names,
+    and records the mapping in the pprox and the waveform file."""
+    from dlab.pprox import validate
+
+    run, names = renamed
+    out = run("--alt-stim-names", str(names))
+    pp = load_pprox(out, 1)
+    assert [t["stimulus"]["name"] for t in pp["pprox"]] == ["x", "b", "c"]
+    assert pp["stimulus_names"] == {"a": "x"}
+    validate(pp)
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert fp.attrs["stimulus_names_a"] == "x"
+
+
+def test_without_alt_stim_names_lookup_fails(renamed):
+    """Without the mapping, the stimulus can't be found under its played name."""
+    run, _ = renamed
+    with pytest.raises(RuntimeError, match=r"/a\.wav does not exist"):
+        run()
+
+
+def test_no_stimulus_names_by_default(make_recording):
+    """Without --alt-stim-names, the outputs don't record a mapping."""
+    out = make_recording()()
+    assert "stimulus_names" not in load_pprox(out, 1)
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert not any(k.startswith("stimulus_names_") for k in fp.attrs)
+
+
+def test_regenerate_from_arf_uses_recorded_stimulus_names(renamed, tmp_path):
+    """regenerate-pprox --from-arf renames the stimuli as recorded in the
+    waveform file, and the same pprox results."""
+    from dlab import kilo_regenerate
+
+    run, names = renamed
+    out = run("--alt-stim-names", str(names))
+    new = tmp_path / "new"
+    kilo_regenerate.script(
+        [
+            "-r",
+            REGISTRY,
+            "--units",
+            str(out / "rec_c1_spikes.h5"),
+            "-o",
+            str(new),
+            "--from-arf",
+            "--local-stim-dir",
+            str(tmp_path / "stims"),
+            str(tmp_path / "rec.arf"),
+        ]
+    )
+    provenance = {"processed_by", "derived_from", "trials_from"}
+    old, doc = load_pprox(out, 1), load_pprox(new, 1)
+    assert {k: v for k, v in doc.items() if k not in provenance} == {
+        k: v for k, v in old.items() if k not in provenance
+    }

@@ -644,6 +644,9 @@ the wrong stimulus.
 - A recording without a working sync line has the same effect, as in
   C401_1_1b.
 
+Stimuli presented under other names are compared under the neurobank names
+recorded in the pprox's `stimulus_names` (`--alt-stim-names`).
+
 **Fixable:** sometimes. Re-sync if the recording has a usable sync track.
 Mislabeled trials invalidate stimulus-specific analyses, which makes this the
 strongest case for reprocessing. Excluding trials is only safe if a few
