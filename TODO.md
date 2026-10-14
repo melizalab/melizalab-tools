@@ -115,7 +115,12 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   (up to 1 s on some setups), which loosens message-to-pulse matching. The
   audit's `message-jitter` finds sessions where the lags were spread over
   ~0.2 s (summer 2025 on the kiaa0319 rig; 2026-01-06 to -12 and 2026-04-09
-  to 05-11 on the induction rig).
+  to 05-11 on the induction rig). Not too short: at 512 frames (2 periods,
+  ~23 ms; jill 3.0.0) every C182 session on 2026-10-12 had jack xruns (1-6
+  per 72 min), and jpresent stops the stimulus playing at an xrun (12 of 8520
+  cut short; group-kilo-spikes drops them). 4096 frames gave none in ~17.5 h
+  (jill 2.2.2 and 3.0.0rc1); try 1024 and count xruns in a full session
+  (jill_error and the xrun lines in jpresent's log).
 
 ## pprox.py
 

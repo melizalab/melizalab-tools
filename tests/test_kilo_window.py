@@ -287,6 +287,17 @@ def test_trials_in_window():
     assert (before, after) == (1, 1)
 
 
+def test_trials_in_window_drops_aux_pulses_after_it():
+    """Aux pulses of the last kept trial that start after the window's stop
+    are dropped with the part of the trial after it."""
+    trials = [
+        kilo.Trial(0, 20, 40, "s", 30, 35, aux=(("led", 30, 33), ("led", 38, 39))),
+        kilo.Trial(0, 40, 60, "s", 50, 55, aux=()),
+    ]
+    kept, _, _ = kilo.trials_in_window(trials, 15, 37)
+    assert kept[0].aux == (("led", 30, 33),)
+
+
 # --- checking the window against the recording
 
 

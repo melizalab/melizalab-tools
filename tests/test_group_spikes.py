@@ -576,6 +576,7 @@ def test_spike_counts(make_recording):
         "sorted": 14,
         "duplicate": 1,
         "before_first_trial": 1,
+        "after_trial_end": 0,
         "near_ends": 1,
         "artifact": 1,
         "kept": 10,
@@ -644,3 +645,21 @@ def test_sorter_from_kilosort4_log(make_recording, tmp_path):
     )
     with pytest.raises(RuntimeError, match=r"kilosort4\.log says"):
         run("--sorter", "kilosort 2.5")
+
+
+def test_spikes_in_dropped_trial(make_recording, tmp_path):
+    """A trial whose stimulus doesn't fit the sync track (here b, 2.5 s, with
+    the next click 2 s later, as when a presentation is stopped early) is
+    dropped, and the spikes in its interval are in no trial: they're dropped
+    from the pprox and the waveform file, and counted."""
+    run = make_recording()
+    with ewave.open(tmp_path / "stims" / "b.wav", "w", sampling_rate=44100) as fp:
+        fp.write(np.zeros(round(2.5 * 44100), "h"))
+    out = run()
+    pp = load_pprox(out, 1)
+    assert [t["stimulus"]["name"] for t in pp["pprox"]] == ["a", "c"]
+    # cluster 1's spike at 96000 is in b's trial (60000-120000)
+    assert pp["spike_counts"]["after_trial_end"] == 1
+    assert pp["spike_counts"]["kept"] == 3
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert 96000 not in fp["times"][:]

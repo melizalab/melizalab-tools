@@ -433,6 +433,14 @@ class StimulusFinder:
         return output
 
 
+# the lag assumed between the start messages and their sync events when the
+# messages are on another clock (see arf_to_trials): typical of our rigs
+# (0.07-1 s), and short enough that the aux pulses that follow other messages
+# (0.27 s on the C182 rig, where sync events follow by 0.07 s) still come
+# between their message and the next
+NOMINAL_SYNC_LAG = 0.25
+
+
 def arf_to_trials(
     data_file: h5.File,
     stim_finder: StimulusFinder,
@@ -470,7 +478,9 @@ def arf_to_trials(
     The continuous recording is broken up into trials based on the stimulus
     presentation, such that each trial encompasses one and only one stimulus.
     The `prepad` parameter specifies, in seconds, when trials begin relative to
-    stimulus onset. The default is 1.0 s.
+    stimulus onset. The default is 1.0 s. A trial whose stimulus doesn't fit
+    the sync track, usually a presentation stopped early, is dropped (see
+    check_stimulus_lengths); its interval is in no trial.
 
     If oeaudio_log is set, it's used instead of the network event datasets.
 
@@ -598,7 +608,10 @@ def arf_to_trials(
                 True,
             )
         # lags (sync event after start message) are meaningless for a log from
-        # another session
+        # another session. If the messages are on another clock from the sync
+        # track (C182_4_1), they're shifted so the start messages come
+        # NOMINAL_SYNC_LAG before their sync events, for the aux checks
+        message_shift = 0
         if times_fit:
             starts = np.array([stim.start for stim in entry_stimuli])
             lags = (stim_onsets - starts) / sampling_rate
@@ -606,11 +619,16 @@ def arf_to_trials(
                 "    - sync events follow start messages by %.3f s", np.median(lags)
             )
             if not 0 <= np.median(lags) <= 2.0:
+                message_shift = round(
+                    np.median(stim_onsets - starts) - NOMINAL_SYNC_LAG * sampling_rate
+                )
                 log.warning(
                     "  - WARNING: sync events follow their start messages by %.3f s; "
                     "the message times don't line up with the sync track. The "
-                    "stimuli are paired with the sync events in order.",
+                    "stimuli are paired with the sync events in order, and the "
+                    "messages shifted to %.2f s before them for the aux checks.",
                     np.median(lags),
+                    NOMINAL_SYNC_LAG,
                 )
             lo, hi = sync_lag_range(lags)
             for i in sync_lag_outliers(starts, stim_onsets, sampling_rate):
@@ -625,8 +643,12 @@ def arf_to_trials(
                     hi,
                 )
 
-        check_stimulus_lengths(
-            entry_stimuli, stim_durations, sync_pulses, sync.size, sampling_rate
+        # trials whose stimulus doesn't fit the sync track (stopped early) are
+        # dropped
+        mismatched = set(
+            check_stimulus_lengths(
+                entry_stimuli, stim_durations, sync_pulses, sync.size, sampling_rate
+            ).tolist()
         )
 
         padding_samples = int(prepad * sampling_rate)
@@ -639,6 +661,8 @@ def arf_to_trials(
                 fillvalue=dset_end + padding_samples,
             )
         ):
+            if i in mismatched:
+                continue
             stim_seconds = stim_durations[stim.name]
             stim_samples = int(stim_seconds * sampling_rate)
             if stim_samples > offset - onset:
@@ -671,10 +695,11 @@ def arf_to_trials(
                         name,
                     )
                     continue
+                shift = message_shift - stim_sample_offset
                 messages = [
                     ev._replace(
-                        start=ev.start - stim_sample_offset,
-                        end=None if ev.end is None else ev.end - stim_sample_offset,
+                        start=ev.start + shift,
+                        end=None if ev.end is None else ev.end + shift,
                     )
                     for ev in events[stream]
                 ]
@@ -758,13 +783,15 @@ def check_stimulus_lengths(
     nsamples: int,
     sampling_rate: float,
     max_missing: float = 0.01,
-) -> None:
+) -> np.ndarray:
     """Checks that the stimuli paired with the sync events (one per event) fit
     the sync track: the gaps between them, and the pulse widths if the sync
-    track has pulses (see stimulus_length_mismatches). Logs a warning for each
-    trial that doesn't fit; raises RuntimeError if more than max_missing of the
-    trials (at least one) don't, since the stimuli are then probably paired
-    with the wrong sync events, and the trials would be mislabeled."""
+    track has pulses (see stimulus_length_mismatches). Returns the indices of
+    the trials that don't, with a warning for each: usually presentations
+    stopped early (C182_4_1), which arf_to_trials drops. Raises RuntimeError
+    if more than max_missing of the trials (at least one) don't fit, since the
+    stimuli are then probably paired with the wrong sync events, and the trials
+    would be mislabeled."""
     onsets = pulses[:, 0]
     lengths = np.array([durations[stim.name] for stim in stimuli])
     widths = None
@@ -775,7 +802,7 @@ def check_stimulus_lengths(
     for i in bad:
         log.warning(
             "  - WARNING: stimulus %d (%s, %.3f s) doesn't fit the sync track "
-            "(%s; next sync event after %.3f s)",
+            "(%s; next sync event after %.3f s); dropping the trial",
             i,
             stimuli[i].name,
             lengths[i],
@@ -792,6 +819,7 @@ def check_stimulus_lengths(
             "spurious sync event), or the sync track or stimulus durations are "
             "wrong. Check --sync, or set --sync-thresh."
         )
+    return bad
 
 
 def match_aux_pulses(
@@ -926,8 +954,9 @@ def aux_pulses(entry, aux: Mapping[str, str]) -> list[tuple]:
 
 def assign_aux_pulses(trials: list[Trial], pulses: list[tuple]) -> list[Trial]:
     """Returns trials (from one entry, in order) with each pulse assigned to the
-    trial in which it starts. Pulses that start before the first trial are
-    dropped with a warning."""
+    trial in which it starts. Pulses that start before the first trial, or
+    after the end of the trial before them (in a dropped trial), are dropped
+    with a warning."""
     starts = np.array([trial.recording_start for trial in trials])
     assigned = [[] for _ in trials]
     for pulse in pulses:
@@ -936,6 +965,8 @@ def assign_aux_pulses(trials: list[Trial], pulses: list[tuple]) -> list[Trial]:
             log.warning(
                 "  - aux pulse %s starts before the first trial; dropped", pulse
             )
+        elif pulse[1] >= trials[i].recording_end:
+            log.warning("  - aux pulse %s is in a dropped trial; dropped", pulse)
         else:
             assigned[i].append(pulse)
     return [
@@ -1178,10 +1209,14 @@ def trials_in_window(
 ) -> tuple[list[Trial], int, int]:
     """The trials of a sort of the window [start, stop) of the recording (see
     dlab.kilo_window): those whose prepad and stimulus are within the window,
-    with their ends clipped to its stop. Also returns the numbers of trials
-    dropped before and after the window."""
+    with their ends clipped to its stop, and without aux pulses that start
+    after it. Also returns the numbers of trials dropped before and after the
+    window."""
     kept = [
-        trial._replace(recording_end=min(trial.recording_end, stop))
+        trial._replace(
+            recording_end=min(trial.recording_end, stop),
+            aux=trial.aux and tuple(pulse for pulse in trial.aux if pulse[1] < stop),
+        )
         for trial in trials
         if trial.recording_start >= start and trial.stimulus_end <= stop
     ]
@@ -1687,6 +1722,17 @@ def group_spikes_script(argv=None):
     if before.any():
         log.info("  - dropping %d spikes before the first trial", before.sum())
         events = events[~before]
+    # and spikes after the end of the trial they fall in: in the interval of a
+    # dropped trial, or after the last trial of a sorted window
+    ends = trials.recording_end.to_numpy()[events.trial.to_numpy()]
+    after = events.time.to_numpy() > ends
+    n_after_end = events[after].index.value_counts()
+    if after.any():
+        log.info(
+            "  - dropping %d spikes after the end of their trial (in dropped trials)",
+            after.sum(),
+        )
+        events = events[~after]
 
     # the options that determine the trials, so they can be reconstructed;
     # written to the pprox and waveform files (flat, for hdf5 attributes)
@@ -1792,6 +1838,7 @@ def group_spikes_script(argv=None):
             "sorted": int(n_sorted.get(clust_id, 0)),
             "duplicate": int(n_duplicate.get(clust_id, 0)),
             "before_first_trial": int(n_before_first.get(clust_id, 0)),
+            "after_trial_end": int(n_after_end.get(clust_id, 0)),
             "near_ends": n_spikes - n_clean,
             "artifact": n_clean - len(spikes),
             "kept": len(spikes),

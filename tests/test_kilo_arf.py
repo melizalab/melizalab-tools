@@ -213,14 +213,28 @@ def test_trials_across_entries_use_time_order(make_arf):
     assert [t.stimulus_start for t in result] == ONSETS * 2
 
 
-def test_trials_warns_when_stimulus_outlasts_trial(make_arf, caplog):
-    """A stimulus longer than its trial is logged, and the trial is still made."""
+def test_trials_drops_stimulus_that_outlasts_trial(make_arf, caplog):
+    """A stimulus longer than its trial (the next sync event comes before it
+    ends, as when a presentation is stopped early) doesn't fit the sync track;
+    the trial is dropped with a warning, and the others are kept."""
     finder = StubFinder({"a": 2.5, "b": 0.5, "c": 0.5})  # a's trial is 2 s
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(one_entry()), finder)
+    assert [t.stimulus_name for t in result] == ["b", "c"]
+    assert "stimulus 0 (a, 2.500 s) doesn't fit the sync track" in caplog.text
+    assert "dropping the trial" in caplog.text
+
+
+def test_trials_warns_when_last_stimulus_outlasts_recording(make_arf, caplog):
+    """The last stimulus may run past the end of the recording: this is logged,
+    and the trial is kept, with the stimulus end not clipped."""
+    # the last trial runs to the end of the recording plus the prepad (3 s)
+    finder = StubFinder({"a": 0.5, "b": 0.5, "c": 3.5})
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
         result = trials(make_arf(one_entry()), finder)
     assert len(result) == 3
     assert "longer than the duration of the trial" in caplog.text
-    assert result[0].stimulus_end == 30000 + 75000, "stimulus end is not clipped"
+    assert result[2].stimulus_end == 150000 + 105000, "stimulus end is not clipped"
 
 
 def test_trials_missing_sync_channel(make_arf):
@@ -767,6 +781,21 @@ def test_no_pulses_warns(make_arf, caplog):
     ]
 
 
+def test_aux_check_with_offset_message_clock(make_arf, caplog):
+    """When the messages are on another clock from the sync track (C182_4_1:
+    the recording starts 3000 s into acquisition, the messages count from
+    about its start), the stimuli are paired in order, and the condition
+    messages are shifted by the same amount for the aux check."""
+    entry = opto_entry([(90000, 105000)], first_sample=90_000_000)
+    entry["messages"] = jpresent_messages(STIMULI, conditions={"b"})
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(make_arf(entry), aux={"led": f"{LED}:condition"})
+    assert [t.stimulus_name for t in result] == ["a", "b", "c"]
+    assert [bool(t.aux) for t in result] == [False, True, False]
+    warnings = aux_warnings(caplog)
+    assert len(warnings) == 1 and "don't line up with the sync track" in warnings[0]
+
+
 def test_pulse_train_in_window(make_arf, caplog):
     """Several pulses in one message's window (a train) are fine."""
     pulses = [(90000 + k * 3000, 91500 + k * 3000) for k in range(5)]
@@ -830,3 +859,17 @@ def test_no_check_without_aux(make_arf, caplog):
     with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
         trials(make_arf(opto_entry([])))
     assert aux_warnings(caplog) == []
+
+
+def test_aux_pulse_in_dropped_trial(caplog):
+    """A pulse in the interval of a dropped trial (after the end of the trial
+    before it) is dropped with a warning, not given to that trial."""
+    trials = [
+        kilo.Trial(0, 0, 100, "a", 50, 60),
+        kilo.Trial(0, 200, 300, "c", 250, 260),  # b (100-200) was dropped
+    ]
+    pulses = [("led", 55, 58), ("led", 150, 160), ("led", 255, 258)]
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = kilo.assign_aux_pulses(trials, pulses)
+    assert [t.aux for t in result] == [(("led", 55, 58),), (("led", 255, 258),)]
+    assert "is in a dropped trial" in caplog.text
