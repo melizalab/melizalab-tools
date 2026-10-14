@@ -233,6 +233,22 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
     sync_thresh = args.sync_thresh
     if sync_thresh is None:
         sync_thresh = {w.attrs.get("sync_thresh") for w in waveforms}.pop()
+    # units from a sort of part of the recording record the window, and only
+    # the trials within it are kept (see dlab.kilo_window)
+    prefix = "sorted_window_"
+    windows = {
+        tuple(
+            sorted(
+                (k[len(prefix) :], _plain(v))
+                for k, v in w.attrs.items()
+                if k.startswith(prefix)
+            )
+        )
+        for w in waveforms
+    }
+    if len(windows) != 1:
+        raise RuntimeError("the waveform files record different sorted windows")
+    sorted_window = dict(windows.pop())
     arf_path = Path(args.recording)
     if not arf_path.exists():
         arf_path = find_local(args.recording, args.registry_url)
@@ -256,6 +272,16 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         )
         entry_attrs = tuple(
             kilo.entry_to_metadata(e) for _, e in kilo.iter_entries(afp)
+        )
+    if sorted_window:
+        trials, before, after = kilo.trials_in_window(
+            trials, sorted_window["start"], sorted_window["stop"]
+        )
+        log.info(
+            "  - %d trials in the sorted window (%d before and %d after it dropped)",
+            len(trials),
+            before,
+            after,
         )
     rate = waveforms[0].sampling_rate
     table = list(kilo.trials_to_pprox(pd.DataFrame(trials).assign(events=np.nan), rate))
@@ -281,6 +307,7 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         recording=url,
         entry_metadata=entry_attrs,
         **trial_options,
+        **({"sorted_window": sorted_window} if sorted_window else {}),
         **metadata,
     )
     return TrialSource(f"{arf_path.name} ({PROG} {__version__})", doc)

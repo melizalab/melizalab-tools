@@ -26,25 +26,49 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
 
 ## Outputs (group-kilo-spikes)
 
-- [ ] Sorting part of a recording: merge in the code the student used to sort
-  a time window (deliberate exclusions, confirmed 2026-10-09), and record the
-  window actually sorted as a top-level annotation in the pprox and waveform
-  files, with enough to replicate the exclusion from the ARF file alone: the
-  entry (or entries), the start and end in samples from the entry's first
-  sample (half-open, [start, end)) as well as in s, the open-ephys sample
-  number of the entry's first sample (so message times can be placed), how
-  the window was applied (data cut before sorting, or kilosort's
-  `tmin`/`tmax`) and the program and version that applied it. Check against
-  the student's code which of these it already knows. Deposited examples:
-  P388_3_1 (700 s to ~4500 s) and P390_3_1 (from 500 s), whose trials and
-  spikes are timed from the window's start; C110_1_1, C122_1_1, P388_4_1,
-  E82_1_1, E82_2_1, which end early and keep the recording's origin. Decide
-  whether output is timed from the recording's start (consistent with the
-  ARF; needs the spike times shifted) or the window's start (with the
-  annotation, consumers can convert). The audit and regenerate-pprox
-  `--from-arf` should then use the annotation: messages outside the window
-  are expected to have no trial, and a shifted origin is not a problem (now
-  inferred by the audit's `clock-shift`).
+- [ ] Sorting part of a recording (`--sort-start`/`--sort-stop`, from the
+  student's fork, 410767a and 0a9bbce at github.com/bpqle/melizalab-tools):
+  done for single-entry recordings, timed from the recording's start, with
+  the `sorted_window` annotation and the checks in dlab.kilo_window. Still
+  open:
+  - how kilosort lays out a sort of a window is found from the data, not
+    assumed: temp_wh.dat may start at the window's start or the
+    recording's, and so may the spike times (`sorted_data_from`,
+    `spike_times_from` in the annotation). What's known (2026-10-14): the
+    student used kilosort 2.5's `tmin`/`tmax`, and recalls temp_wh.dat
+    being full length with spike times from `tmin` (and patched 2.5 to
+    write them from the recording's start). The deposited P388_3_1 and
+    P390_3_1 show temp_wh.dat starting at `tmin` too: their waveform
+    snippets match the recording only at spike time + `tmin` (median r 0.94
+    and 0.91, against 0.00 at the times as given). Kilosort 4 writes
+    spike_times.npy from the recording's start (MouseLand/Kilosort#1024;
+    only its plots were wrong, fixed in 4.1.6); its temp_wh.dat with
+    `tmin` is unknown. Tested only on synthetic sorts in each layout; check
+    against a real sort directory from the patched 2.5 or kilosort 4 when
+    there is one.
+  - `MAX_SORT_PADDING` assumes kilosort 2-3 write temp_wh.dat in whole
+    batches of 65600 samples and kilosort 4 no more; not verified against
+    kilosort's source or a real sort directory.
+  - the checks map temp_wh.dat's columns to probe channels with
+    channel_map.npy, and probe channel i to the ARF dataset CH{i+1}. Whether
+    phy's `ch` in cluster_info.tsv is a column or a channel id (they differ
+    if kilosort dropped channels) is not settled; group-kilo-spikes has
+    always used it as a column.
+  - the audit should use the annotation: messages outside the window are
+    expected to have no trial. For deposited units without it, the audit
+    could find the window from the spike times: threshold crossings on the
+    unit's channel against its spike times locate the start, and the
+    average of the band-passed recording at the spikes confirms it to the
+    sample (as kilo_window's spike-average check does). This found P388_3_1
+    starting at exactly 700 s (sample 21000000, last spike at 4501.7 s) and
+    P390_3_1 at exactly 500 s (to the end of the recording), both timed
+    from the window's start; the other deposited examples (C110_1_1,
+    C122_1_1, P388_4_1, E82_1_1, E82_2_1) end early and keep the
+    recording's origin.
+- [ ] The student's fork also has `--alt-stim-names` (a YAML file mapping
+  stimulus names to the names deposited in neurobank) and `--temp-wh` (another
+  name for temp_wh.dat). Fold in separately if wanted; its spike-interface
+  column names (`amp`, `rp_contamination`) are not needed.
 - [ ] Store the other parameters that determine group-kilo-spikes output in
   the pprox (and waveform files where they apply), so a unit can be
   reproduced and audited without the command line. Not recorded now:

@@ -27,8 +27,8 @@ import numpy as np
 import pandas as pd
 import toelis
 
+from dlab import kilo_window, pprox
 from dlab import neurobank as nbank
-from dlab import pprox
 from dlab.spikes import SpikeWaveforms, save_waveforms
 
 log = logging.getLogger(__name__)
@@ -1110,6 +1110,22 @@ def stimulus_length_mismatches(
     return np.flatnonzero(bad)
 
 
+def trials_in_window(
+    trials: list[Trial], start: int, stop: int
+) -> tuple[list[Trial], int, int]:
+    """The trials of a sort of the window [start, stop) of the recording (see
+    dlab.kilo_window): those whose prepad and stimulus are within the window,
+    with their ends clipped to its stop. Also returns the numbers of trials
+    dropped before and after the window."""
+    kept = [
+        trial._replace(recording_end=min(trial.recording_end, stop))
+        for trial in trials
+        if trial.recording_start >= start and trial.stimulus_end <= stop
+    ]
+    before = sum(trial.recording_start < start for trial in trials)
+    return kept, before, len(trials) - len(kept) - before
+
+
 def assign_spikes(times: np.ndarray, trial_starts: np.ndarray) -> np.ndarray:
     """The index of the trial each spike falls in, given the trials' start
     samples (increasing). A spike exactly at a trial's start goes to the
@@ -1282,6 +1298,24 @@ def group_spikes_script(argv=None):
         help="sets trial start time relative to stimulus onset (default %(default)0.1f s)",
     )
     p.add_argument(
+        "--sort-start",
+        type=float,
+        metavar="SECONDS",
+        help="if only part of the recording was sorted (e.g. with kilosort's "
+        "tmin), the time in the recording (s) where the sorted part starts. "
+        "Whether temp_wh.dat and the spike times count from there or from the "
+        "recording's start is found from the data; the output is timed from the "
+        "recording's start, with only the trials within the sorted part.",
+    )
+    p.add_argument(
+        "--sort-stop",
+        type=float,
+        metavar="SECONDS",
+        help="if only part of the recording was sorted (e.g. with kilosort's "
+        "tmax), the time in the recording (s) where the sorted part stops. The "
+        "sorted part is checked against the recording's neural channels.",
+    )
+    p.add_argument(
         "--toelis",
         action="store_true",
         help="output toelis instead of pprox. one file will be generated for "
@@ -1345,6 +1379,9 @@ def group_spikes_script(argv=None):
     args = p.parse_args(argv)
     if args.audio_sync and args.sync_thresh is not None:
         p.error("--sync-thresh doesn't apply to --audio-sync")
+    windowed = args.sort_start is not None or args.sort_stop is not None
+    if args.toelis and windowed:
+        p.error("--sort-start and --sort-stop don't apply to --toelis")
     setup_log(args.debug, args.debug_http)
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
     log.info("- %s version %s", p.prog, version)
@@ -1424,21 +1461,121 @@ def group_spikes_script(argv=None):
             str(args.recording), registry_url=args.registry_url
         )
 
+    sampling_rate = params["sampling_rate"]
+    good_clust_types = ("good",)
+    if args.mua:
+        good_clust_types += ("mua",)
+    n_before = int(args.waveform_pre_peak * sampling_rate / 1000)
+    n_after = int(args.waveform_post_peak * sampling_rate / 1000)
+
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
-        trials = pd.DataFrame(
-            arf_to_trials(
-                afp,
-                stim_finder,
-                args.sync,
-                args.sync_thresh,
-                args.prepad,
-                oeaudio_log=args.oeaudio_log,
-                aux=args.aux,
-                audio_sync=args.audio_sync,
-            )
+        trials = arf_to_trials(
+            afp,
+            stim_finder,
+            args.sync,
+            args.sync_thresh,
+            args.prepad,
+            oeaudio_log=args.oeaudio_log,
+            aux=args.aux,
+            audio_sync=args.audio_sync,
         )
         entry_attrs = tuple(entry_to_metadata(e) for _, e in iter_entries(afp))
+        entries = [entry for _, entry in iter_entries(afp)]
+        # the part of the recording that was sorted; only checked for
+        # single-entry recordings (temp_wh.dat for several is not settled)
+        window = None
+        sorted_window = {}
+        if len(entries) > 1 and windowed:
+            raise RuntimeError(
+                "--sort-start and --sort-stop are only supported for recordings "
+                "with one entry"
+            )
+        if len(entries) == 1:
+            entry = entries[0]
+            track = entry[args.audio_sync or args.sync]
+            if track.attrs["sampling_rate"] != sampling_rate:
+                raise RuntimeError(
+                    f"the recording's sampling rate ({track.attrs['sampling_rate']}) "
+                    f"isn't the sort's ({sampling_rate})"
+                )
+            window = kilo_window.sort_window(
+                args.sort_start, args.sort_stop, track.size, nsamples, sampling_rate
+            )
+        if windowed:
+            log.info(
+                "- sorted window: samples %d-%d (%.3f-%.3f s) of the recording",
+                window.start,
+                window.stop,
+                window.start / sampling_rate,
+                window.stop / sampling_rate,
+            )
+            mapfile = args.sortdir / "channel_map.npy"
+            channel_map = (
+                np.load(mapfile).ravel() if mapfile.exists() else np.arange(nchannels)
+            )
+            # the largest units to be written, on different channels
+            units = []
+            for clust_id in events.index.value_counts().index:
+                if clust_id not in info.index:
+                    continue
+                if info.loc[clust_id, "group"] not in good_clust_types:
+                    continue
+                column = int(info.loc[clust_id, "ch"])
+                if column in (u[1] for u in units):
+                    continue
+                times = events.loc[[clust_id], "time"].to_numpy(copy=True)
+                units.append((int(clust_id), column, times))
+                if len(units) == kilo_window.CHECK_UNITS:
+                    break
+            if not units:
+                raise RuntimeError("no units to check the sorted window against")
+            log.info("  - finding where the sort and its spike times start:")
+            window, window_check = kilo_window.check_sort_window(
+                recording,
+                entry,
+                window,
+                units,
+                channel_map,
+                n_before,
+                n_after,
+                sampling_rate,
+            )
+            trials, trials_before, trials_after = trials_in_window(
+                trials, window.start, window.stop
+            )
+            log.info(
+                "  - %d trials in the window (%d before and %d after it dropped)",
+                len(trials),
+                trials_before,
+                trials_after,
+            )
+            if not trials:
+                raise RuntimeError("no trials in the sorted window")
+            sorted_window = {
+                "sorted_window": {
+                    "entry": 0,
+                    "start": window.start,
+                    "stop": window.stop,
+                    "start_s": window.start / sampling_rate,
+                    "stop_s": window.stop / sampling_rate,
+                    "first_sample": round(track.attrs["offset"] * sampling_rate),
+                    "sorted_samples": window.sorted_samples,
+                    "sorted_data_start": window.data_origin,
+                    "spike_times_start": window.spike_origin,
+                    "trials_before": trials_before,
+                    "trials_after": trials_after,
+                    **window_check,
+                }
+            }
+        trials = pd.DataFrame(trials)
+
+    # spike times may count from the window's start, and temp_wh.dat may start
+    # there too (see dlab.kilo_window); time the spikes from the recording's
+    # start, and index temp_wh.dat from data_origin
+    spike_origin = 0 if window is None else window.spike_origin
+    data_origin = 0 if window is None else window.data_origin
+    events["time"] += spike_origin
 
     # this pandas magic sorts the events by cluster and trial
     log.info("- sorting events into trials:")
@@ -1478,9 +1615,6 @@ def group_spikes_script(argv=None):
         audio_parameters = {"audio_sync_parameters": audio_sync.parameters()}
     total_spikes = 0
     total_clusters = 0
-    good_clust_types = ("good",)
-    if args.mua:
-        good_clust_types += ("mua",)
     for clust_id, cluster in events.groupby("clust"):
         clust_info = info.loc[clust_id]
         clust_type = clust_info["group"]
@@ -1500,15 +1634,16 @@ def group_spikes_script(argv=None):
             clust_type,
         )
         # remove artifact spikes
-        n_before = int(args.waveform_pre_peak * params["sampling_rate"] / 1000)
-        n_after = int(args.waveform_post_peak * params["sampling_rate"] / 1000)
+        sorted_times = cluster.time - data_origin  # in temp_wh.dat
         spikes = cluster[
-            (cluster.time > n_before) & (cluster.time < (nsamples - n_after))
+            (sorted_times > n_before) & (sorted_times < (nsamples - n_after))
         ]
         n_clean = len(spikes)
         # the same windows qs.peaks would extract; indexing the read-only
         # memmap directly reads only the samples around each spike
-        windows = spikes.time.to_numpy()[:, None] + np.arange(-n_before, n_after)
+        windows = (spikes.time.to_numpy() - data_origin)[:, None] + np.arange(
+            -n_before, n_after
+        )
         waveforms = recording[windows, clust_info["ch"]]
         mean_spike = waveforms.mean(0)
         included = np.abs(waveforms).max(-1) < (
@@ -1561,6 +1696,7 @@ def group_spikes_script(argv=None):
             kilosort_n_spikes=clust_info["n_spikes"],
             entry_metadata=entry_attrs,
             **trial_options,
+            **sorted_window,
             **aux_tracks,
             **audio_parameters,
             **resource_info["metadata"],
@@ -1591,6 +1727,10 @@ def group_spikes_script(argv=None):
                     kilosort_probe_depth=clust_info["depth"],
                     kilosort_n_spikes=clust_info["n_spikes"],
                     **trial_options,
+                    **{
+                        f"sorted_window_{k}": v
+                        for k, v in sorted_window.get("sorted_window", {}).items()
+                    },
                 )
 
     log.info(
