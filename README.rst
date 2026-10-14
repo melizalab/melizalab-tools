@@ -49,7 +49,9 @@ console scripts
    found by checking it against the recording's neural channels, to the
    sample, and the output is timed from the recording's start. Stimuli
    presented under other names than they were deposited under are mapped with
-   ``--alt-stim-names``.
+   ``--alt-stim-names``. The outputs record the sort, the sorter's version
+   (read from kilosort 4's log, or given with ``--sorter``), and how many of
+   each unit's spikes were dropped and why.
 -  ``audit-kilo-spikes``: check the ``group-kilo-spikes`` output for one
    recording against its waveform files, the stimulus messages in the ARF
    file, and each other, and write a JSON report. Changes nothing.

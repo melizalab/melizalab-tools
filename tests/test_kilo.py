@@ -509,3 +509,26 @@ def test_rename_stimuli():
         kilo.Stimulus("x", 10, 20),
         kilo.Stimulus("b", 30),
     ]
+
+
+def test_kilosort_log_to_sorter(tmp_path):
+    """The version line of kilosort4.log; 'kilosort 4' if it has none, None
+    without the log."""
+    path = tmp_path / "kilosort4.log"
+    assert kilo.kilosort_log_to_sorter(path) is None
+    path.write_text("x kilosort.run_kilosort INFO     Python version 3.11\n")
+    assert kilo.kilosort_log_to_sorter(path) == "kilosort 4"
+    path.write_text(
+        "x kilosort.run_kilosort INFO     Kilosort version 4.0.30\n"
+        "x kilosort.run_kilosort INFO     Python version 3.11\n"
+    )
+    assert kilo.kilosort_log_to_sorter(path) == "kilosort 4.0.30"
+
+
+def test_fields_to_attrs():
+    """Dict fields become one attribute per item; others are unchanged."""
+    assert kilo.fields_to_attrs({"a": 1, "b": {"x": 2, "y": "z"}}) == {
+        "a": 1,
+        "b_x": 2,
+        "b_y": "z",
+    }

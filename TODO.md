@@ -42,8 +42,9 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
     snippets match the recording only at spike time + `tmin` (median r 0.94
     and 0.91, against 0.00 at the times as given). Kilosort 4 writes
     spike_times.npy from the recording's start (MouseLand/Kilosort#1024;
-    only its plots were wrong, fixed in 4.1.6); its temp_wh.dat with
-    `tmin` is unknown. Tested only on synthetic sorts in each layout; check
+    only its plots were wrong, fixed in 4.1.6; `save_to_phy` adds `imin`),
+    and its temp_wh.dat, written batch by batch from `imin`, probably starts
+    at `tmin` (from the 4.1.7 source). Tested only on synthetic sorts in each layout; check
     against a real sort directory from the patched 2.5 or kilosort 4 when
     there is one.
   - `MAX_SORT_PADDING` assumes kilosort 2-3 write temp_wh.dat in whole
@@ -65,32 +66,17 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
     from the window's start; the other deposited examples (C110_1_1,
     C122_1_1, P388_4_1, E82_1_1, E82_2_1) end early and keep the
     recording's origin.
-- [ ] Store the other parameters that determine group-kilo-spikes output in
-  the pprox (and waveform files where they apply), so a unit can be
-  reproduced and audited without the command line. Not recorded now:
-  - `artifact_reject_thresh`, which decides which spikes are dropped as
-    artifacts, and the counts of spikes dropped (as artifacts, too close to
-    the ends of temp_wh.dat for a waveform, as duplicate times, and before
-    the first trial), so a unit's spike total can be reconciled with
-    `kilosort_n_spikes`;
-  - `waveform_pre_peak`/`waveform_post_peak` in the pprox (implicit in the
-    waveform file's shape and `peak_index`, but they also decide which
-    spikes are too close to the ends);
-  - the cluster id and its phy group (`good`, or `mua` with `--mua`), now
-    only implied by the file name and the option;
-  - the sort: the sort directory's name, `params.py` (dtype, channel count,
-    sampling rate) and the number of samples in temp_wh.dat. The sample
-    count also shows whether a window was sorted (see the item above);
-  - the sorter and its version, which nothing records now (`processed_by`
-    names only group-kilo-spikes). Kilosort 4 probably logs its version in
-    `kilosort4.log` in the sort directory (check); otherwise, and for older
-    kilosorts, which don't record it, it has to be given as an option. The
-    version can't be recovered for deposited units;
-  - `--local-stim-dir`, when stimulus durations came from local files
-    instead of neurobank.
-  The trial options already recorded (`sync_track`, `prepad`, `sync_thresh`,
-  `oeaudio_log`, `aux_tracks`) stay as they are; the schema allows extra
-  top-level fields.
+- [ ] The log misstates spike counts (pinned by
+  `test_spike_count_log_messages`): "N artifact spike(s) excluded" counts the
+  spikes too close to the ends of temp_wh.dat as artifacts too, and "a total
+  of N spikes were assigned" counts each unit's spikes before the near-end and
+  artifact exclusions. The outputs' `spike_counts` are right.
+- [ ] Kilosort 4 writes temp_wh.dat only with `save_preprocessed_copy=True`
+  (default False; from the 4.1.7 source), so a default kilosort 4 sort can't
+  be run through group-kilo-spikes, which needs it for the waveforms. Its copy
+  is drift-corrected, and probably has only the channels in chanMap while
+  params.py gives `n_channels_dat` as all the channels in the binary file
+  (not checked against a real sort). Check with a real kilosort 4 sort.
 
 ## Audit
 

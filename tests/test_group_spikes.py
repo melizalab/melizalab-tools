@@ -548,3 +548,99 @@ def test_regenerate_from_arf_uses_recorded_stimulus_names(renamed, tmp_path):
     assert {k: v for k, v in doc.items() if k not in provenance} == {
         k: v for k, v in old.items() if k not in provenance
     }
+
+
+# a good cluster with one spike dropped at each step: a duplicate time (33000),
+# a spike before the first trial (with --prepad 0.5, trials start at 15000), an
+# artifact (a noise cluster adds a spike 24x larger at 120000), and a spike too
+# close to the end for a waveform
+DROPPED = {
+    1: dict(
+        times=[
+            *(100, 33000, 33000, 36000, 39000, 42000, 96000, 99000, 102000),
+            *(120000, 150300, 151000, 155000, NSAMPLES - 100),
+        ],
+        group="good",
+        ch=2,
+    ),
+    3: dict(times=[120000], group="noise", ch=2, amplitude=24),
+}
+
+
+def test_spike_counts(make_recording):
+    """The pprox and the waveform file record how many of the cluster's spikes
+    were dropped at each step, and how many were kept."""
+    out = make_recording(DROPPED)("--prepad", "0.5")
+    pp = load_pprox(out, 1)
+    assert pp["spike_counts"] == {
+        "sorted": 14,
+        "duplicate": 1,
+        "before_first_trial": 1,
+        "near_ends": 1,
+        "artifact": 1,
+        "kept": 10,
+    }
+    assert sum(len(t["events"]) for t in pp["pprox"]) == 10
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert fp["times"].size == 10
+        assert fp.attrs["spike_counts_kept"] == 10
+        assert fp.attrs["spike_counts_artifact"] == 1
+
+
+def test_spike_count_log_messages(make_recording, caplog):
+    """PINNED: the log's artifact count includes the spikes too close to the
+    ends, and its total counts spikes before those exclusions (2 and 12 here,
+    for 1 artifact and 10 spikes written). See TODO.md."""
+    with caplog.at_level("INFO", logger="dlab.kilo"):
+        make_recording(DROPPED)("--prepad", "0.5")
+    assert "2 artifact spike(s) excluded" in caplog.text
+    assert "a total of 12 spikes were assigned to 1 clusters" in caplog.text
+
+
+def test_unit_and_sort_fields(make_recording):
+    """The pprox and the waveform file record the cluster, its phy group, the
+    sort's shape, and the options that decide which spikes are kept."""
+    out = make_recording()("--artifact-reject-thresh", "8")
+    pp = load_pprox(out, 1)
+    assert pp["kilosort_cluster"] == 1 and pp["kilosort_group"] == "good"
+    assert pp["sort"] == {
+        "directory": "ks",
+        "samples": NSAMPLES,
+        "channels": 4,
+        "dtype": "int16",
+        "sampling_rate": SAMPLING_RATE,
+    }
+    assert pp["artifact_reject_thresh"] == 8.0
+    assert pp["waveform_pre_peak"] == 2.0 and pp["waveform_post_peak"] == 5.0
+    assert pp["local_stim_dir"] == "stims"
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert fp.attrs["kilosort_cluster"] == 1
+        assert fp.attrs["sort_samples"] == NSAMPLES
+        assert fp.attrs["artifact_reject_thresh"] == 8.0
+        assert fp.attrs["local_stim_dir"] == "stims"
+
+
+def test_sorter_option(make_recording):
+    """--sorter is recorded as sorted_by; without it (or kilosort4.log), the
+    outputs have no sorted_by."""
+    run = make_recording()
+    assert "sorted_by" not in load_pprox(run(), 1)
+    out = run("--sorter", "kilosort 2.5")
+    assert load_pprox(out, 1)["sorted_by"] == "kilosort 2.5"
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert fp.attrs["sorted_by"] == "kilosort 2.5"
+
+
+def test_sorter_from_kilosort4_log(make_recording, tmp_path):
+    """The version kilosort 4 logs is recorded; --sorter must agree with it."""
+    run = make_recording()
+    (tmp_path / "ks" / "kilosort4.log").write_text(
+        "2026-10-01 10:00:00,000 kilosort.run_kilosort INFO     "
+        "Kilosort version 4.1.7\n"
+    )
+    assert load_pprox(run(), 1)["sorted_by"] == "kilosort 4.1.7"
+    assert load_pprox(run("--sorter", "kilosort 4.1.7"), 1)["sorted_by"] == (
+        "kilosort 4.1.7"
+    )
+    with pytest.raises(RuntimeError, match=r"kilosort4\.log says"):
+        run("--sorter", "kilosort 2.5")

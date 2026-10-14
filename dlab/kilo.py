@@ -80,6 +80,32 @@ def read_kilo_params(fname: Path) -> dict:
     )
 
 
+def fields_to_attrs(fields: Mapping) -> dict:
+    """pprox fields as hdf5 attributes: a dict value is written as one
+    attribute per item, named '<field>_<key>'"""
+    out = {}
+    for name, value in fields.items():
+        if isinstance(value, Mapping):
+            out.update({f"{name}_{k}": v for k, v in value.items()})
+        else:
+            out[name] = value
+    return out
+
+
+def kilosort_log_to_sorter(path: Path) -> str | None:
+    """The sorter and its version from kilosort4.log, which kilosort 4 writes
+    in its output directory (e.g. 'kilosort 4.1.7'), or 'kilosort 4' if the log
+    doesn't give the version. None if there is no log."""
+    if not path.exists():
+        return None
+    with open(path) as fp:
+        for line in fp:
+            m = re.search(r"Kilosort version (\S+)", line)
+            if m is not None:
+                return f"kilosort {m.group(1)}"
+    return "kilosort 4"
+
+
 # '<verb> <name>' with an optional '<stream>_' prefix on the verb (see
 # messages_to_events)
 _re_message = re.compile(r"(?:([A-Za-z0-9]+)_)?(start|stop) (.*)")
@@ -1407,6 +1433,13 @@ def group_spikes_script(argv=None):
         help="DEBUG/TESTING ONLY. Search this directory for stimulus files.",
     )
     p.add_argument(
+        "--sorter",
+        metavar="NAME_VERSION",
+        help="the spike sorter and its version (e.g. 'kilosort 2.5'), recorded "
+        "in the outputs. Read from kilosort4.log for kilosort 4; give it for "
+        "other sorters, which don't record it.",
+    )
+    p.add_argument(
         "--alt-stim-names",
         type=Path,
         metavar="YAML",
@@ -1463,6 +1496,16 @@ def group_spikes_script(argv=None):
     stim_finder = StimulusFinder(args.registry_url, args.local_stim_dir)
 
     log.info("- kilosort output directory: %s", args.sortdir)
+    sorted_by = kilosort_log_to_sorter(args.sortdir / "kilosort4.log")
+    if sorted_by is not None and args.sorter is not None and sorted_by != args.sorter:
+        raise RuntimeError(
+            f"--sorter is '{args.sorter}', but kilosort4.log says '{sorted_by}'"
+        )
+    sorted_by = sorted_by or args.sorter
+    if sorted_by is None:
+        log.warning("  - WARNING: sorter version unknown; give it with --sorter")
+    else:
+        log.info("  - sorted by %s", sorted_by)
     timefile = args.sortdir / "spike_times.npy"
     clustfile = args.sortdir / "spike_clusters.npy"
     infofile = args.sortdir / "cluster_info.tsv"
@@ -1487,8 +1530,11 @@ def group_spikes_script(argv=None):
         log.info("- only analyzing clusters: %s", args.cluster)
         events = events[events.clust.isin(args.cluster)]
 
+    # the spikes of each cluster, and how many are dropped at each step
+    n_sorted = events.clust.value_counts()
     # find duplicates - this is rare but needs to be caught
     duplicates = events.duplicated()
+    n_duplicate = events[duplicates].clust.value_counts()
     if duplicates.any():
         dupl_clusts = events[duplicates].clust
         log.warning(
@@ -1637,6 +1683,7 @@ def group_spikes_script(argv=None):
     # spikes before the first trial are in no trial; drop them from the waveform
     # files too, so these and the pprox files have the same spikes
     before = events.trial < 0
+    n_before_first = events[before].index.value_counts()
     if before.any():
         log.info("  - dropping %d spikes before the first trial", before.sum())
         events = events[~before]
@@ -1651,6 +1698,22 @@ def group_spikes_script(argv=None):
         trial_options["sync_thresh"] = args.sync_thresh
     if args.oeaudio_log is not None:
         trial_options["oeaudio_log"] = args.oeaudio_log.name
+    if args.local_stim_dir is not None:
+        trial_options["local_stim_dir"] = args.local_stim_dir.name
+    # the sort, and the options that decide which spikes are kept
+    sort_fields = {
+        "sort": {
+            "directory": args.sortdir.resolve().name,
+            "samples": nsamples,
+            "channels": nchannels,
+            "dtype": params["dtype"],
+            "sampling_rate": params["sampling_rate"],
+        },
+        **({"sorted_by": sorted_by} if sorted_by is not None else {}),
+        "artifact_reject_thresh": args.artifact_reject_thresh,
+        "waveform_pre_peak": args.waveform_pre_peak,
+        "waveform_post_peak": args.waveform_post_peak,
+    }
     # the stimuli presented under other names; only written if there are any
     alt_stim_names = {"stimulus_names": stimulus_names} if stimulus_names else {}
     # describes the auxiliary channels; only written if there are any
@@ -1725,6 +1788,20 @@ def group_spikes_script(argv=None):
             input("group-kilo-spikes will skip this unit. Press any key to continue.")
             continue
 
+        spike_counts = {
+            "sorted": int(n_sorted.get(clust_id, 0)),
+            "duplicate": int(n_duplicate.get(clust_id, 0)),
+            "before_first_trial": int(n_before_first.get(clust_id, 0)),
+            "near_ends": n_spikes - n_clean,
+            "artifact": n_clean - len(spikes),
+            "kept": len(spikes),
+        }
+        unit_fields = {
+            "kilosort_cluster": int(clust_id),
+            "kilosort_group": clust_type,
+            "spike_counts": spike_counts,
+        }
+
         # aggregate spikes by trial and left join to trial information table
         # - empty trials will be nan
         clust_trials = trials.join(
@@ -1751,6 +1828,8 @@ def group_spikes_script(argv=None):
             kilosort_probe_depth=clust_info["depth"],
             kilosort_n_spikes=clust_info["n_spikes"],
             entry_metadata=entry_attrs,
+            **unit_fields,
+            **sort_fields,
             **trial_options,
             **sorted_window,
             **alt_stim_names,
@@ -1783,12 +1862,15 @@ def group_spikes_script(argv=None):
                     kilosort_source_channel=clust_info["ch"],
                     kilosort_probe_depth=clust_info["depth"],
                     kilosort_n_spikes=clust_info["n_spikes"],
-                    **trial_options,
-                    **{
-                        f"sorted_window_{k}": v
-                        for k, v in sorted_window.get("sorted_window", {}).items()
-                    },
-                    **{f"stimulus_names_{k}": v for k, v in stimulus_names.items()},
+                    **fields_to_attrs(
+                        {
+                            **unit_fields,
+                            **sort_fields,
+                            **trial_options,
+                            **sorted_window,
+                            **alt_stim_names,
+                        }
+                    ),
                 )
 
     log.info(

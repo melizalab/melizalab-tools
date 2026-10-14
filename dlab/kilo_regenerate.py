@@ -50,7 +50,17 @@ log = logging.getLogger("dlab")
 
 PROG = "regenerate-pprox"
 # top-level fields that describe the unit, not the recording or its trials
-UNIT_FIELDS = ("processed_by", "derived_from", "trials_from")
+UNIT_FIELDS = ("processed_by", "derived_from", "trials_from", "spike_counts")
+# fields group-kilo-spikes writes to the waveform files as well as the pprox,
+# which a regenerated pprox takes from the unit's waveform file (dicts are
+# written one attribute per item; see kilo.fields_to_attrs)
+RECORDED_FIELDS = (
+    "sorted_by",
+    "artifact_reject_thresh",
+    "waveform_pre_peak",
+    "waveform_post_peak",
+)
+RECORDED_DICTS = ("sort", "spike_counts")
 
 
 @dataclass
@@ -75,6 +85,14 @@ class Waveforms:
     @property
     def processed_by(self) -> str | None:
         return self.attrs.get("processed_by")
+
+
+def attrs_to_field(attrs: dict, name: str) -> dict:
+    """A dict written to a waveform file as attributes named '<name>_<key>'"""
+    prefix = f"{name}_"
+    return {
+        k[len(prefix) :]: _plain(v) for k, v in attrs.items() if k.startswith(prefix)
+    }
 
 
 def _plain(value):
@@ -234,17 +252,10 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
     if sync_thresh is None:
         sync_thresh = {w.attrs.get("sync_thresh") for w in waveforms}.pop()
 
-    def recorded(prefix, what):
-        # a dict written to the waveform files as attributes named prefix + key
+    def recorded(name, what):
+        # a dict field, which must be the same in all the waveform files
         values = {
-            tuple(
-                sorted(
-                    (k[len(prefix) :], _plain(v))
-                    for k, v in w.attrs.items()
-                    if k.startswith(prefix)
-                )
-            )
-            for w in waveforms
+            tuple(sorted(attrs_to_field(w.attrs, name).items())) for w in waveforms
         }
         if len(values) != 1:
             raise RuntimeError(f"the waveform files record different {what}")
@@ -252,11 +263,11 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
 
     # units from a sort of part of the recording record the window, and only
     # the trials within it are kept (see dlab.kilo_window)
-    sorted_window = recorded("sorted_window_", "sorted windows")
+    sorted_window = recorded("sorted_window", "sorted windows")
     if args.alt_stim_names is not None:
         stimulus_names = kilo.yaml_to_stimulus_names(args.alt_stim_names)
     else:
-        stimulus_names = recorded("stimulus_names_", "stimulus names")
+        stimulus_names = recorded("stimulus_names", "stimulus names")
     arf_path = Path(args.recording)
     if not arf_path.exists():
         arf_path = find_local(args.recording, args.registry_url)
@@ -310,6 +321,8 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         trial_options["sync_thresh"] = sync_thresh
     if args.oeaudio_log is not None:
         trial_options["oeaudio_log"] = args.oeaudio_log.name
+    if args.local_stim_dir is not None:
+        trial_options["local_stim_dir"] = args.local_stim_dir.name
     doc = pprox.from_trials(
         table,
         schema=pprox._stimtrial_schema,
@@ -328,7 +341,9 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
 
 def regenerate(waveforms: Waveforms, source: TrialSource) -> dict:
     """The pprox for a unit: the source's top-level fields and trials, with the
-    events from the waveform file and the unit's kilosort fields"""
+    events from the waveform file, the unit's kilosort fields and spike counts,
+    and the fields about the sort it records (RECORDED_FIELDS and
+    RECORDED_DICTS)"""
     doc = {
         k: v
         for k, v in source.doc.items()
@@ -336,6 +351,11 @@ def regenerate(waveforms: Waveforms, source: TrialSource) -> dict:
     }
     doc["pprox"] = rebuild(waveforms, source.trials)
     doc.update({k: v for k, v in waveforms.attrs.items() if k.startswith("kilosort_")})
+    doc.update({k: waveforms.attrs[k] for k in RECORDED_FIELDS if k in waveforms.attrs})
+    for name in RECORDED_DICTS:
+        field = attrs_to_field(waveforms.attrs, name)
+        if field:
+            doc[name] = field
     doc["processed_by"] = [
         p for p in (waveforms.processed_by, f"{PROG} {__version__}") if p
     ]
