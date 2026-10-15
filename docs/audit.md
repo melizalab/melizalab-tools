@@ -144,6 +144,24 @@ Findings are graded by their effect on analyses of the data:
 | `warn`   | Specific trials are unreliable, or the files are inconsistent in a way that doesn't change the spike times. The listed trials can usually be excluded from analyses. |
 | `fail`   | The unit as a whole is unreliable. Don't use it until the problem is understood.                                                                                     |
 
+Some findings are known errors of earlier versions of `group-kilo-spikes` (and
+`group-klopto-spikes`); the table of them, with the version that fixed each,
+is `KNOWN_ERRORS` in `dlab/kilo_audit.py`. A finding is graded by the version
+that made the unit (the first `group-kilo-spikes` entry in `processed_by`):
+
+- **Known error:** a known error of that version explains it. The message
+  ends with the error, and the finding has `"version_note": "known-error"`.
+  The severity is unchanged.
+- **Unexpected:** the same finding in output from a version that fixed every
+  known error for it is a new bug, or a file was changed after processing.
+  It is one level more severe (info becomes warn, warn becomes fail), says
+  so in the message, and has `"version_note": "unexpected"`. Regenerated
+  units (`regenerate-pprox` in `processed_by`) are not made more severe,
+  since their trials may come from another unit.
+
+Findings for units of unknown version, or for checks without known errors,
+are not graded.
+
 ## 3. Collect the results
 
 ```bash
@@ -155,6 +173,8 @@ This prints a summary:
 - **Status:** recordings and units by status.
 - **Checks:** each check and severity, with the number of recordings and
   units it was found in.
+- **Unexpected:** the number of findings that are unexpected for the version
+  that made the unit (see [the report](#the-report)), if there are any.
 - **Versions:** units by the `group-kilo-spikes` version that processed them,
   and their status. Use this to separate the known errors of old versions
   from new problems.
@@ -251,7 +271,13 @@ Check the regenerated files with `audit-kilo-spikes` before depositing them.
 
 Each finding has a `check` name. A check can appear at different severities,
 depending on how bad the problem is. In findings that list trials, the trial
-numbers are indexes into the pprox's `pprox` array.
+numbers are indexes into the pprox's `pprox` array. The severities are as
+listed for output whose version explains the finding; the checks with known
+errors of earlier versions (`events-outside-interval`,
+`waveforms-before-first-trial`, `trials-before-messages`,
+`stimulus-mislabeled`, `trials-share-message` and
+`stimulus-duration-mismatch`) are one level more severe in output from a
+version that fixed them (see [the report](#the-report)).
 
 | Check                                                           | Severity   | Fixable?  | Remedy                                                  |
 |-----------------------------------------------------------------|------------|-----------|---------------------------------------------------------|
@@ -653,8 +679,12 @@ failure, check `recording-mismatch` first; if the recording is right, re-sync.
 **Severity:** fail (trials listed)
 
 **Problem:** The listed trials are labeled with a different stimulus from the
-last start message before their onset, so their responses are attributed to
-the wrong stimulus.
+start message their onset follows, so their responses are attributed to the
+wrong stimulus. Each onset is paired with the message nearest to it less the
+recording's typical lag (the median time from each onset back to the last
+message before it), so a message that arrives after its onset, as some do on
+setups with a short lag, or that was delayed by up to half the gap to the
+next, is still paired with the right trial.
 - Versions before 2026.10.07 matched sync events to messages in order
   without allowing for a missed sync event, so one missed event mislabeled
   every later trial.
@@ -742,7 +772,10 @@ larger audio buffer than needed.
 **Problem:** Some stimulus messages have no trial. A few are expected:
 `group-kilo-spikes` drops a trial whose sync event was missed. A block at the
 start or end is a sort of part of the recording (deliberate in C110_1_1,
-C122_1_1, P388_4_1, E82_1_1, E82_2_1, P388_3_1 and P390_3_1). Otherwise, many
+C122_1_1, P388_4_1, E82_1_1, E82_2_1, P388_3_1 and P390_3_1). Output from
+2026.10.14 and later records the number of trials outside a sorted window
+(`sorted_window`); these are counted in the message, and only the rest
+toward the 1%. Otherwise, many
 missing trials suggest a problem with the sync track. Repeated start messages
 for the same stimulus within 50 ms (jpresent sent each one twice in E1) are
 counted once.

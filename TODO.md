@@ -50,9 +50,9 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
     if kilosort dropped channels) is not settled; group-kilo-spikes has
     always used it as a column. C182_4_1 doesn't settle it: its channel map
     is 0-127 in order, so columns and channel ids are the same.
-  - the audit should use the annotation: messages outside the window are
-    expected to have no trial. For deposited units without it, the audit
-    could find the window from the spike times: threshold crossings on the
+  - the audit uses the annotation's counts of trials outside the window
+    (`trials-dropped`). For deposited units without it, the audit could
+    find the window from the spike times: threshold crossings on the
     unit's channel against its spike times locate the start, and the
     average of the band-passed recording at the spikes confirms it to the
     sample (as kilo_window's spike-average check does). This found P388_3_1
@@ -82,28 +82,6 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   windows in one sequential pass (~8.5 min for the whole file at the VM's
   69 MB/s, whatever the number of units); on fast disks that would be slower
   than now.
-
-## Audit
-
-- [ ] Know which errors each version of group-kilo-spikes (and
-  group-klopto-spikes) fixed, and grade findings by version: a finding that
-  matches a known error of the version that produced the output is explained
-  (as now for pulse onsets reported at the pulse's end, via
-  `SYNC_FIX_VERSION`), while the same finding in output from a version after
-  the fix is unexpected (a new bug, or a file changed after processing) and
-  should be more severe. Needs a table of fixes by version in one place,
-  instead of the single `SYNC_FIX_VERSION` constant: e.g. 2026.10.07 (pulse
-  onsets at the pulse's end; trials after a missed sync event mislabeled;
-  spikes before the first trial kept in waveform files) and the next release
-  (in-order pairing; stimulus length check; duplicate jpresent start
-  messages). Also check the window annotation, once recorded (see Provenance).
-- [ ] The audit's `stimulus-mislabeled` still compares each trial's label
-  with the last message before its onset, which assumes messages arrive
-  before their sync events; group-kilo-spikes now pairs in order (see
-  `match_sync_events`). Messages that jittered by more than the gap between
-  stimuli would be reported as mislabeling, though `stimulus-duration-mismatch`
-  is the dispositive check. None of the archive comes close (largest spread
-  ~0.2 s, gaps >= 0.68 s).
 
 ## Deposited data and the registry
 

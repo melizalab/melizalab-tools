@@ -157,13 +157,17 @@ def shift_onset(trial, seconds):
 def test_late_onset(output):
     """An onset that isn't the rise of its stimulus's pulse (here 0.5 s late)
     fails the stimulus length check, listing the trial; its lag is noted as
-    message timing."""
+    message timing. The current version drops such trials, so in its output
+    the finding is unexpected and fails."""
     edit_pprox(output, lambda pp: shift_onset(pp["pprox"][3], 0.5))
     report = audit(output)
     assert checks(unit_report(report)) == [
         ("message-jitter", "info", [3]),
-        ("stimulus-duration-mismatch", "warn", [3]),
+        ("stimulus-duration-mismatch", "fail", [3]),
     ]
+    f = unit_report(report)["findings"][1]
+    assert f["version_note"] == "unexpected"
+    assert "(unexpected in output from group-kilo-spikes" in f["message"]
     # the other units now have a different trial table
     assert [f["check"] for f in report["findings"]] == ["trial-tables-differ"]
 
@@ -183,7 +187,11 @@ def test_pulse_end_onset_in_old_version(output):
     found = unit_report(audit(output))["findings"]
     (f,) = [f for f in found if f["check"] == "stimulus-duration-mismatch"]
     assert (f["severity"], f["trials"]) == ("warn", [3])
-    assert "probably pulse onsets reported at the end of the pulse" in f["message"]
+    assert f["version_note"] == "known-error"
+    assert (
+        "(known error of group-kilo-spikes 2026.07.15: pulse onsets reported at "
+        "the end of the pulse; or "
+    ) in f["message"]
 
 
 def test_pulse_track_found_without_sync_track(output):
@@ -223,7 +231,7 @@ def test_events_outside_interval(output):
         pp["pprox"][4]["events"].append(pp["pprox"][4]["interval"][1] + 1.0)
 
     edit_pprox(output, stray)
-    assert ("events-outside-interval", "warn", [4]) in checks(
+    assert ("events-outside-interval", "fail", [4]) in checks(
         unit_report(audit(output))
     )
 
@@ -290,15 +298,20 @@ def test_waveform_file_from_another_recording(output):
 
 
 def test_spikes_before_first_trial(output):
-    """Spikes before the first trial in the waveform file (kept by earlier
-    versions) are only noted."""
+    """Spikes before the first trial in the waveform file, which versions
+    before 2026.10.07 kept, are only noted in their output; in the current
+    version's, they are unexpected, a warning."""
     path = output / f"{UNIT}_spikes.h5"
     with h5py.File(path) as fp:
         times = fp["times"][:]
     rewrite_waveforms(path, times=np.r_[[10, 20], times])
     unit = unit_report(audit(output))
-    assert unit["status"] == "info"
-    assert checks(unit) == [("waveforms-before-first-trial", "info", None)]
+    assert checks(unit) == [("waveforms-before-first-trial", "warn", None)]
+    edit_pprox(
+        output, lambda pp: pp.update(processed_by=["group-kilo-spikes 2026.07.15"])
+    )
+    (f,) = unit_report(audit(output))["findings"]
+    assert (f["severity"], f["version_note"]) == ("info", "known-error")
 
 
 def test_pprox_names_another_recording(excerpt_output):
@@ -402,28 +415,35 @@ def test_p397_reference_is_clean():
 @pytest.mark.slow
 def test_e36_old_version_flags_end_of_pulse_trials():
     """The version before the sync fixes reported the pulses of trials 0, 3
-    and 12 at their end; these are flagged in every unit, as warnings."""
+    and 12 at their end; these don't fit the sync track in every unit
+    (warnings), and their lags are noted as message timing."""
     report = example_report("E36_5_1", "output-a20b62a")
     assert report["status"] == "warn"
     for unit in report["units"]:
-        lag = [f for f in unit["findings"] if f["check"] == "message-jitter"]
-        assert [(f["severity"], f["trials"]) for f in lag] == [("warn", [0, 3, 12])]
+        found = {
+            f["check"]: (f["severity"], f.get("trials"))
+            for f in unit["findings"]
+            if f["check"] in ("stimulus-duration-mismatch", "message-jitter")
+        }
+        assert found == {
+            "stimulus-duration-mismatch": ("warn", [0, 3, 12]),
+            "message-jitter": ("info", [0, 3, 12]),
+        }
 
 
 @pytest.mark.slow
 def test_c401_fails():
     """C401's reference output (no sync line) fails: its onsets drift away from
     the messages, so most trials are mislabeled, and its waveform files name
-    another recording."""
+    another recording. The drifting lags are only message timing (info)."""
     report = example_report("C401_1_1b", "output")
     assert report["status"] == "fail"
     for unit in report["units"]:
         found = {f["check"] for f in unit["findings"] if f["severity"] == "fail"}
-        assert {
-            "stimulus-mislabeled",
-            "message-jitter",
-            "waveforms-recording-mismatch",
-        } <= found
+        assert {"stimulus-mislabeled", "waveforms-recording-mismatch"} <= found
+        assert ("message-jitter", "info") in {
+            (f["check"], f["severity"]) for f in unit["findings"]
+        }
 
 
 # --- message checks on synthetic trial tables (cases from the archive audit)
@@ -643,6 +663,84 @@ def test_stimulus_durations_shifted_labels():
     (f,) = kilo_audit.check_stimulus_durations(unit, RATE)
     assert (f["check"], f["severity"]) == ("stimulus-duration-mismatch", "fail")
     assert min(f["trials"]) >= 99 and len(f["trials"]) > 10
+
+
+# --- grading by version
+
+
+def stopped_early():
+    """A stimulus-duration-mismatch warning, as for a presentation stopped
+    early by a jack xrun (kept by 2026.10.07, dropped since 2026.10.14)"""
+    return [kilo_audit.finding("stimulus-duration-mismatch", "warn", "x", [5])]
+
+
+def test_known_error_of_the_version():
+    (f,) = kilo_audit.grade_findings(stopped_early(), ["group-kilo-spikes 2026.10.07"])
+    assert (f["severity"], f["version_note"]) == ("warn", "known-error")
+    assert f["message"] == (
+        "x (known error of group-kilo-spikes 2026.10.07: presentations stopped "
+        "early (e.g. by a jack xrun) kept)"
+    )
+
+
+def test_unexpected_in_a_fixed_version():
+    (f,) = kilo_audit.grade_findings(stopped_early(), ["group-kilo-spikes 2026.10.14"])
+    assert (f["severity"], f["version_note"]) == ("fail", "unexpected")
+    assert "which has the fixes of 2026.10.14" in f["message"]
+
+
+def test_grading_regenerated_or_unknown_versions():
+    """A regenerated unit's trials may come from another unit, so its findings
+    are only explained, never made more severe; findings for units of unknown
+    version, or for checks without known errors, are unchanged."""
+    regenerated = ["group-kilo-spikes 2026.10.14", "regenerate-pprox 2026.10.14"]
+    assert kilo_audit.grade_findings(stopped_early(), regenerated) == stopped_early()
+    for processed_by in ([], ["group-kilo-spikes 0.1"], ["phy"]):
+        assert kilo_audit.grade_findings(stopped_early(), processed_by) == (
+            stopped_early()
+        )
+    jitter = [kilo_audit.finding("message-jitter", "info", "x")]
+    assert kilo_audit.grade_findings(jitter, ["group-kilo-spikes 2026.10.14"]) == jitter
+
+
+def test_every_known_error_is_a_documented_check():
+    text = (Path(__file__).parent.parent / "docs" / "audit.md").read_text()
+    for check in kilo_audit.KNOWN_ERRORS:
+        assert f"#### `{check}`" in text
+
+
+# --- message pairing
+
+
+def test_messages_after_their_onsets():
+    """On the C182 rig sync events follow their messages by only 0.067 s, so
+    with some jitter a message can arrive after its onset, and
+    group-kilo-spikes pairs them in order. The audit pairs each onset with
+    the message nearest it less the typical lag, so these aren't
+    mislabeled."""
+    names, starts, onsets = presentation(200, lag=(-0.05, 0.15))
+    assert np.mean(onsets < starts) > 0.2
+    trials = list(zip(names, onsets, strict=True))
+    assert message_checks(trials, message_stimuli(names, starts)) == [
+        ("message-jitter", "info", None)
+    ]
+
+
+def test_sorted_window_messages_are_not_dropped_trials():
+    """A sort of part of the recording records how many trials were outside
+    it (sorted_window), so their messages having no trial is only noted."""
+    names, starts, onsets = presentation(300)
+    trials = list(zip(names[40:250], onsets[40:250], strict=True))
+    unit = message_unit(trials)
+    unit.pprox["sorted_window"] = {"trials_before": 40, "trials_after": 50}
+    (f,) = kilo_audit.check_messages(unit, message_stimuli(names, starts), RATE)
+    assert (f["check"], f["severity"]) == ("trials-dropped", "info")
+    assert f["message"] == (
+        "90 of 300 stimulus messages have no trial (90 outside the sorted window)"
+    )
+    unit.pprox["sorted_window"] = {"trials_before": 40, "trials_after": 0}
+    (f,) = kilo_audit.check_messages(unit, message_stimuli(names, starts), RATE)
+    assert f["severity"] == "warn"
 
 
 # --- selection
@@ -1087,6 +1185,18 @@ def test_summarize():
         "stimulus-mislabeled (fail) x1, trial-tables-differ (warn)"
     )
     assert flagged[1].endswith("message-jitter (warn) x2")
+
+
+def test_summarize_unexpected():
+    """Findings unexpected for the version that made the unit are counted."""
+    report = make_report(
+        "D_1", ("D_1_c1", NEW, [("stimulus-duration-mismatch", "fail")])
+    )
+    report["units"][0]["findings"][0]["version_note"] = "unexpected"
+    assert (
+        "1 findings in 1 units are unexpected for the version that made them"
+    ) in kilo_audit.summarize([*REPORTS, report])
+    assert "unexpected" not in kilo_audit.summarize(REPORTS)
 
 
 def test_summarize_level():

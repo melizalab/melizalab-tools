@@ -65,9 +65,32 @@ from dlab.util import add_log_arguments, setup_log
 log = logging.getLogger("dlab")
 
 SEVERITIES = ("ok", "info", "warn", "fail")
-# the first version with the current sync detection; lag outliers in output
-# from earlier versions are probably the known detection errors
-SYNC_FIX_VERSION = "2026.10.07"
+# the known errors of earlier versions of group-kilo-spikes (and
+# group-klopto-spikes) that each check finds, as (the first version without
+# the error, the error); see grade_findings
+_MISSED_SYNC = "trials after a missed sync event paired with the next stimulus"
+KNOWN_ERRORS = {
+    "events-outside-interval": [
+        ("2026.10.07", "spikes after the last trial's interval kept in it")
+    ],
+    "waveforms-before-first-trial": [
+        ("2026.10.07", "spikes before the first trial kept in the waveform file")
+    ],
+    "trials-before-messages": [
+        (
+            "2026.10.07",
+            "a pulse already high when the recording started reported as an "
+            "onset at sample 0",
+        )
+    ],
+    "stimulus-mislabeled": [("2026.10.07", _MISSED_SYNC)],
+    "trials-share-message": [("2026.10.07", _MISSED_SYNC)],
+    "stimulus-duration-mismatch": [
+        ("2026.10.07", "pulse onsets reported at the end of the pulse"),
+        ("2026.10.07", _MISSED_SYNC),
+        ("2026.10.14", "presentations stopped early (e.g. by a jack xrun) kept"),
+    ],
+}
 # lag outliers in more than this fraction of trials make a unit unreliable
 MAX_OUTLIER_FRACTION = 0.5
 # sync events follow their messages by 0.25-1 s; a longer lag isn't plausible
@@ -118,14 +141,60 @@ class Unit:
         }
 
 
-def old_sync_version(processed_by: list[str]) -> bool:
-    """True if the unit was processed by a version of group-kilo-spikes (or
-    group-klopto-spikes) from before the sync detection fixes."""
+def processing_version(processed_by: list[str]) -> tuple[str, str] | None:
+    """The program (group-kilo-spikes or group-klopto-spikes) and calendar
+    version that made a unit's output, or None if neither did (or the version
+    isn't a date)."""
     for entry in processed_by:
         prog, _, version = entry.partition(" ")
         if prog in ("group-kilo-spikes", "group-klopto-spikes"):
-            return version < SYNC_FIX_VERSION
-    return False
+            if re.fullmatch(r"\d{4}\.\d{2}\.\d{2}", version):
+                return prog, version
+            return None
+    return None
+
+
+def grade_findings(findings: list[dict], processed_by: list[str]) -> list[dict]:
+    """Grades a unit's findings by the version that made it (see KNOWN_ERRORS).
+    A finding that a known error of that version explains says so
+    (`version_note` "known-error"). The same finding in output from a version
+    with every fix is unexpected, a new bug or a file changed after
+    processing, and is made one level more severe (`version_note`
+    "unexpected"); not for regenerated units, whose trials may come from
+    another unit. Findings for units of unknown version are unchanged."""
+    made_by = processing_version(processed_by)
+    if made_by is None:
+        return findings
+    prog, version = made_by
+    regenerated = any(p.startswith("regenerate-pprox") for p in processed_by)
+    out = []
+    for f in findings:
+        errors = KNOWN_ERRORS.get(f["check"])
+        if not errors:
+            out.append(f)
+            continue
+        known = [error for fixed, error in errors if version < fixed]
+        if known:
+            f = {
+                **f,
+                "message": f"{f['message']} (known error of {prog} {version}: "
+                + "; or ".join(known)
+                + ")",
+                "version_note": "known-error",
+            }
+        elif not regenerated:
+            fixed = max(fixed for fixed, _ in errors)
+            severity = SEVERITIES[min(SEVERITIES.index(f["severity"]) + 1, 3)]
+            f = {
+                **f,
+                "severity": severity,
+                "message": f"{f['message']} (unexpected in output from {prog} "
+                f"{version}, which has the fixes of {fixed}: a new bug, or the "
+                "file was changed after processing)",
+                "version_note": "unexpected",
+            }
+        out.append(f)
+    return out
 
 
 # --- checks on a pprox alone
@@ -340,8 +409,7 @@ def check_waveforms(unit: Unit) -> list[dict]:
             finding(
                 "waveforms-before-first-trial",
                 "info",
-                f"{n_before} spike(s) before the first trial in the waveform file "
-                "(kept by versions before 2026.10.07)",
+                f"{n_before} spike(s) before the first trial in the waveform file",
             )
         )
     return out
@@ -468,10 +536,35 @@ def shift_events(events: list, shift: int) -> list:
     ]
 
 
+def pair_messages(starts: np.ndarray, onsets: np.ndarray) -> np.ndarray:
+    """The start message each onset follows: the one nearest the onset less
+    the typical lag (the median lag from each onset back to the last message
+    before it). Messages that arrive after their onsets, as some do on setups
+    with a short lag, or that are delayed by up to half the gap to the next,
+    are paired with the right onset. An onset whose time less the lag is more
+    than half the median gap between messages before the first message gets
+    -1."""
+    order = np.argsort(starts, kind="stable")
+    ordered = starts[order]
+    if ordered.size == 0:
+        return np.full(onsets.size, -1)
+    before = np.searchsorted(ordered, onsets, side="right") - 1
+    has = before >= 0
+    typical = np.median(onsets[has] - ordered[before[has]]) if has.any() else 0
+    t = onsets - typical
+    after = np.clip(np.searchsorted(ordered, t), 0, ordered.size - 1)
+    prev = np.maximum(after - 1, 0)
+    nearest = np.where(
+        np.abs(ordered[after] - t) < np.abs(ordered[prev] - t), after, prev
+    )
+    half_gap = np.median(np.diff(ordered)) / 2 if ordered.size > 1 else np.inf
+    return np.where(t < ordered[0] - half_gap, -1, order[nearest])
+
+
 def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     """Checks a unit's trials against the stimulus start messages: each trial's
-    onset (its sync event) should follow a start message for its stimulus by a
-    lag consistent with the other trials. If the trials don't fit the messages
+    onset (its sync event) should follow a start message for its stimulus (see
+    pair_messages) by a lag consistent with the other trials. If the trials don't fit the messages
     as they are, but do with a constant shift (see clock_shift), the shift is
     reported and the trials are checked against the messages it pairs them
     with."""
@@ -488,7 +581,7 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
     names = [t["stimulus"]["name"] for t in trials]
     starts = np.array([s.start for s in stimuli])
     onsets = np.array([round(t["offset"] * sampling_rate) for t in trials])
-    idx = np.searchsorted(starts, onsets, side="right") - 1
+    idx = pair_messages(starts, onsets)
     out = []
 
     def mislabeled(idx):
@@ -531,8 +624,8 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
             finding(
                 "stimulus-mislabeled",
                 "fail",
-                "trials labeled with a different stimulus from the message "
-                "before their onset",
+                "trials labeled with a different stimulus from the start "
+                "message their onset follows",
                 wrong,
             )
         )
@@ -576,24 +669,17 @@ def check_messages(unit: Unit, stimuli, sampling_rate: float) -> list[dict]:
                 "message-jitter", "info", message, outliers if outliers.size else None
             )
         )
+    # a sort of part of the recording records how many trials were outside it
+    window = unit.pprox.get("sorted_window") or {}
+    outside = window.get("trials_before", 0) + window.get("trials_after", 0)
     n_dropped = len(stimuli) - np.unique(idx[later]).size
-    allowed = max(1, int(0.01 * len(stimuli)))
-    if n_dropped > allowed:
-        out.append(
-            finding(
-                "trials-dropped",
-                "warn",
-                f"{n_dropped} of {len(stimuli)} stimulus messages have no trial",
-            )
-        )
-    elif n_dropped:
-        out.append(
-            finding(
-                "trials-dropped",
-                "info",
-                f"{n_dropped} of {len(stimuli)} stimulus messages have no trial",
-            )
-        )
+    if n_dropped:
+        message = f"{n_dropped} of {len(stimuli)} stimulus messages have no trial"
+        if outside:
+            message += f" ({outside} outside the sorted window)"
+        allowed = max(1, int(0.01 * (len(stimuli) - outside)))
+        severity = "warn" if n_dropped - outside > allowed else "info"
+        out.append(finding("trials-dropped", severity, message))
     return out
 
 
@@ -680,11 +766,6 @@ def check_stimulus_durations(unit: Unit, sampling_rate: float, sync=None) -> lis
     )
     if no_pulse.size:
         message += f"; {no_pulse.size} onsets are not the rise of a pulse"
-        if old_sync_version(unit.processed_by):
-            message += (
-                f" (in versions before {SYNC_FIX_VERSION}, probably pulse onsets "
-                "reported at the end of the pulse)"
-            )
     allowed = max(1, int(0.01 * len(trials)))
     severity = "fail" if bad.size > allowed else "warn"
     return [finding("stimulus-duration-mismatch", severity, message, bad)]
@@ -1319,6 +1400,8 @@ def audit_recording(
                         message_shift,
                     )
                 )
+    for unit in units:
+        unit.findings = grade_findings(unit.findings, unit.processed_by)
     status = worst([*findings, *(f for u in units for f in u.findings)])
     return {
         "recording": recording,
@@ -1830,8 +1913,8 @@ def report_findings(reports: list[dict]) -> Iterable[dict]:
 
 def summarize(reports: list[dict], level: str = "warn") -> str:
     """A text summary of audit reports: recordings and units by status,
-    findings by check, units by version, and the recordings with findings at or
-    above level."""
+    findings by check, the findings unexpected for their version, units by
+    version, and the recordings with findings at or above level."""
     lines = []
     units = [u for r in reports for u in r["units"]]
     lines.append(f"{len(reports)} recordings, {len(units)} units")
@@ -1858,6 +1941,14 @@ def summarize(reports: list[dict], level: str = "warn") -> str:
             checks.items(), key=lambda kv: (-SEVERITIES.index(kv[0][1]), kv[0][0])
         ):
             lines.append(f"{check:<30}{sev:<10}{len(recs):>12}{len(unit_names):>8}")
+    unexpected = [row for row in rows if row.get("version_note") == "unexpected"]
+    if unexpected:
+        n_units = len({(row["recording"], row["unit"]) for row in unexpected})
+        lines.append("")
+        lines.append(
+            f"{len(unexpected)} findings in {n_units} units are unexpected for the "
+            "version that made them (a new bug, or a file changed after processing)"
+        )
 
     versions: dict[str, dict[str, int]] = {}
     for unit in units:
