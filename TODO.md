@@ -19,18 +19,11 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   files exist yet, but they may; fixing it won't change single-entry output.
   Needs: how the kilosort input (temp_wh.dat) is assembled from several
   entries (order, and any gaps between them).
-- [ ] Find stimulus onsets on an audio channel without messages (an exhaustive
-  search for every stimulus anywhere in the recording), for recordings with
-  neither a sync track nor messages (none known). `--audio-sync` needs the
-  messages, or a log, to know where to look.
 
 ## Outputs (group-kilo-spikes)
 
-- [ ] Sorting part of a recording (`--sort-start`/`--sort-stop`, from the
-  student's fork, 410767a and 0a9bbce at github.com/bpqle/melizalab-tools):
-  done for single-entry recordings, timed from the recording's start, with
-  the `sorted_window` annotation and the checks in dlab.kilo_window. Still
-  open:
+- [ ] Open questions about sorts of part of a recording
+  (`--sort-start`/`--sort-stop`):
   - how kilosort lays out a sort of a window is found from the data, not
     assumed: temp_wh.dat may start at the window's start or the
     recording's, and so may the spike times (`sorted_data_from`,
@@ -46,15 +39,17 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
     and its temp_wh.dat, written batch by batch from `imin`, probably starts
     at `tmin` (from the 4.1.7 source). Tested only on synthetic sorts in each layout; check
     against a real sort directory from the patched 2.5 or kilosort 4 when
-    there is one.
-  - `MAX_SORT_PADDING` assumes kilosort 2-3 write temp_wh.dat in whole
-    batches of 65600 samples and kilosort 4 no more; not verified against
-    kilosort's source or a real sort directory.
+    there is one (C182_4_1, the only kilosort 4 sort, is of the whole
+    recording).
+  - `MAX_SORT_PADDING` (65600) assumes kilosort 2-3 write temp_wh.dat in
+    whole batches of 65600 samples; not verified. Kilosort 4 pads too, to
+    whole batches of `batch_size` (60000 by default; C182_4_1).
   - the checks map temp_wh.dat's columns to probe channels with
     channel_map.npy, and probe channel i to the ARF dataset CH{i+1}. Whether
     phy's `ch` in cluster_info.tsv is a column or a channel id (they differ
     if kilosort dropped channels) is not settled; group-kilo-spikes has
-    always used it as a column.
+    always used it as a column. C182_4_1 doesn't settle it: its channel map
+    is 0-127 in order, so columns and channel ids are the same.
   - the audit should use the annotation: messages outside the window are
     expected to have no trial. For deposited units without it, the audit
     could find the window from the spike times: threshold crossings on the
@@ -74,9 +69,19 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
 - [ ] Kilosort 4 writes temp_wh.dat only with `save_preprocessed_copy=True`
   (default False; from the 4.1.7 source), so a default kilosort 4 sort can't
   be run through group-kilo-spikes, which needs it for the waveforms. Its copy
-  is drift-corrected, and probably has only the channels in chanMap while
-  params.py gives `n_channels_dat` as all the channels in the binary file
-  (not checked against a real sort). Check with a real kilosort 4 sort.
+  is drift-corrected. It has all the channels in the binary file
+  (`n_chan_bin`), with the channels not in chanMap all zeros: C182_4_1 (4.1.2)
+  has 136 columns, the 128 in its channel map filtered and 8 zero.
+- [ ] Reading the waveforms from temp_wh.dat is limited by the disk's random
+  reads, not the code. On the VM (C182_4_1: 136 channels, ~35 GB, 16 GB of
+  RAM, so nothing stays cached between units) it takes ~7 ms per spike, one
+  seek per spike window: 115-145 s for units of 17,000-21,000 spikes, against
+  0.1 s for the same read once cached and 0.3 s for `save_waveforms`.
+  `MADV_RANDOM` (no readahead) is slower, ~12 ms per spike. It's much faster
+  on the bare-metal machine. If it matters on slow storage, read all units'
+  windows in one sequential pass (~8.5 min for the whole file at the VM's
+  69 MB/s, whatever the number of units); on fast disks that would be slower
+  than now.
 
 ## Audit
 
@@ -102,25 +107,18 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
 
 ## Deposited data and the registry
 
-- [ ] The neurobank resource "trials" is the only stimtrial file without
-  `interval`; probably a dummy that should be removed.
 - [ ] Existing klopto outputs (e.g. E36's) have placeholder `led_start` /
   `led_end` values in trials without the LED (sample 0 relative to the
   stimulus, e.g. -3.27 s); analyses must use `led` first.
 
 ## Recording practice
 
-- [ ] Remind experimenters to shorten the JACK period and audio driver/card
-  buffers: TTL pulses and sync events follow the jrelay messages by 0.2-0.3 s
-  (up to 1 s on some setups), which loosens message-to-pulse matching. The
-  audit's `message-jitter` finds sessions where the lags were spread over
-  ~0.2 s (summer 2025 on the kiaa0319 rig; 2026-01-06 to -12 and 2026-04-09
-  to 05-11 on the induction rig). Not too short: at 512 frames (2 periods,
-  ~23 ms; jill 3.0.0) every C182 session on 2026-10-12 had jack xruns (1-6
-  per 72 min), and jpresent stops the stimulus playing at an xrun (12 of 8520
-  cut short; group-kilo-spikes drops them). 4096 frames gave none in ~17.5 h
-  (jill 2.2.2 and 3.0.0rc1); try 1024 and count xruns in a full session
-  (jill_error and the xrun lines in jpresent's log).
+- [ ] Try a JACK period of 1024 frames (2 periods) on the C182 rig and count
+  xruns in a full session (jill_error and the xrun lines in jpresent's log).
+  At 512 every C182 session on 2026-10-12 had xruns (1-6 per 72 min; jill
+  3.0.0), and jpresent stops the stimulus playing at an xrun (12 of 8520 cut
+  short; group-kilo-spikes drops them); 4096 gave none in ~17.5 h (jill 2.2.2
+  and 3.0.0rc1, a confound).
 
 ## pprox.py
 
