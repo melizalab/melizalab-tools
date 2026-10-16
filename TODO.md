@@ -88,6 +88,45 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
 - [ ] Existing klopto outputs (e.g. E36's) have placeholder `led_start` /
   `led_end` values in trials without the LED (sample 0 relative to the
   stimulus, e.g. -3.27 s); analyses must use `led` first.
+- [ ] `kilosort_amplitude` in the outputs is the template amplitude in each
+  kilosort version's own scale, so it can't be compared across sorters
+  (E76_2_1b: median 2128 from 2.5, 27.7 from 4). The whitened waveforms are
+  only roughly comparable (both scale whitened noise to SD 200; 13% apart on
+  the same neurons). Use `recorded_amplitude` (since 2026.10.17), or
+  measure the band-passed ARF: on E76_2_1b, the same neurons have the same
+  uV amplitude in both sorts (median ratio 1.00), and the site's "smaller"
+  KS4 units were this field. Outputs before 2026.10.14 don't record the
+  sorter; the amplitude's scale tells (thousands for 2.5, tens for 4).
+
+## Spike sorting
+
+- [ ] Kilosort 4 against 2.5, on six sites sorted with both (E76_2_1b,
+  E76_4_1b, E77_1_1b, E77_3_1b, E79_2_1b, E79_3_1b; KS4 units as deposited,
+  KS2.5 re-sorts by the same student, 2026-10-16; KS2.5 sort folders without
+  temp_wh.dat in examples/). KS4 kept 427 good units, KS2.5 231. Paired by
+  spikes within 0.33 ms:
+  - KS2.5 detected the same spikes: 100% of the matched KS4 units' spikes
+    are in some KS2.5 cluster (median 100% for the 29 unmatched).
+  - 398 KS4 units have a KS2.5 cluster with at least half their spikes. Its
+    phy label: good 126 (1.04x the spikes, ISI violations < 1.5 ms 0.00%),
+    mua 105 (1.08x, 0.09%; KS2.5 ContamPct ~3%, a stricter curation
+    threshold than the KS4 sort's), unlabeled 167 (2.17x, 0.45%; KS2.5's
+    own label mua, ContamPct ~37%). The KS4 units have 0.00%.
+  - So KS4's gain is mostly neurons KS2.5 merged with multiunit or noise
+    spikes, which curation can't recover without splitting by hand. KS4
+    rarely over-splits: 19 KS2.5 clusters hold more than one KS4 unit (28
+    pairs); 17 pairs have near-coincidences at chance or above (distinct
+    neurons), and only E79_3_1b's KS2.5 cluster 12 (KS4 450-452) is clearly
+    one neuron split in three. 98 of the 107 KS2.5 good clusters without a
+    KS4 partner overlap a KS4 unit already matched to another cluster
+    (fragments or duplicates).
+  - Units both kept have the same uV amplitude and isolation.
+  Decision: the student's dataset stays on KS2.5 (most sites; re-sorting
+  dozens isn't worth it). For new sorts, KS4 yields more isolated neurons;
+  curate with one written rule (KSLabel, ContamPct threshold), review all
+  KS-good clusters, and merge same-channel units whose spike trains never
+  come within 1.5 ms. Scripts and tables (pair_sites.py, siblings.py) were
+  in the session scratchpad, not kept.
 
 ## Recording practice
 

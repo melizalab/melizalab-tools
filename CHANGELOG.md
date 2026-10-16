@@ -1,5 +1,61 @@
 # Changelog
 
+## 2026.10.17
+
+### group-kilo-spikes
+
+Fixes:
+
+- Kilosort 2.5 sorts work again. 2026.10.07 and 2026.10.14 stopped at the
+  first good cluster ("arrays used as indices must be of integer (or
+  boolean) type"), because kilosort 2.5 saves the spike times as uint64.
+  Kilosort 4 sorts weren't affected, and no output was written by the
+  failing runs, so nothing deposited needs checking.
+
+New:
+
+- The outputs (pprox and waveform files) record `recorded_amplitude`: the
+  unit's peak-to-trough amplitude and its channel's noise (robust SD) in the
+  ARF file, band-passed as kilosort filters it, in uV, with the channel and
+  the number of spikes averaged (up to 500). Unlike `kilosort_amplitude` and
+  the waveforms, it doesn't depend on the sorter. It's measured only for
+  recordings with one entry, and skipped with a warning if the unit's
+  channel isn't in the ARF file. Measuring it reads the recording around
+  each unit's spikes, a few seconds per unit; `--no-recorded-amplitude`
+  skips it. All other fields are unchanged.
+
+Note on existing outputs: `kilosort_amplitude` is the template amplitude in
+each kilosort version's own scale (thousands for 2.5, tens for 4, for the same
+units), and the waveforms are whitened data, scaled by each sorter in its own
+way. Neither should be compared across sorters or read as uV. Outputs before
+2026.10.14 don't record the sorter; the scale of `kilosort_amplitude` shows
+which it was.
+
+### regenerate-pprox
+
+- `recorded_amplitude` is taken from the unit's own waveform file, never from
+  the pprox whose trials are used.
+
+### audit-kilo-spikes
+
+- Findings are graded by the version that made the unit (`version_note`): a
+  finding that a known error of that version explains says so; one in output
+  from a version that fixed every known error for it is one level more
+  severe ("unexpected"). See docs/audit.md.
+- Onsets are paired with the nearest start message (less the recording's
+  typical lag) for `stimulus-mislabeled`, `trials-share-message` and
+  `trials-before-messages`, so a message that arrives after its onset no
+  longer gives a false finding.
+- Trials outside a sorted window (recorded since 2026.10.14) are counted
+  separately in `trials-dropped`.
+- `collect-kilo-audit` counts the unexpected findings.
+
+### find-kilo-units
+
+- Listing only recordings without units (e.g. after their units were purged)
+  no longer fails with "400 Bad Request"; they're reported as having no
+  units.
+
 ## 2026.10.14
 
 ### group-kilo-spikes

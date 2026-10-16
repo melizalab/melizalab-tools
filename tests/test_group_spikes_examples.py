@@ -122,8 +122,8 @@ SORT_FIELDS = {
     "waveform_post_peak",
     "spike_counts",
 }
-# pprox fields that are known to change: the recorded amplitude is new since
-# 2026.10.14
+# pprox fields that are known to change: the recorded amplitude is new in
+# 2026.10.17
 CHANGED = {"entry_metadata", "recorded_amplitude", *TRIAL_OPTIONS, *SORT_FIELDS}
 # waveform file attributes that are known to change: the same fields, with the
 # dicts flattened into one attribute per key
