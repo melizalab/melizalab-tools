@@ -47,6 +47,7 @@ import shutil
 from pathlib import Path
 
 import h5py
+import httpx
 import numpy as np
 import pytest
 
@@ -852,6 +853,13 @@ def fake_registry(monkeypatch, tmp_path):
                 yield {"name": name, "dtype": params["dtype"]}
 
     def describe_many(registry_url, *ids):
+        if not ids:  # as the registry does
+            request = httpx.Request("POST", f"{registry_url}bulk/resources/")
+            raise httpx.HTTPStatusError(
+                "400 Bad Request",
+                request=request,
+                response=httpx.Response(400, request=request),
+            )
         return [recordings[name] for name in ids if name in recordings]
 
     monkeypatch.setattr(kilo_audit.nbank_core, "search", search)
@@ -929,6 +937,21 @@ def test_find_units_for_listed_recordings(fake_registry, tmp_path, capsys, caplo
     caplog.clear()
     with caplog.at_level("DEBUG", logger="dlab"):
         kilo_audit.find_units_script(["-r", "https://registry/", str(listed)])
+    assert "C_3: no units (no locations in the registry)" in caplog.text
+
+
+def test_find_units_when_no_listed_recording_has_units(
+    fake_registry, tmp_path, capsys, caplog
+):
+    """If none of the listed recordings has units (e.g. after they were
+    purged), nothing is written, and they are listed with --debug."""
+    listed = tmp_path / "recordings.txt"
+    listed.write_text("C_3\n")
+    with caplog.at_level("DEBUG", logger="dlab"):
+        kilo_audit.find_units_script(
+            ["-r", "https://registry/", "--debug", str(listed)]
+        )
+    assert capsys.readouterr().out == ""
     assert "C_3: no units (no locations in the registry)" in caplog.text
 
 

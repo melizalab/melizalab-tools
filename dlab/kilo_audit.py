@@ -1771,9 +1771,12 @@ def find_units_script(argv=None):
             unmatched = []
             # e.g. deposited before sorting showed there were no good units
             no_units = [rec for rec in recordings if rec not in groups]
-        records = {
-            r["name"]: r for r in nbank_core.describe_many(args.registry_url, *groups)
-        }
+        # the registry refuses a bulk request with no names
+        records = (
+            {r["name"]: r for r in nbank_core.describe_many(args.registry_url, *groups)}
+            if groups
+            else {}
+        )
         locations = fetch_locations(args.registry_url, [*records, *no_units])
     except (OSError, httpx.HTTPError) as err:
         log.error("find-kilo-units: %s", err)
