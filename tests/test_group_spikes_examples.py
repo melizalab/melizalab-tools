@@ -35,6 +35,12 @@ examples/ are gone, so are the tests. The examples with args files:
   oeaudio_20260617-130556.log"). The reference, output/, is the pprox and
   waveform files as deposited (group-kilo-spikes 2026.06.22). The example
   also has the raw open-ephys recording, which no test uses.
+- E41_2_2b: kilosort 2.5 (spike_times.npy is uint64), oeaudio-present with
+  messages in the ARF file, sync on a channel named "sync" ("--sync sync").
+  E41_2_2b.arf is a link to the archived recording. Its first deposit was
+  purged, so the reference, output/, is from group-kilo-spikes at 480b327
+  (the int64 fix), checked by hand: 110 trials, 53 units, no warnings. It
+  doesn't have recorded_amplitude.
 
 Expected differences from the earlier version (see TODO.md): stimulus onsets
 move by a few samples (sync detection now finds rising edges), and
