@@ -4,6 +4,13 @@
 Most tests remove a unit's pprox from the output of group-kilo-spikes on the
 E36 excerpt (see test_group_spikes_excerpt.py), regenerate it from the
 waveform file, and compare it with the original.
+
+The slow test uses an example recording in examples/ (not in the repository;
+skipped if missing). It needs no kilosort output or raw data:
+
+- P397_1_1/output/: the pprox and waveform files as deposited
+  (group-kilo-spikes 2026.06.22, clicks); two of the units it regenerates
+  have spikes exactly at trial boundaries
 """
 
 import json

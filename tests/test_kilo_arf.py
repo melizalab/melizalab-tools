@@ -6,6 +6,15 @@ recording into trials with arf_to_trials.
 Recordings are built with the helpers in conftest.py, which follow the layout
 arfx-oephys writes. Tests marked PINNED record current behavior that looks like
 a bug; see TODO.md.
+
+Some are modeled on example recordings, and need no files:
+
+- P352_1_1: the sustained pulses fill ~58% of the sync track
+- C182_4_1: the acquisition board's sample counter reset 1.8 s into the
+  recording, so the first sample number of the final run is -53343. Its first
+  ARF export took the offset from the first sample number instead, which put
+  the messages 2986 s before their sync events; the re-export (with the fix
+  for arfx#47) is the one in the archive.
 """
 
 import logging
@@ -340,12 +349,15 @@ def test_trials_more_clicks_than_stimuli(make_arf):
         trials(path)
 
 
-@pytest.mark.parametrize("first_sample", [0, FIRST_SAMPLE])
-def test_trials_missing_click_drops_that_stimulus(make_arf, first_sample):
+# the first sample is negative when the acquisition board's sample counter
+# reset after the recording started (C182_4_1)
+@pytest.mark.parametrize("first_sample", [0, FIRST_SAMPLE, -53343])
+def test_trials_missing_click_drops_that_stimulus(make_arf, first_sample, caplog):
     """If a click is missed, that stimulus is dropped and the others keep their
     own clicks. Message times are open-ephys sample numbers, which include the
     recording's first sample number, so they are converted to sync-track
-    samples before matching.
+    samples before matching, and then line up with the clicks without the
+    shift for messages on another clock.
     """
     path = make_arf(
         one_entry(
@@ -354,11 +366,13 @@ def test_trials_missing_click_drops_that_stimulus(make_arf, first_sample):
             messages=oeaudio_messages(STIMULI, first_sample=first_sample),
         )
     )
-    result = trials(path)
+    with caplog.at_level(logging.WARNING, logger="dlab.kilo"):
+        result = trials(path)
     assert [(t.stimulus_name, t.stimulus_start) for t in result] == [
         ("a", 30000),
         ("c", 150000),
     ], "b should be dropped"
+    assert "don't line up with the sync track" not in caplog.text
 
 
 def test_trials_messages_after_clicks_paired_in_order(make_arf, caplog):
@@ -782,9 +796,9 @@ def test_no_pulses_warns(make_arf, caplog):
 
 
 def test_aux_check_with_offset_message_clock(make_arf, caplog):
-    """When the messages are on another clock from the sync track (C182_4_1:
-    the recording starts 3000 s into acquisition, the messages count from
-    about its start), the stimuli are paired in order, and the condition
+    """When the messages are on another clock from the sync track (C182_4_1's
+    first export: the recording starts 3000 s into acquisition, the messages
+    count from about its start), the stimuli are paired in order, and the condition
     messages are shifted by the same amount for the aux check."""
     entry = opto_entry([(90000, 105000)], first_sample=90_000_000)
     entry["messages"] = jpresent_messages(STIMULI, conditions={"b"})

@@ -19,8 +19,7 @@ The trial table comes from one of these, in order of preference:
 - --from-arf: the trials made from the ARF file by the current version of
   group-kilo-spikes. This needs the sync track and prepad, from the options or
   the waveform file. The onsets may differ by a few samples from those of the
-  original version (more for pulse sync before 2026.10.07), and aux pulses are
-  not included.
+  original version (more for pulse sync), and aux pulses are not included.
 
 The regenerated files are written to a directory for depositing by hand. Each
 records the waveform file it was derived from (derived_from), the source of its

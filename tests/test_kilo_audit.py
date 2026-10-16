@@ -3,9 +3,42 @@
 
 Most tests audit the output of group-kilo-spikes on the E36 excerpt (see
 test_group_spikes_excerpt.py), which should be clean, after corrupting a copy
-of it in one specific way. The slow tests at the end audit the example
-recordings, whose problems are known (see TODO.md). Tests marked PINNED
-record current behavior that looks like a bug; see TODO.md.
+of it in one specific way. Tests marked PINNED record current behavior that
+looks like a bug; see TODO.md.
+
+The slow tests audit example recordings in examples/ (not in the repository;
+each test is skipped if its files are missing). None need kilosort output or
+raw data; except where noted, the files are in the archive:
+
+- P397_1_1/: P397_1_1.arf, oeaudio_20260617-130556.log, and output/, the
+  pprox and waveform files as deposited (group-kilo-spikes 2026.06.22,
+  clicks)
+- E36_5_1/: E36_5_1.arf (jpresent; pulses on ADC3, LED on ADC4), output/
+  (pprox files from group-klopto-spikes 2026.07.15, for the stimulus
+  durations), and output-a20b62a/, the outputs of an unreleased version
+  (a20b62a) that reported the pulses of trials 0, 3 and 12 at their end.
+  output-a20b62a is not in the archive: it was made from the kilosort output
+  in E36_5_1/sorting/, so it can't be remade if that is lost.
+- C401_1_1b/: C401_1_1b.arf and output/ (group-kilo-spikes 2026.07.15). No
+  sync line was connected, and the waveform files name another recording.
+- C180_1_1.arf: the metadata message and the entry attributes name different
+  experimenters
+
+The tests of the message checks use synthetic trial tables modeled on
+recordings from the archive audit, and need no files:
+
+- C165_3_1, E92_4_1, P399_4_1: lags from message to onset spread evenly over
+  ~0.215 s, with the onsets right
+- P388_3_1, P390_3_1: sorted from 700 s and 500 s into the recording, with
+  the trials and spikes timed from the start of the sort
+- E36_2_1 (group-klopto-spikes 2026.07.15): the pulse track was high when the
+  recording started, so trial 0's onset is at sample 0
+- C182 rig (measured in C182_4_1): sync events follow their messages by
+  0.067 s, so with jitter a message can come after its onset
+- C182_4_1: the acquisition board's sample counter reset 1.8 s into the
+  recording. Its first ARF export took the offset from the first sample
+  number, which put the messages 2986 s before their sync events; the
+  re-export (with the fix for arfx#47) doesn't, and is the one in the archive.
 """
 
 import json
@@ -1637,7 +1670,7 @@ def test_entry_stimuli_renamed(tmp_path):
     assert [s.start for s in renamed] == [s.start for s in plain]
 
 
-# --- messages on another clock (C182_4_1)
+# --- messages on another clock (C182_4_1's first export)
 
 
 def offset_presentation(offset=2984.0, dropped=(40, 120)):

@@ -2,9 +2,12 @@
 """Checks of dlab.kilo against the example recordings in examples/.
 
 These are large (8-18 GB), so they are not in the repository and each test
-class is skipped if its file is missing. Each class loads the sync track once
+is skipped if its files are missing. Each class loads the sync track once
 (about 0.1-0.2 GB as int16). They also record the measurements behind the
 synthetic recordings in conftest.py.
+
+Examples (paths in examples/). None of the tests need kilosort output or raw
+data; except where noted, the files are in the archive:
 
 - E69_1_1.arf: GUI 0.5.3, old-style 2 ms clicks on a channel named "sync";
   messages in "Network_Events-104.0_TEXT_group_1"
@@ -16,7 +19,16 @@ synthetic recordings in conftest.py.
   old-style clicks were recorded (ADC5); ADC3, the default --sync, is flat
 - E36_5_1/E36_5_1.arf: GUI 1.0.2, jpresent, both sync tracks: the clicks
   (ADC5; positive at stimulus onset, negative at offset) are the input to the
-  Schmitt trigger that makes the pulses (ADC3)
+  Schmitt trigger that makes the pulses (ADC3). ADC4 has the LED pulses.
+- E36_5_1/output/: pprox files from group-klopto-spikes 2026.07.15, whose
+  opto field marks the trials with the LED
+- E36_5_1/output-a20b62a/: pprox files from an unreleased version (a20b62a),
+  which reported the pulses of trials 0, 3 and 12 at their end. Not in the
+  archive: they were made from the kilosort output in E36_5_1/sorting/, so
+  they can't be remade if that is lost.
+- C401_1_1b/C401_1_1b.arf and output/ (pprox files from group-kilo-spikes
+  2026.07.15): no sync line was connected, so the onsets drift away from the
+  messages; ADC5 is near the negative rail with ~250 counts of noise
 
 Tests marked PINNED record current behavior that looks like a bug; see TODO.md.
 """

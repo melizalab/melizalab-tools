@@ -10,8 +10,7 @@ problem justifies reprocessing is a decision for a person.
 
 Findings are graded by their effect on analyses of the data:
 
-- info: no effect (e.g. spikes before the first trial in the waveform file,
-  which versions before 2026.10.07 kept).
+- info: no effect (e.g. spikes before the first trial in the waveform file).
 - warn: specific trials are unreliable and can be excluded (they are listed),
   or the files are inconsistent in a way that doesn't change the spike times.
 - fail: the unit as a whole is unreliable (e.g. trials labeled with the wrong
@@ -461,7 +460,7 @@ def clock_shift(
     messages: an offset k such that trial i follows message i+k throughout,
     with its label and with consistent lags (see kilo.sync_lag_range), as when
     a recording was sorted from some time after its start and the trials (and
-    spikes) were timed from the start of the sort (P388_3_1, P390_3_1).
+    spikes) were timed from the start of the sort.
     Returns k and the median time from message to onset (s, negative if the
     onsets come first), or None if there is no such offset."""
     codes = {}
@@ -496,7 +495,8 @@ def message_clock_offset(
     trial follows the next message for its stimulus (in order; trials may have
     been dropped, but never added) by a consistent lag longer than
     MAX_SYNC_LAG, as when the acquisition board's sample counter reset during
-    the recording (C182_4_1). The onsets come from the sync track, which
+    the recording and the ARF file's offset is the first sample number. The
+    onsets come from the sync track, which
     shares the neural data's clock, and check_stimulus_durations checks them,
     so the trials are right. Returns the shift (samples) that puts the
     messages kilo.NOMINAL_SYNC_LAG before their trials' onsets, as

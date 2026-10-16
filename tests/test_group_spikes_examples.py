@@ -22,6 +22,20 @@ compared.
 neurobank is not used: the recording's record (URL and metadata) and the
 stimulus durations are taken from the reference pprox files.
 
+These tests need the kilosort output, including temp_wh.dat, which is deleted
+once a sort is deposited and isn't in the archive: when the copies in
+examples/ are gone, so are the tests. The examples with args files:
+
+- E36_5_1: jpresent, pulses on ADC3 ("--prepad 0.5"; ADC3 is the default).
+  The reference is output-a20b62a/, from an unreleased version (a20b62a) on
+  this sort, which isn't in the archive either; output/ is from
+  group-klopto-spikes on a different sort.
+- P397_1_1: oeaudio-present, clicks on ADC3, stimuli only in the
+  open-ephys-audio log ("--sync ADC3 --prepad 0.5 --oeaudio-log
+  oeaudio_20260617-130556.log"). The reference, output/, is the pprox and
+  waveform files as deposited (group-kilo-spikes 2026.06.22). The example
+  also has the raw open-ephys recording, which no test uses.
+
 Expected differences from the earlier version (see TODO.md): stimulus onsets
 move by a few samples (sync detection now finds rising edges), and
 entry_metadata changes from null to the name and sampling rate for jpresent

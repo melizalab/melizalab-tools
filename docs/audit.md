@@ -648,15 +648,20 @@ recordings); correct them by the shift there.
 
 **Problem:** None for the trials. Each trial follows the next message for its
 stimulus (in order) by a consistent lag of more than 2 s: the messages are on
-another clock from the recording. In C182_4_1 the acquisition board's sample
-counter reset 1.9 s into the recording, and arfx-oephys took the ARF's offset
-from the first sample number, so the messages appear 2986 s before their sync
-events. The onsets come from the sync track, which shares the neural data's
-clock (`stimulus-duration-mismatch` checks them), so the trials are right.
-The other message checks, and the aux checks against message streams, use the
-messages shifted to 0.25 s before the onsets, as group-kilo-spikes does.
+another clock from the recording. In the first export of C182_4_1 the
+acquisition board's sample counter reset 1.8 s into the recording, and
+arfx-oephys took the ARF's offset from the first sample number, so the
+messages appear 2986 s before their sync events. arfx-oephys now takes the
+offset from the samples after the reset (arfx#47), and the re-exported
+C182_4_1 doesn't have this finding. The onsets come from the sync track,
+which shares the neural data's clock (`stimulus-duration-mismatch` checks
+them), so the trials are right. The other message checks, and the aux checks
+against message streams, use the messages shifted to 0.25 s before the
+onsets, as group-kilo-spikes does.
 
-**Fixable:** —. Analyses that use the message times directly need the shift.
+**Fixable:** Yes, by exporting the recording again with a version of
+arfx-oephys that has the fix for arfx#47. Otherwise analyses that use the
+message times directly need the shift.
 
 #### `trials-before-messages`
 

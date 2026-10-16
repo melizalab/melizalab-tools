@@ -436,7 +436,7 @@ class StimulusFinder:
 # the lag assumed between the start messages and their sync events when the
 # messages are on another clock (see arf_to_trials): typical of our rigs
 # (0.07-1 s), and short enough that the aux pulses that follow other messages
-# (0.27 s on the C182 rig, where sync events follow by 0.07 s) still come
+# (0.27 s on one rig, where sync events follow by 0.07 s) still come
 # between their message and the next
 NOMINAL_SYNC_LAG = 0.25
 
@@ -609,8 +609,8 @@ def arf_to_trials(
             )
         # lags (sync event after start message) are meaningless for a log from
         # another session. If the messages are on another clock from the sync
-        # track (C182_4_1), they're shifted so the start messages come
-        # NOMINAL_SYNC_LAG before their sync events, for the aux checks
+        # track, they're shifted so the start messages come NOMINAL_SYNC_LAG
+        # before their sync events, for the aux checks
         message_shift = 0
         if times_fit:
             starts = np.array([stim.start for stim in entry_stimuli])
@@ -788,10 +788,10 @@ def check_stimulus_lengths(
     the sync track: the gaps between them, and the pulse widths if the sync
     track has pulses (see stimulus_length_mismatches). Returns the indices of
     the trials that don't, with a warning for each: usually presentations
-    stopped early (C182_4_1), which arf_to_trials drops. Raises RuntimeError
-    if more than max_missing of the trials (at least one) don't fit, since the
-    stimuli are then probably paired with the wrong sync events, and the trials
-    would be mislabeled."""
+    stopped early (e.g. by a jack xrun), which arf_to_trials drops. Raises
+    RuntimeError if more than max_missing of the trials (at least one) don't
+    fit, since the stimuli are then probably paired with the wrong sync events,
+    and the trials would be mislabeled."""
     onsets = pulses[:, 0]
     lengths = np.array([durations[stim.name] for stim in stimuli])
     widths = None
@@ -1239,8 +1239,7 @@ def waveforms_to_events(
     waveform file (samples, see dlab.spikes.load_waveforms), using the trial
     table (offset and recording.start) of a pprox from the same run. Returns
     the events for each trial (in s from the stimulus onset, as in the pprox)
-    and the number of spikes before the first trial, which group-kilo-spikes
-    versions before 2026.10.07 kept in the waveform files but not the pprox."""
+    and the number of spikes before the first trial, which are in no trial."""
     times = np.sort(np.asarray(times))
     starts = np.array([trial["recording"]["start"] for trial in pprox_trials])
     onsets = np.array(
