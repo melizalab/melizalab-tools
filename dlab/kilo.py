@@ -1254,6 +1254,67 @@ def waveforms_to_events(
     return events, int((trial < 0).sum())
 
 
+# a unit's recorded amplitude is the average of the band-passed recording
+# around up to this many of its spikes, spread through the recording; the
+# channel's noise is measured on this many one-second stretches of it
+AMPLITUDE_SPIKES = 500
+NOISE_STRETCHES = 10
+
+
+def channel_noise(dset: h5.Dataset, sampling_rate: float) -> float:
+    """The robust standard deviation (median absolute deviation / 0.6745) of
+    a channel band-passed as kilosort filters it, in the dataset's raw units,
+    from NOISE_STRETCHES one-second stretches spread through it"""
+    n = round(sampling_rate)
+    starts = np.linspace(0, max(dset.size - n, 0), NOISE_STRETCHES).astype(int)
+    x = np.concatenate(
+        [kilo_window.filtered(dset, s, s + n, sampling_rate) for s in starts]
+    )
+    return float(np.median(np.abs(x - np.median(x))) / 0.6745)
+
+
+def recorded_amplitude(
+    dset: h5.Dataset,
+    times: np.ndarray,
+    n_before: int,
+    n_after: int,
+    sampling_rate: float,
+    noise: dict[str, float],
+) -> dict | None:
+    """The amplitude of a unit in the recording, which doesn't depend on the
+    sorter's scaling and whitening: the peak-to-trough of the average of dset
+    (band-passed as kilosort filters it) around the spikes at `times`
+    (recording samples), and the channel's noise (see channel_noise; cached
+    in `noise` by dataset name), in the dataset's units (uV for headstage
+    channels). None if the dataset has no `bit_volts` to scale it, or no spike
+    has a full window."""
+    scale = dset.attrs.get("bit_volts")
+    if scale is None:
+        return None
+    times = np.sort(np.asarray(times, dtype="int64"))
+    times = times[(times >= n_before) & (times < dset.size - n_after)]
+    if times.size == 0:
+        return None
+    if times.size > AMPLITUDE_SPIKES:
+        times = times[np.linspace(0, times.size - 1, AMPLITUDE_SPIKES).astype(int)]
+    average = np.zeros(n_before + n_after)
+    for t in times:
+        average += kilo_window.filtered(dset, t - n_before, t + n_after, sampling_rate)
+    average /= times.size
+    name = dset.name.rsplit("/", 1)[-1]
+    if dset.name not in noise:
+        noise[dset.name] = channel_noise(dset, sampling_rate)
+    units = dset.attrs.get("units", "")
+    return {
+        "channel": name,
+        "units": units.decode() if isinstance(units, bytes) else str(units),
+        "peak_to_trough": float(average.max() - average.min()) * float(scale),
+        "noise_sd": noise[dset.name] * float(scale),
+        "n_spikes": int(times.size),
+        "filter": list(kilo_window.FILTER_BAND),
+    }
+
+
 def events_to_toelis(events: pd.DataFrame, sampling_rate: float):
     """Assign event_times to clusters, generating a large toelis object"""
     nevents, _ = events.shape
@@ -1450,6 +1511,13 @@ def group_spikes_script(argv=None):
         help="if set, do not save representative waveforms from each unit's main channel in an hdf5 file",
     )
     p.add_argument(
+        "--no-recorded-amplitude",
+        action="store_true",
+        help="if set, do not measure each unit's amplitude and noise on its channel "
+        "in the ARF file (recorded_amplitude), which reads the recording around up "
+        f"to {AMPLITUDE_SPIKES} of each unit's spikes",
+    )
+    p.add_argument(
         "--waveform-pre-peak",
         type=float,
         default=2.0,
@@ -1608,6 +1676,10 @@ def group_spikes_script(argv=None):
 
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
+        mapfile = args.sortdir / "channel_map.npy"
+        channel_map = (
+            np.load(mapfile).ravel() if mapfile.exists() else np.arange(nchannels)
+        )
         trials = arf_to_trials(
             afp,
             stim_finder,
@@ -1621,6 +1693,7 @@ def group_spikes_script(argv=None):
         )
         entry_attrs = tuple(entry_to_metadata(e) for _, e in iter_entries(afp))
         entries = [entry for _, entry in iter_entries(afp)]
+        entry_name = entries[0].name if len(entries) == 1 else None
         # the part of the recording that was sorted; only checked for
         # single-entry recordings (temp_wh.dat for several is not settled)
         window = None
@@ -1648,10 +1721,6 @@ def group_spikes_script(argv=None):
                 window.stop,
                 window.start / sampling_rate,
                 window.stop / sampling_rate,
-            )
-            mapfile = args.sortdir / "channel_map.npy"
-            channel_map = (
-                np.load(mapfile).ravel() if mapfile.exists() else np.arange(nchannels)
             )
             # the largest units to be written, on different channels
             units = []
@@ -1782,6 +1851,19 @@ def group_spikes_script(argv=None):
         from dlab import audio_sync
 
         audio_parameters = {"audio_sync_parameters": audio_sync.parameters()}
+    # the recording, for each unit's amplitude in it; only measured for
+    # recordings with one entry (spike times aren't split by entry)
+    amplitude_entry = None
+    if not args.no_recorded_amplitude:
+        if entry_name is None:
+            log.warning(
+                "  - WARNING: recorded amplitudes are only measured for recordings "
+                "with one entry"
+            )
+        else:
+            amplitude_file = h5.File(datafile, "r")
+            amplitude_entry = amplitude_file[entry_name]
+    noise = {}
     total_spikes = 0
     total_clusters = 0
     for clust_id, cluster in events.groupby("clust"):
@@ -1852,6 +1934,36 @@ def group_spikes_script(argv=None):
             "kilosort_group": clust_type,
             "spike_counts": spike_counts,
         }
+        if amplitude_entry is not None:
+            channel = int(channel_map[int(clust_info["ch"])])
+            name = f"CH{channel + 1}"
+            amplitude = None
+            if name in amplitude_entry:
+                amplitude = recorded_amplitude(
+                    amplitude_entry[name],
+                    spikes.time.to_numpy(),
+                    n_before,
+                    n_after,
+                    sampling_rate,
+                    noise,
+                )
+            if amplitude is None:
+                log.warning(
+                    "    - WARNING: no recorded amplitude (no dataset %s in the "
+                    "recording, no bit_volts, or no spikes with a full window)",
+                    name,
+                )
+            else:
+                log.info(
+                    "    - recorded amplitude on %s: %.1f %s peak to trough "
+                    "(noise %.1f %s)",
+                    name,
+                    amplitude["peak_to_trough"],
+                    amplitude["units"],
+                    amplitude["noise_sd"],
+                    amplitude["units"],
+                )
+                unit_fields["recorded_amplitude"] = amplitude
 
         # aggregate spikes by trial and left join to trial information table
         # - empty trials will be nan
@@ -1924,6 +2036,8 @@ def group_spikes_script(argv=None):
                     ),
                 )
 
+    if amplitude_entry is not None:
+        amplitude_file.close()
     log.info(
         "- a total of %d spikes were assigned to %d clusters",
         total_spikes,

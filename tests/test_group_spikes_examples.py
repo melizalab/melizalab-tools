@@ -116,8 +116,9 @@ SORT_FIELDS = {
     "waveform_post_peak",
     "spike_counts",
 }
-# pprox fields that are known to change
-CHANGED = {"entry_metadata", *TRIAL_OPTIONS, *SORT_FIELDS}
+# pprox fields that are known to change: the recorded amplitude is new since
+# 2026.10.14
+CHANGED = {"entry_metadata", "recorded_amplitude", *TRIAL_OPTIONS, *SORT_FIELDS}
 # waveform file attributes that are known to change: the same fields, with the
 # dicts flattened into one attribute per key
 WAVEFORM_CHANGED = {
@@ -140,6 +141,17 @@ WAVEFORM_CHANGED = {
             "kept",
         )
     ),
+    *(
+        f"recorded_amplitude_{k}"
+        for k in (
+            "channel",
+            "units",
+            "peak_to_trough",
+            "noise_sd",
+            "n_spikes",
+            "filter",
+        )
+    ),
 }
 # pprox fields written by group-kilo-spikes itself; the rest are neurobank metadata
 SCRIPT_FIELDS = {
@@ -148,7 +160,9 @@ SCRIPT_FIELDS = {
     "recording",
     "processed_by",
     "entry_metadata",
+    "recorded_amplitude",
     *TRIAL_OPTIONS,
+    *SORT_FIELDS,
 }
 
 # slow: runs group-kilo-spikes on full recordings (deselected by default; run

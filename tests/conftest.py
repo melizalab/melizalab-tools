@@ -225,12 +225,15 @@ def add_entry(
     message_dset=MESSAGES,
     aux_channels=None,
     channels=None,
+    channel_attrs=None,
     **attrs,
 ):
     """Add an entry with a sync channel (unless sync is None) and a message
     dataset (unless messages is None). aux_channels maps the names of further
     channels to lists of (onset, offset) pulses on them, and channels maps
-    names to their data (int16). Returns the entry."""
+    names to their data (int16), with the attributes in channel_attrs (e.g.
+    bit_volts and units, as arfx-oephys writes for headstage channels).
+    Returns the entry."""
     entry = arf.create_entry(fp, name, timestamp, **attrs)
     if sync is not None:
         arf.create_dataset(
@@ -251,6 +254,7 @@ def add_entry(
             sampling_rate=sampling_rate,
             offset=first_sample / sampling_rate,
             channel_name=name,
+            **(channel_attrs or {}),
         )
     for name, pulses in (aux_channels or {}).items():
         arf.create_dataset(

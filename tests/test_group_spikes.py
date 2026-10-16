@@ -680,3 +680,102 @@ def test_spikes_in_dropped_trial(make_recording, tmp_path):
     assert pp["spike_counts"]["kept"] == 3
     with h5py.File(out / "rec_c1_spikes.h5") as fp:
         assert 96000 not in fp["times"][:]
+
+
+BIT_VOLTS = 0.195
+
+
+def headstage_channel(times, seed=1):
+    """A headstage channel with cluster spikes at times (troughs at the spike
+    times) in noise, as int16, and its band-passed version in uV (filtered
+    whole, as the measurement is expected to match)"""
+    from scipy.signal import butter, sosfiltfilt
+
+    data = np.random.default_rng(seed).normal(0, 20, NSAMPLES)
+    for t in times:
+        data[t - SPIKE.argmin() : t - SPIKE.argmin() + SPIKE.size] += SPIKE
+    data = np.round(data).astype("int16")
+    sos = butter(3, (300, 6000), "bandpass", fs=SAMPLING_RATE, output="sos")
+    return data, sosfiltfilt(sos, data.astype("d")) * BIT_VOLTS
+
+
+def test_recorded_amplitude(make_recording):
+    """Each unit's amplitude in the recording, in uV: the peak-to-trough of
+    the average band-passed recording around its spikes on its channel
+    (ch 2 is CH3), and the channel's noise (robust SD), in the pprox and the
+    waveform file."""
+    times = CLUSTERS[1]["times"]
+    data, uv = headstage_channel(times)
+    run = make_recording(
+        channels={"CH3": data}, channel_attrs={"bit_volts": BIT_VOLTS, "units": "uV"}
+    )
+    out = run()
+    amplitude = load_pprox(out, 1)["recorded_amplitude"]
+    average = np.mean([uv[t - N_BEFORE : t + N_AFTER] for t in times], 0)
+    noise = np.median(np.abs(uv - np.median(uv))) / 0.6745
+    assert amplitude["channel"] == "CH3" and amplitude["units"] == "uV"
+    assert amplitude["n_spikes"] == 4
+    assert amplitude["filter"] == [300.0, 6000.0]
+    assert amplitude["peak_to_trough"] == pytest.approx(np.ptp(average), rel=0.01)
+    assert amplitude["noise_sd"] == pytest.approx(noise, rel=0.05)
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert fp.attrs["recorded_amplitude_channel"] == "CH3"
+        assert fp.attrs["recorded_amplitude_peak_to_trough"] == pytest.approx(
+            amplitude["peak_to_trough"]
+        )
+
+
+def test_recorded_amplitude_uses_channel_map(make_recording, tmp_path):
+    """The channel is the one channel_map.npy gives for the cluster's column
+    of temp_wh.dat."""
+    data, _ = headstage_channel(CLUSTERS[1]["times"])
+    run = make_recording(
+        channels={"CH4": data}, channel_attrs={"bit_volts": BIT_VOLTS, "units": "uV"}
+    )
+    np.save(tmp_path / "ks" / "channel_map.npy", np.array([0, 1, 3, 2]))
+    assert load_pprox(run(), 1)["recorded_amplitude"]["channel"] == "CH4"
+
+
+def test_no_recorded_amplitude_without_channel(make_recording, caplog):
+    """Without the unit's channel in the recording, or with
+    --no-recorded-amplitude, there's no recorded_amplitude; only the first
+    warns."""
+    run = make_recording()
+    with caplog.at_level("WARNING", logger="dlab"):
+        out = run()
+    assert "recorded_amplitude" not in load_pprox(out, 1)
+    assert "no dataset CH3 in the recording" in caplog.text
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="dlab"):
+        out = run("--no-recorded-amplitude")
+    assert "recorded_amplitude" not in load_pprox(out, 1)
+    assert "recorded amplitude" not in caplog.text
+
+
+def test_regenerate_keeps_recorded_amplitude(make_recording, tmp_path):
+    """regenerate-pprox takes the unit's recorded_amplitude from its waveform
+    file."""
+    from dlab import kilo_regenerate
+
+    data, _ = headstage_channel(CLUSTERS[1]["times"])
+    run = make_recording(
+        channels={"CH3": data}, channel_attrs={"bit_volts": BIT_VOLTS, "units": "uV"}
+    )
+    out = run()
+    new = tmp_path / "new"
+    kilo_regenerate.script(
+        [
+            "-r",
+            REGISTRY,
+            "--units",
+            str(out / "rec_c1_spikes.h5"),
+            "-o",
+            str(new),
+            "--from-arf",
+            "--local-stim-dir",
+            str(tmp_path / "stims"),
+            str(tmp_path / "rec.arf"),
+        ]
+    )
+    expected = load_pprox(out, 1)["recorded_amplitude"]
+    assert load_pprox(new, 1)["recorded_amplitude"] == expected

@@ -49,7 +49,13 @@ log = logging.getLogger("dlab")
 
 PROG = "regenerate-pprox"
 # top-level fields that describe the unit, not the recording or its trials
-UNIT_FIELDS = ("processed_by", "derived_from", "trials_from", "spike_counts")
+UNIT_FIELDS = (
+    "processed_by",
+    "derived_from",
+    "trials_from",
+    "spike_counts",
+    "recorded_amplitude",
+)
 # fields group-kilo-spikes writes to the waveform files as well as the pprox,
 # which a regenerated pprox takes from the unit's waveform file (dicts are
 # written one attribute per item; see kilo.fields_to_attrs)
@@ -59,7 +65,7 @@ RECORDED_FIELDS = (
     "waveform_pre_peak",
     "waveform_post_peak",
 )
-RECORDED_DICTS = ("sort", "spike_counts")
+RECORDED_DICTS = ("sort", "spike_counts", "recorded_amplitude")
 
 
 @dataclass
