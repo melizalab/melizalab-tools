@@ -74,6 +74,34 @@ def message_rows(dset):
     return [(int(r["start"]), r["message"].decode()) for r in dset[:]]
 
 
+def median_by_name(names, values) -> dict[str, float]:
+    by_name = {}
+    for name, value in zip(names, values, strict=True):
+        by_name.setdefault(name, []).append(value)
+    return {name: float(np.median(v)) for name, v in by_name.items()}
+
+
+def message_durations(rows) -> dict[str, float]:
+    """Stimulus durations (s) from the start and stop messages: the median for
+    each stimulus, since the messages come with the audio buffers"""
+    starts, names, lengths = {}, [], []
+    for t, m in rows:
+        if m.startswith("start "):
+            starts[m[6:]] = t
+        elif m.startswith("stop ") and m[5:] in starts:
+            names.append(Path(m[5:]).stem)
+            lengths.append((t - starts.pop(m[5:])) / RATE)
+    return median_by_name(names, lengths)
+
+
+def pulse_widths(x, edges, above=1000):
+    """The width (samples) of each pulse rising at `edges`, at the level of
+    rising_edges"""
+    level = np.percentile(x, 5) + above
+    down = np.flatnonzero((x[:-1] > level) & (x[1:] <= level)) + 1
+    return down[np.searchsorted(down, edges)] - edges
+
+
 def start_messages(dset, first_sample):
     """Sample positions (relative to the first recorded sample) of 'start' messages"""
     rows = dset[:]
@@ -242,7 +270,9 @@ class TestSustainedPulses:
             entry = only_entry(fp)
             rows = message_rows(entry["MessageCenter"])
             names = [m[6:] for _, m in rows if m.startswith("start ")]
-            finder = StubFinder(dict.fromkeys(names, 1.0))
+            # the stimulus lengths must fit the pulses
+            widths = pulse_widths(rec.sync, rec.edges) / RATE
+            finder = StubFinder(median_by_name(names, widths))
             result = kilo.arf_to_trials(fp, finder, "ADC3", oeaudio_log=None)
         assert [t.stimulus_name for t in result] == names
         lag = np.array([t.stimulus_start for t in result]) - rec.edges
@@ -354,12 +384,10 @@ class TestLongRecording:
         order. This 160-million-sample track also checks that sync detection
         doesn't need several float64 copies of it."""
         with h5py.File(self.PATH, "r") as fp:
-            names = [
-                Path(m[6:]).stem
-                for _, m in message_rows(only_entry(fp)["MessageCenter"])
-                if m.startswith("start ")
-            ]
-            finder = StubFinder(dict.fromkeys(names, 1.0))
+            rows = message_rows(only_entry(fp)["MessageCenter"])
+            names = [Path(m[6:]).stem for _, m in rows if m.startswith("start ")]
+            # the stimulus lengths must fit the gaps between the clicks
+            finder = StubFinder(message_durations(rows))
             result = kilo.arf_to_trials(fp, finder, "ADC5", oeaudio_log=None)
         assert len(result) == 1920
         assert [t.stimulus_name for t in result] == names

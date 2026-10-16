@@ -8,4 +8,4 @@ attic/
 .venv/
 .venv-linux/
 dist/
-examples/
+examples

@@ -105,8 +105,42 @@ EXAMPLES = sorted(
 MAX_ONSET_SHIFT = 0.010
 # the options that determine the trials, recorded since 2026.10.14
 TRIAL_OPTIONS = {"sync_track", "prepad", "sync_thresh", "oeaudio_log"}
+# the sort and the unit options, also recorded since 2026.10.14
+SORT_FIELDS = {
+    "sort",
+    "sorted_by",
+    "kilosort_cluster",
+    "kilosort_group",
+    "artifact_reject_thresh",
+    "waveform_pre_peak",
+    "waveform_post_peak",
+    "spike_counts",
+}
 # pprox fields that are known to change
-CHANGED = {"entry_metadata", *TRIAL_OPTIONS}
+CHANGED = {"entry_metadata", *TRIAL_OPTIONS, *SORT_FIELDS}
+# waveform file attributes that are known to change: the same fields, with the
+# dicts flattened into one attribute per key
+WAVEFORM_CHANGED = {
+    "schema_ver",
+    *TRIAL_OPTIONS,
+    *(SORT_FIELDS - {"sort", "spike_counts"}),
+    *(
+        f"sort_{k}"
+        for k in ("directory", "samples", "channels", "dtype", "sampling_rate")
+    ),
+    *(
+        f"spike_counts_{k}"
+        for k in (
+            "sorted",
+            "duplicate",
+            "before_first_trial",
+            "after_trial_end",
+            "near_ends",
+            "artifact",
+            "kept",
+        )
+    ),
+}
 # pprox fields written by group-kilo-spikes itself; the rest are neurobank metadata
 SCRIPT_FIELDS = {
     "$schema",
@@ -230,7 +264,7 @@ def test_waveforms_match_reference(run_example):
         diffs = compare_waveforms(
             out / ref_path.name,
             ref_path,
-            ignore={"processed_by", *TRIAL_OPTIONS},
+            ignore={"processed_by", *WAVEFORM_CHANGED},
             ref_from=first_trial,
         )
         assert diffs == [], ref_path.name
