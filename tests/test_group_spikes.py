@@ -61,12 +61,13 @@ def fake_neurobank(monkeypatch):
     return calls
 
 
-@pytest.fixture
-def make_recording(tmp_path, fake_neurobank):
+@pytest.fixture(params=["int64", "uint64"])
+def make_recording(request, tmp_path, fake_neurobank):
     """Returns a function that writes a recording with the given clusters and
-    returns a function to run the script on it."""
+    returns a function to run the script on it. Every test runs with the spike
+    times saved as int64 (kilosort 4) and as uint64 (kilosort 2.5)."""
 
-    def make(clusters=CLUSTERS, **entry):
+    def make(clusters=CLUSTERS, times_dtype=request.param, **entry):
         rec = tmp_path / "rec.arf"
         with arf.open_file(rec, "w") as fp:
             spec = dict(
@@ -76,7 +77,9 @@ def make_recording(tmp_path, fake_neurobank):
             )
             spec.update(entry)
             add_entry(fp, "entry_0", 1000.0, **spec)
-        ks = make_kilosort_dir(tmp_path / "ks", clusters, nsamples=NSAMPLES)
+        ks = make_kilosort_dir(
+            tmp_path / "ks", clusters, nsamples=NSAMPLES, times_dtype=times_dtype
+        )
         stims = tmp_path / "stims"
         stims.mkdir(exist_ok=True)
         for name, on, off in STIMULI:
@@ -189,6 +192,20 @@ def test_waveforms(make_recording):
     mean = spikes.load_mean_waveform(out / "rec_c1_spikes.h5")
     assert mean.n_spikes == 4 and mean.aligned_to == "trough"
     assert mean.mean.argmin() == mean.peak_index
+
+
+def test_uint64_spike_times(make_recording):
+    """Spike times saved as uint64 (kilosort 2.5) give the same outputs as
+    int64 (kilosort 4)."""
+    out = make_recording(times_dtype="int64")()
+    expected = load_pprox(out, 1)["pprox"]
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        waveforms = fp["waveforms"][:]
+    make_recording(times_dtype="uint64")()
+    assert load_pprox(out, 1)["pprox"] == expected
+    with h5py.File(out / "rec_c1_spikes.h5") as fp:
+        assert fp["times"][:].tolist() == CLUSTERS[1]["times"]
+        assert np.array_equal(fp["waveforms"][:], waveforms)
 
 
 def test_mua_option(make_recording):

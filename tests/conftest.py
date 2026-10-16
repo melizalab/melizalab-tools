@@ -279,7 +279,14 @@ SPIKE = -1000 * np.exp(-0.5 * ((np.arange(60) - 20) / 4) ** 2)  # 2 ms, peak at 
 
 
 def make_kilosort_dir(
-    path, clusters, *, nsamples, nchannels=4, sampling_rate=SAMPLING_RATE, seed=0
+    path,
+    clusters,
+    *,
+    nsamples,
+    nchannels=4,
+    sampling_rate=SAMPLING_RATE,
+    seed=0,
+    times_dtype="int64",
 ):
     """Write the kilosort/phy output group-kilo-spikes reads, and return path.
 
@@ -287,7 +294,8 @@ def make_kilosort_dir(
     ch=channel, amplitude=scale of the spike shape, default 1)}. Each spike is
     added to the whitened data (temp_wh.dat) on its cluster's channel, with
     its trough SPIKE.argmin() samples after the spike time. Columns of
-    cluster_info.tsv that the script reads are filled in.
+    cluster_info.tsv that the script reads are filled in. times_dtype is the
+    dtype of spike_times.npy: int64 from kilosort 4, uint64 from kilosort 2.5.
     """
     import pandas as pd
 
@@ -315,7 +323,10 @@ def make_kilosort_dir(
             )
         )
     order = np.argsort(np.concatenate(times), kind="stable")
-    np.save(path / "spike_times.npy", np.concatenate(times)[order][:, None])
+    np.save(
+        path / "spike_times.npy",
+        np.concatenate(times)[order][:, None].astype(times_dtype),
+    )
     np.save(path / "spike_clusters.npy", np.concatenate(ids)[order])
     pd.DataFrame(rows).set_index("cluster_id").to_csv(
         path / "cluster_info.tsv", sep="\t"

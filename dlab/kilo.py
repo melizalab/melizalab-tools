@@ -1545,8 +1545,13 @@ def group_spikes_script(argv=None):
     infofile = args.sortdir / "cluster_info.tsv"
     log.info("  - spike times: %s", timefile)
     log.info("  - spike clusters: %s", clustfile)
+    # kilosort 2.5 saves uint64, which numpy promotes to float when combined
+    # with signed integers, and which wraps instead of going negative
     events = pd.DataFrame(
-        {"time": np.load(timefile).squeeze(), "clust": np.load(clustfile)},
+        {
+            "time": np.load(timefile).squeeze().astype("int64"),
+            "clust": np.load(clustfile),
+        },
     )
     log.info("  - cluster info: %s", infofile)
     info = pd.read_csv(infofile, sep="\t", index_col=0)
