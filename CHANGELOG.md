@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.10.20
+
+### group-kilo-spikes
+
+Fixes:
+
+- Kilosort 2.5 sorts that haven't been saved in phy stopped with "Per-column
+  arrays must each be 1-dimensional". They now stop with a message to open
+  the sort in phy and save it: phy writes cluster_info.tsv, which the script
+  needs, only when the sort is saved. No output was written by the failing
+  runs.
+- spike_clusters.npy saved as a column vector, as kilosort 2.5 writes it, is
+  read. Phy rewrites it as 1-D when the sort is saved, so this matters only
+  for sorts whose cluster_info.tsv came from elsewhere.
+
+Outputs are unchanged.
+
 ## 2026.10.17
 
 ### group-kilo-spikes

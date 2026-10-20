@@ -33,7 +33,7 @@ from dlab.spikes import SpikeWaveforms, save_waveforms
 
 log = logging.getLogger(__name__)
 # version of group-kilo-spikes, recorded in its output files
-SCRIPT_VERSION = "2026.10.17"
+SCRIPT_VERSION = "2026.10.20"
 
 
 class Trial(NamedTuple):
@@ -1649,14 +1649,21 @@ def group_spikes_script(argv=None):
     timefile = args.sortdir / "spike_times.npy"
     clustfile = args.sortdir / "spike_clusters.npy"
     infofile = args.sortdir / "cluster_info.tsv"
+    # phy writes cluster_info.tsv when the curated sort is saved
+    if not infofile.exists():
+        raise RuntimeError(
+            f"no {infofile.name} in {args.sortdir}: open the sort in phy and save it"
+        )
     log.info("  - spike times: %s", timefile)
     log.info("  - spike clusters: %s", clustfile)
-    # kilosort 2.5 saves uint64, which numpy promotes to float when combined
-    # with signed integers, and which wraps instead of going negative
+    # kilosort 2.5 saves column vectors (phy rewrites spike_clusters as 1-D
+    # when the sort is saved, but not spike_times) and the times as uint64,
+    # which numpy promotes to float when combined with signed integers, and
+    # which wraps instead of going negative
     events = pd.DataFrame(
         {
             "time": np.load(timefile).squeeze().astype("int64"),
-            "clust": np.load(clustfile),
+            "clust": np.load(clustfile).squeeze(),
         },
     )
     log.info("  - cluster info: %s", infofile)

@@ -208,6 +208,27 @@ def test_uint64_spike_times(make_recording):
         assert np.array_equal(fp["waveforms"][:], waveforms)
 
 
+def test_column_spike_clusters(make_recording, tmp_path):
+    """spike_clusters saved as a uint32 column vector (kilosort 2.5, before
+    the sort is saved in phy) gives the same outputs as a 1-D array."""
+    run = make_recording()
+    out = run()
+    expected = load_pprox(out, 1)["pprox"]
+    path = tmp_path / "ks" / "spike_clusters.npy"
+    np.save(path, np.load(path)[:, None].astype("uint32"))
+    run()
+    assert load_pprox(out, 1)["pprox"] == expected
+
+
+def test_missing_cluster_info(make_recording, tmp_path):
+    """Without cluster_info.tsv (the sort was never saved in phy), the script
+    says so before reading the sort."""
+    run = make_recording()
+    (tmp_path / "ks" / "cluster_info.tsv").unlink()
+    with pytest.raises(RuntimeError, match=r"no cluster_info\.tsv.*save it"):
+        run()
+
+
 def test_mua_option(make_recording):
     """--mua also writes 'mua' clusters, but never 'noise'."""
     out = make_recording()("--mua")
