@@ -144,8 +144,8 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
     the channel units.
 - [ ] Migration of intracellular-abfdir resources: 788 of 1,976 have an
   integer `name` because `nbank -k` read e.g. `20140603_1_1` as 2014060311
-  (underscores are digit separators in Python; neurobank issue drafted in
-  neurobank-issue-keyval-numbers.md). Recover the names with heuristics
+  (underscores are digit separators in Python; fixed in neurobank master,
+  which reads -k values as JSON). Recover the names with heuristics
   (recording date, the ABF file names, `_N_M` patterns); 9- and 11-digit
   names are ambiguous. Also: 19 resources have only `name` in their metadata,
   and two have no ABF files (6edc858d: one .tif; f5bbaa66: empty).
@@ -156,9 +156,6 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   `biocytin` (387 records have `filled: "biocytin"`; `biocytin` is a boolean).
   The reader returns all of an archive's `metadata`, so whatever the
   migration copies from the registry is registered again on deposit.
-- [ ] `dlab.util.ParseKeyVal` (group-kilo-spikes `-k`) has the same bug:
-  `-k name=20140603_1_1` gives 2014060311, and `0x1f`, `1j` are numbers
-  (pinned in test_util).
 
 ## Recording practice
 

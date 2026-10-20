@@ -490,7 +490,7 @@ wheels = [
 [[package]]
 name = "neurobank"
 version = "0.12.1"
-source = { git = "https://github.com/melizalab/neurobank#0436e102ecdca4e34086144093eb228b2c289b42" }
+source = { git = "https://github.com/melizalab/neurobank#34da5da7a2737ede3d35cf62067a2aa58da9a88a" }
 dependencies = [
     { name = "httpx" },
 ]

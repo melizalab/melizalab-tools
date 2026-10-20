@@ -302,6 +302,14 @@ def test_script(single):
         assert json.loads(zf.read("metadata.json")) == doc
 
 
+def test_script_catalog_name_with_underscores(single):
+    """A recording name like 20140603_1_1 stays a string (nbank's -k parser
+    used to read it as the number 2014060311)"""
+    abfzip.script(["catalog", "-k", "name=20140603_1_1", str(single)])
+    doc = json.loads((single.parent / "rec.json").read_text())
+    assert doc["metadata"]["name"] == "20140603_1_1"
+
+
 def test_script_catalog_exists(recording):
     (recording.parent / "rec.json").write_text("{}")
     with pytest.raises(FileExistsError):

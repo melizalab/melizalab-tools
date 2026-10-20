@@ -1,4 +1,6 @@
 # -*- mode: python -*-
+import pytest
+
 from dlab import util
 
 
@@ -22,19 +24,40 @@ def make_parser(**kwargs):
 
 
 def test_parse_key_val_literals():
-    """Values are parsed as Python literals where possible, else kept as str."""
+    """Values are parsed as JSON where possible, else kept as str."""
     args = make_parser().parse_args(["-k", "n=3", "-k", "s=abc", "-k", "l=[1, 2]"])
     assert args.meta == {"n": 3, "s": "abc", "l": [1, 2]}
 
 
-def test_parse_key_val_underscores():
-    """PINNED: values Python reads as numbers are converted even if they
-    aren't plain decimals, so a recording name like 20140603_1_1 loses its
-    underscores. They should stay strings."""
-    args = make_parser().parse_args(
-        ["-k", "name=20140603_1_1", "-k", "h=0x1f", "-k", "c=1j"]
-    )
-    assert args.meta == {"name": 2014060311, "h": 31, "c": 1j}
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1.5", 1.5),
+        ('"quoted"', "quoted"),
+        ("true", True),
+        ("True", True),
+        ("None", None),
+        ('{"a": 1}', {"a": 1}),
+        ("007", "007"),
+        ("NaN", "NaN"),
+        # Python reads these as numbers; they used to be converted
+        ("20140603_1_1", "20140603_1_1"),
+        ("0x1f", "0x1f"),
+        ("1j", "1j"),
+    ],
+)
+def test_parse_key_val_json(value, expected):
+    """As nbank parses -k: JSON, True/False/None, or a string"""
+    assert make_parser().parse_args(["-k", f"x={value}"]).meta == {"x": expected}
+
+
+def test_parse_key_val_bad_json(capsys):
+    """A value that looks like a JSON list or object but isn't one is a usage
+    error, not a string"""
+    for value in ("[1, 2", "{'a': 1}"):
+        with pytest.raises(SystemExit):
+            make_parser().parse_args(["-k", f"x={value}"])
+        assert "not a valid JSON list or object" in capsys.readouterr().err
 
 
 def test_parse_key_val_without_arguments():
