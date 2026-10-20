@@ -312,7 +312,9 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
     table = list(kilo.trials_to_pprox(pd.DataFrame(trials).assign(events=np.nan), rate))
     recording = Path(args.recording).stem
     try:
-        metadata = nbank.describe(args.registry_url, recording)["metadata"]
+        metadata = kilo.resource_to_metadata(
+            nbank.describe(args.registry_url, recording)
+        )
         url = nbank.registry.full_url(args.registry_url, recording)
     except (TypeError, KeyError, httpx.HTTPError) as err:
         # describe() returns None for an unregistered recording

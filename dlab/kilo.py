@@ -266,6 +266,17 @@ def find_message_dset(entry):
             return entry[name]
 
 
+def resource_to_metadata(resource: dict) -> dict:
+    """The metadata of a recording's registry record to copy into its outputs:
+    the record's metadata, with experimenter and animal from the record's own
+    fields (which the registry no longer copies into the metadata)."""
+    out = dict(resource["metadata"])
+    for key in ("experimenter", "animal"):
+        if resource.get(key) is not None:
+            out[key] = resource[key]
+    return out
+
+
 def entry_to_metadata(entry):
     """Extracts metadata from an entry in an ARF file recorded with a stimulus
     presentation script (oeaudio-present or jpresent).
@@ -1998,7 +2009,7 @@ def group_spikes_script(argv=None):
             **alt_stim_names,
             **aux_tracks,
             **audio_parameters,
-            **resource_info["metadata"],
+            **resource_to_metadata(resource_info),
         )
         if not args.dry_run:
             with open(outfile, "w") as ofp:

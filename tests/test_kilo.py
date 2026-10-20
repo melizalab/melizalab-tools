@@ -532,3 +532,23 @@ def test_fields_to_attrs():
         "b_x": 2,
         "b_y": "z",
     }
+
+
+def test_resource_to_metadata():
+    """The record's experimenter and animal fields are added to its metadata,
+    replacing the copies there; fields the record doesn't have are left out."""
+    record = {
+        "name": "E36_5_1",
+        "metadata": {"pen": 5, "bird": "x", "experimenter": "bple"},
+        "experimenter": "bao.le",
+        "animal": "7c7c975c-0340-42ea-935f-6e9f12d132a4",
+    }
+    assert kilo.resource_to_metadata(record) == {
+        "pen": 5,
+        "bird": "x",
+        "experimenter": "bao.le",
+        "animal": "7c7c975c-0340-42ea-935f-6e9f12d132a4",
+    }
+    assert kilo.resource_to_metadata({"metadata": {"pen": 5}, "animal": None}) == {
+        "pen": 5
+    }

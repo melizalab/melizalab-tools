@@ -399,6 +399,20 @@ wheels = [
 ]
 
 [[package]]
+name = "melizalab-specs"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/ae/111a66d196ef5dcee5d81485c4e68f90db4fb9b1be961480306dc64bf48b/melizalab_specs-0.1.0.tar.gz", hash = "sha256:a8f70454b0380aac24a519640f397f5256d25e1f201b700a7fcd19800ba25edb", size = 17772, upload-time = "2026-10-20T13:36:38.409Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/0b/f7992b6dfc1e71d0b64478f445291b2f532cf003d95dc865171ce0a439e6/melizalab_specs-0.1.0-py3-none-any.whl", hash = "sha256:0b3fb7d8e14b96d8c0e88232315859d0f72d17540b4b269c00b6720960b8eb6b", size = 23548, upload-time = "2026-10-20T13:36:37.194Z" },
+]
+
+[package.optional-dependencies]
+validate = [
+    { name = "jsonschema" },
+]
+
+[[package]]
 name = "melizalab-tools"
 version = "2026.10.17"
 source = { editable = "." }
@@ -408,6 +422,7 @@ dependencies = [
     { name = "ewave" },
     { name = "jsonschema" },
     { name = "libtfr" },
+    { name = "melizalab-specs", extra = ["validate"] },
     { name = "neurobank" },
     { name = "pandas" },
     { name = "pyyaml" },
@@ -437,6 +452,7 @@ requires-dist = [
     { name = "ewave", specifier = ">=1.0.10" },
     { name = "jsonschema", specifier = ">=4.18" },
     { name = "libtfr", specifier = ">=2.1.9" },
+    { name = "melizalab-specs", extras = ["validate"], specifier = ">=0.1" },
     { name = "neurobank", specifier = ">=0.12,<0.13" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },

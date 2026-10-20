@@ -324,7 +324,7 @@ def _json_path(path) -> str:
 
 def check_schema(unit: Unit, max_errors: int = 3) -> list[dict]:
     """Validates a unit's pprox against the schema named in its $schema, using
-    the bundled copies of the published pprox and stimtrial schemas."""
+    the published pprox and stimtrial schemas in melizalab-specs."""
     schema = unit.pprox.get("$schema")
     if schema is None:
         return [

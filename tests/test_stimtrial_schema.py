@@ -1,6 +1,6 @@
 # -*- mode: python -*-
 """The pprox files group-kilo-spikes writes conform to the published stimtrial
-schema (bundled in dlab/schemas)."""
+schema (from melizalab-specs)."""
 
 import copy
 import json
@@ -8,19 +8,10 @@ from pathlib import Path
 
 import pytest
 from jsonschema import ValidationError
-from jsonschema.validators import validator_for
 
-from dlab.pprox import SCHEMAS, validate
+from dlab.pprox import validate
 
 DATA = Path(__file__).parent / "data"
-
-
-@pytest.mark.parametrize("path", sorted(SCHEMAS.glob("*.json")), ids=lambda p: p.name)
-def test_schemas_are_valid(path):
-    schema = json.loads(path.read_text())
-    cls = validator_for(schema, default=None)
-    assert cls is not None, f"unrecognized $schema {schema['$schema']}"
-    cls.check_schema(schema)
 
 
 @pytest.mark.parametrize(

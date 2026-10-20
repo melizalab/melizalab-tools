@@ -12,12 +12,10 @@ Copyright (C) Dan Meliza, 2006-2020 (dan@meliza.org)
 
 """
 
-import functools
 import itertools
 import json
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from pathlib import Path
 from typing import Any, TypedDict
 
 import numpy as np
@@ -82,32 +80,18 @@ def groupby(pprox: Collection, keyfun: Callable[[Trial], Any]) -> Iterator:
     return itertools.groupby(evsorted, key=keyfun)
 
 
-# copies of the published schemas (see schemas/README.md), by $id
-SCHEMAS = Path(__file__).parent / "schemas"
-
-
-@functools.cache
-def _schema_registry():
-    from referencing import Registry, Resource
-
-    resources = []
-    for path in SCHEMAS.glob("*.json"):
-        contents = json.loads(path.read_text())
-        resources.append((contents["$id"], Resource.from_contents(contents)))
-    return Registry().with_resources(resources)
-
-
 def _validator(obj: Collection):
+    import melizalab_specs
     from jsonschema import Draft202012Validator
 
     schema = obj.get("$schema", _base_schema)
-    known = {uri.rstrip("#") for uri in _schema_registry()}
+    known = {uri.rstrip("#") for uri in (_base_schema, _stimtrial_schema)}
     if schema.rstrip("#") not in known:
         raise ValueError(
             f"unknown schema {schema!r} (known: {', '.join(sorted(known))})"
         )
     # each schema is interpreted in its own dialect
-    return Draft202012Validator({"$ref": schema}, registry=_schema_registry())
+    return Draft202012Validator({"$ref": schema}, registry=melizalab_specs.registry())
 
 
 def _as_json(obj: Collection):
@@ -121,15 +105,14 @@ def _as_json(obj: Collection):
 def validation_errors(obj: Collection) -> list:
     """The ways obj fails to conform to the schema named in its $schema (or
     pprox, if it has none), as jsonschema.ValidationError objects, in document
-    order. Raises ValueError if the schema isn't one of the bundled schemas
-    (pprox and stimtrial)."""
+    order. Raises ValueError if the schema isn't pprox or stimtrial."""
     errors = _validator(obj).iter_errors(_as_json(obj))
     return sorted(errors, key=lambda e: [str(p) for p in e.absolute_path])
 
 
 def validate(obj: Collection) -> None:
     """Validates obj against the schema named in its $schema (or pprox, if it
-    has none), using the bundled copies of the published schemas. Raises
+    has none), using the published schemas in melizalab-specs. Raises
     jsonschema.ValidationError if obj doesn't conform, and ValueError if the
     schema is unknown."""
     _validator(obj).validate(_as_json(obj))

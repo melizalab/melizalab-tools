@@ -410,10 +410,10 @@ metadata, and note it on the units.
 one that isn't pprox or stimtrial
 
 **Problem:** The pprox doesn't conform to the schema named in its `$schema`
-(validated against copies of the published
+(validated against the published
 [pprox](https://meliza.org/spec:2/pprox.json) and
-[stimtrial](https://meliza.org/spec:2/stimtrial.json) schemas bundled with
-melizalab-tools). The message gives the number of violations and the first
+[stimtrial](https://meliza.org/spec:2/stimtrial.json) schemas, from
+melizalab-specs). The message gives the number of violations and the first
 few, with their place in the file (e.g. `pprox[1].events[0]: 'x' is not of
 type 'number'`). Tools that rely on the schema may fail on the file. As info:
 the pprox isn't validated, because it names no schema or an unknown one.
