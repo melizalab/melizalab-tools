@@ -277,6 +277,33 @@ def resource_to_metadata(resource: dict) -> dict:
     return out
 
 
+def arf_to_presenter(afp: h5.File, oeaudio_log: Path | None = None) -> str | None:
+    """The stimulus presentation script of a recording, from the messages it
+    sent: 'jpresent' if jrelay connected, or 'oeaudio-present' if a metadata
+    message was sent or the stimuli come from an open-ephys-audio log. None if
+    the messages don't say, or the entries disagree."""
+    if oeaudio_log is not None:
+        return "oeaudio-present"
+    found = set()
+    for _, entry in iter_entries(afp):
+        dset = find_message_dset(entry)
+        if dset is None:
+            continue
+        for row in dset:
+            message = row["message"].decode("utf-8", "replace")
+            if message.startswith("jrelay"):
+                found.add("jpresent")
+            elif message.startswith("metadata:"):
+                found.add("oeaudio-present")
+    if len(found) == 1:
+        return found.pop()
+    if found:
+        log.warning(
+            "  - the entries have messages from %s", " and ".join(sorted(found))
+        )
+    return None
+
+
 def entry_to_metadata(entry):
     """Extracts metadata from an entry in an ARF file recorded with a stimulus
     presentation script (oeaudio-present or jpresent).
@@ -1703,6 +1730,7 @@ def group_spikes_script(argv=None):
             stimulus_names=stimulus_names,
         )
         entry_attrs = tuple(entry_to_metadata(e) for _, e in iter_entries(afp))
+        presenter = arf_to_presenter(afp, args.oeaudio_log)
         entries = [entry for _, entry in iter_entries(afp)]
         entry_name = entries[0].name if len(entries) == 1 else None
         # the part of the recording that was sorted; only checked for
@@ -1830,6 +1858,8 @@ def group_spikes_script(argv=None):
         trial_options["oeaudio_log"] = args.oeaudio_log.name
     if args.local_stim_dir is not None:
         trial_options["local_stim_dir"] = args.local_stim_dir.name
+    if presenter is not None:
+        trial_options["presenter"] = presenter
     # the sort, and the options that decide which spikes are kept
     sort_fields = {
         "sort": {
@@ -2043,6 +2073,7 @@ def group_spikes_script(argv=None):
                             **trial_options,
                             **sorted_window,
                             **alt_stim_names,
+                            **resource_to_metadata(resource_info),
                         }
                     ),
                 )

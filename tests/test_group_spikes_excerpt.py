@@ -21,12 +21,14 @@ import numpy as np
 import pytest
 from compare_outputs import compare_pprox, load
 
-from dlab import kilo
+from dlab import kilo, readers
 
 DATA = Path(__file__).parent / "data"
 SORTING = DATA / "E36_excerpt_sorting"
 GOLDEN = DATA / "E36_excerpt_golden"
 N_BEFORE, N_AFTER = 60, 150  # the script's default waveform window (2 and 5 ms)
+# fields that differ from the golden files: the version, and presenter (new)
+GOLDEN_IGNORED = frozenset({"processed_by", "presenter"})
 
 
 def run_excerpt(tmp: Path, sync: str = "ADC3", extra=()) -> Path:
@@ -89,9 +91,31 @@ def test_pprox_match_golden(outputs):
     golden = sorted(GOLDEN.glob("*.pprox"))
     assert len(golden) == 3
     for path in golden:
-        diffs, shifts = compare_pprox(load(out / path.name), load(path))
+        diffs, shifts = compare_pprox(
+            load(out / path.name), load(path), ignore=GOLDEN_IGNORED
+        )
         assert diffs == [], path.name
         assert np.allclose(shifts, 0), path.name
+
+
+def test_outputs_metadata(outputs):
+    """The metadata readers accept the outputs, and both files of a unit
+    register the same values: the recording's animal, experimenter and
+    protocol, and how the unit was made (jpresent, from the jrelay message)."""
+    out, _ = outputs
+    nb = json.loads((DATA / "E36_excerpt_neurobank.json").read_text())
+    for cid in (52, 675, 676):
+        from_pprox = readers.read_pprox_metadata(out / f"E36_5_1_c{cid}.pprox")
+        from_hdf5 = readers.read_spikes_hdf5_metadata(out / f"E36_5_1_c{cid}_spikes.h5")
+        assert from_pprox == from_hdf5
+        assert from_pprox == {
+            "animal": nb["record"]["metadata"]["bird"],
+            "experimenter": "bple",
+            "protocol": "arc6opto1",
+            "recording": f"{nb['registry']}resources/E36_5_1/",
+            "processed_by": f"group-kilo-spikes {kilo.SCRIPT_VERSION}",
+            "presenter": "jpresent",
+        }
 
 
 def test_waveforms_are_windows_of_whitened_data(outputs):
@@ -132,7 +156,7 @@ def test_click_track_gives_same_output(tmp_path, outputs):
         diffs, shifts = compare_pprox(
             load(out / path.name),
             load(path),
-            ignore={"processed_by", "sync_track"},
+            ignore=GOLDEN_IGNORED | {"sync_track"},
             boundary_tol=1 / 30000,
         )
         assert diffs == [], path.name
@@ -156,6 +180,6 @@ def test_led_pulses_as_aux(tmp_path, outputs):
             1 - 1 / 30000
         )
         diffs, shifts = compare_pprox(
-            pp, load(path), ignore={"processed_by", "aux_tracks"}
+            pp, load(path), ignore=GOLDEN_IGNORED | {"aux_tracks"}
         )
         assert diffs == [] and np.allclose(shifts, 0), path.name

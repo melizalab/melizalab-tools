@@ -298,6 +298,7 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         entry_attrs = tuple(
             kilo.entry_to_metadata(e) for _, e in kilo.iter_entries(afp)
         )
+        presenter = kilo.arf_to_presenter(afp, args.oeaudio_log)
     if sorted_window:
         trials, before, after = kilo.trials_in_window(
             trials, sorted_window["start"], sorted_window["stop"]
@@ -330,6 +331,8 @@ def arf_trials(args, waveforms: list[Waveforms]) -> TrialSource:
         trial_options["oeaudio_log"] = args.oeaudio_log.name
     if args.local_stim_dir is not None:
         trial_options["local_stim_dir"] = args.local_stim_dir.name
+    if presenter is not None:
+        trial_options["presenter"] = presenter
     doc = pprox.from_trials(
         table,
         schema=pprox._stimtrial_schema,

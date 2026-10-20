@@ -53,6 +53,7 @@ regenerate-pprox = "dlab.kilo_regenerate:script"
 
 [project.entry-points."nbank.metadata_readers"]
 spikes-pprox = "dlab.readers:read_pprox_metadata"
+spikes-hdf5 = "dlab.readers:read_spikes_hdf5_metadata"
 
 [project.optional-dependencies]
 audio = ["samplerate>=0.2.3"]
