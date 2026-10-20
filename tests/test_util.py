@@ -27,6 +27,16 @@ def test_parse_key_val_literals():
     assert args.meta == {"n": 3, "s": "abc", "l": [1, 2]}
 
 
+def test_parse_key_val_underscores():
+    """PINNED: values Python reads as numbers are converted even if they
+    aren't plain decimals, so a recording name like 20140603_1_1 loses its
+    underscores. They should stay strings."""
+    args = make_parser().parse_args(
+        ["-k", "name=20140603_1_1", "-k", "h=0x1f", "-k", "c=1j"]
+    )
+    assert args.meta == {"name": 2014060311, "h": 31, "c": 1j}
+
+
 def test_parse_key_val_without_arguments():
     """With no default and no -k, the attribute is None."""
     assert make_parser().parse_args([]).meta is None

@@ -12,13 +12,15 @@ file, and don't use the network.
 
 import json
 import math
+import re
+import zipfile
 from pathlib import Path
 from typing import Any
 
 import h5py as h5
 import numpy as np
 
-from dlab import pprox
+from dlab import abfzip, pprox
 
 # names used by older producers, and the agreed names
 LEGACY_NAMES = {"bird": "animal", "experiment": "protocol"}
@@ -158,3 +160,48 @@ def read_spikes_hdf5_metadata(path: Path) -> dict[str, Any]:
             if value is not None:
                 metadata[key] = value
     return registered(metadata)
+
+
+def _check_member_name(name: str) -> None:
+    """Raises ValueError if a member's name isn't a relative path without '..'"""
+    parts = name.replace("\\", "/").split("/")
+    if name.startswith(("/", "\\")) or re.match(r"[A-Za-z]:", name) or ".." in parts:
+        raise ValueError(f"member {name!r} isn't a relative path without '..'")
+
+
+def read_abfzip_metadata(path: Path) -> dict[str, Any]:
+    """Reader for intracellular-abfzip: an abfzip archive of ABF files. Checks
+    the member names, metadata.json (its schema, major version, and that the
+    catalog names members once each), and that there's at least one ABF file
+    and each has a valid header. Returns metadata.json's `metadata` as it is:
+    abf-zip puts there only what the user gave for the registry, and the
+    software. Only the headers of the ABF files are read."""
+    try:
+        zf = zipfile.ZipFile(path)
+    except zipfile.BadZipFile as err:
+        raise ValueError(f"not a zip archive ({err})") from err
+    with zf:
+        infos = [info for info in zf.infolist() if not info.is_dir()]
+        names = [info.filename for info in infos]
+        for name in names:
+            _check_member_name(name)
+        if len(set(names)) != len(names):
+            raise ValueError("the archive has more than one member with the same name")
+        if abfzip.METADATA_NAME not in names:
+            raise ValueError(f"no {abfzip.METADATA_NAME} at the top level")
+        try:
+            doc = json.loads(zf.read(abfzip.METADATA_NAME))
+        except (json.JSONDecodeError, UnicodeDecodeError) as err:
+            raise ValueError(f"{abfzip.METADATA_NAME} isn't JSON ({err})") from err
+        members = [name for name in names if name != abfzip.METADATA_NAME]
+        abfzip.check_metadata(doc, members)
+        abf_files = [name for name in members if abfzip.is_abf(name)]
+        if not abf_files:
+            raise ValueError("no ABF files in the archive")
+        for name in abf_files:
+            with zf.open(name) as fp:
+                try:
+                    abfzip.read_header(fp)
+                except ValueError as err:
+                    raise ValueError(f"{name}: {err}") from err
+    return doc["metadata"]

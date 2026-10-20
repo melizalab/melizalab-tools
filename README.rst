@@ -59,6 +59,12 @@ console scripts
    a control file for running ``audit-kilo-spikes`` in batches.
 -  ``collect-kilo-audit``: summarize the ``audit-kilo-spikes`` reports.
 -  ``regenerate-pprox``: rebuild missing pprox files from their waveform files.
+-  ``abf-zip``: make an `abfzip <https://meliza.org/spec:4/abfzip/>`__
+   archive of the ABF files of an intracellular recording. ``abf-zip catalog``
+   writes ``metadata.json`` (the recording's metadata, and the protocol, start
+   time, and acquisition settings of each ABF file) beside the directory for
+   review; ``abf-zip build`` builds the archive from the directory and the
+   reviewed file.
 -  ``get-songs``: extract segments from arf files, rescale, resample, save into
    wave files, and optionally deposit back into neurobank. Usually the first
    step in generating a stimulus set, keeps a nice provenance trail.

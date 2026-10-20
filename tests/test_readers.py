@@ -2,6 +2,7 @@
 """Tests for dlab.readers, the metadata readers for neurobank deposit."""
 
 import json
+import zipfile
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import h5py
 import numpy as np
 import pytest
 
-from dlab import pprox, readers, spikes
+from dlab import abfzip, pprox, readers, spikes
 
 DATA = Path(__file__).parent / "data"
 
@@ -43,6 +44,7 @@ def test_rename_legacy_disagreeing():
     [
         ("spikes-pprox", readers.read_pprox_metadata),
         ("spikes-hdf5", readers.read_spikes_hdf5_metadata),
+        ("intracellular-abfzip", readers.read_abfzip_metadata),
     ],
 )
 def test_entry_points(dtype, reader):
@@ -246,4 +248,145 @@ def test_spikes_hdf5_reader_is_read_only(tmp_path):
     path = write_waveforms(tmp_path / "unit_spikes.h5", protocol="x")
     before = path.read_bytes(), path.stat().st_mtime_ns
     readers.read_spikes_hdf5_metadata(path)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+ABF = DATA / "abf"
+ABFZIP_METADATA = {
+    "experimenter": "anc4kj",
+    "animal": "ca7cb913-0888-4861-8b3b-a954b16f42ce",
+    "name": "20140603_1_1",
+    "software": "Clampex 10.4.1.10",
+    "biocytin": True,
+    "cell": 5,
+}
+
+
+def write_abfzip(path: Path, members=None, doc=None) -> Path:
+    """An abfzip archive written with zipfile, so that it can break the rules
+    the builder enforces. members: {name: bytes}, by default the test ABF
+    files; doc: metadata.json (a dict, or bytes), by default cataloging them;
+    None leaves it out."""
+    if members is None:
+        members = {p.name: p.read_bytes() for p in sorted(ABF.glob("*.abf"))}
+    if doc is None:
+        catalog = [{"path": name} for name in members if abfzip.is_abf(name)]
+        doc = abfzip.metadata_document(ABFZIP_METADATA, catalog)
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+        if doc is not False:
+            zf.writestr(
+                "metadata.json", doc if isinstance(doc, bytes) else json.dumps(doc)
+            )
+    return path
+
+
+def test_abfzip_built(tmp_path):
+    """An archive from abf-zip: the recording's metadata as it is."""
+    src = tmp_path / "rec"
+    src.mkdir()
+    for path in ABF.glob("*.abf"):
+        (src / path.name).write_bytes(path.read_bytes())
+    (src / "notes.txt").write_text("cell 5\n")
+    doc = abfzip.metadata_document(ABFZIP_METADATA, abfzip.directory_to_catalog(src))
+    out = abfzip.build(src, doc, tmp_path / "rec.zip")
+    assert readers.read_abfzip_metadata(out) == ABFZIP_METADATA
+
+
+def test_abfzip_written_by_zipfile(tmp_path):
+    """Compressed members and an empty catalog are allowed."""
+    path = write_abfzip(
+        tmp_path / "a.zip", doc=abfzip.metadata_document({"name": "x"}, [])
+    )
+    assert readers.read_abfzip_metadata(path) == {"name": "x"}
+
+
+def test_abfzip_newer_minor_version(tmp_path):
+    """A newer minor version is read, ignoring keys it adds."""
+    doc = abfzip.metadata_document(ABFZIP_METADATA, []) | {
+        "version": "1.4",
+        "acquisition": {"software": "pCLAMP 11"},
+    }
+    path = write_abfzip(tmp_path / "a.zip", doc=doc)
+    assert readers.read_abfzip_metadata(path) == ABFZIP_METADATA
+
+
+def test_abfzip_from_zip_directories(tmp_path):
+    """nbank deposit --zip-directories doesn't write metadata.json, so its
+    archives of ABF directories are refused."""
+    path = write_abfzip(tmp_path / "a.zip", doc=False)
+    with pytest.raises(ValueError, match=r"no metadata\.json"):
+        readers.read_abfzip_metadata(path)
+
+
+def abf_bytes(name="2014_09_11_0013.abf"):
+    return (ABF / name).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "members,doc,message",
+    [
+        ({"a.abf": abf_bytes()}, b"{", "isn't JSON"),
+        ({"a.abf": abf_bytes()}, {"version": "1.0"}, r"\$schema"),
+        (
+            {"a.abf": abf_bytes()},
+            abfzip.metadata_document({}, []) | {"version": "2.0"},
+            "only 1.x",
+        ),
+        (
+            {"a.abf": abf_bytes()},
+            abfzip.metadata_document({"animal": None}, []),
+            "invalid at metadata/animal",
+        ),
+        (
+            {"a.abf": abf_bytes()},
+            abfzip.metadata_document({}, [{"path": "b.abf"}]),
+            "'b.abf', which isn't in",
+        ),
+        (
+            {"a.abf": abf_bytes()},
+            abfzip.metadata_document({}, [{"path": "a.abf"}, {"path": "a.abf"}]),
+            "more than once",
+        ),
+        ({"notes.txt": b"x"}, abfzip.metadata_document({}, []), "no ABF files"),
+        (
+            {"a.abf": abf_bytes(), "b.ABF": b"not an abf"},
+            abfzip.metadata_document({}, []),
+            "b.ABF: not an ABF file",
+        ),
+        (
+            {"a.abf": abf_bytes()[:600]},
+            abfzip.metadata_document({}, []),
+            "a.abf: not a valid ABF header",
+        ),
+        (
+            {"a.abf": abf_bytes(), "../b.txt": b"x"},
+            abfzip.metadata_document({}, []),
+            "'../b.txt' isn't a relative path",
+        ),
+        (
+            {"a.abf": abf_bytes(), "/b.txt": b"x"},
+            abfzip.metadata_document({}, []),
+            "isn't a relative path",
+        ),
+    ],
+)
+def test_abfzip_invalid(tmp_path, members, doc, message):
+    path = write_abfzip(tmp_path / "a.zip", members, doc)
+    with pytest.raises(ValueError, match=message):
+        readers.read_abfzip_metadata(path)
+
+
+def test_abfzip_not_a_zip(tmp_path):
+    path = tmp_path / "a.zip"
+    path.write_bytes(abf_bytes())
+    with pytest.raises(ValueError, match="not a zip archive"):
+        readers.read_abfzip_metadata(path)
+
+
+def test_abfzip_reader_is_read_only(tmp_path):
+    path = write_abfzip(tmp_path / "a.zip")
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    readers.read_abfzip_metadata(path)
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
