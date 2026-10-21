@@ -127,6 +127,15 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   KS-good clusters, and merge same-channel units whose spike trains never
   come within 1.5 ms. Scripts and tables (pair_sites.py, siblings.py) were
   in the session scratchpad, not kept.
+- [ ] Scripts for the sorting workflow, once the new setup has been tried by
+  hand a few times. The setup (2026-10-21): grafisia makes the ARF and copies
+  it with the raw data to the sorting machine's share; sturnus mounts that
+  share; nothing is deposited until the sort is curated. Then one command on
+  sturnus: deposit the ARF from the share, run `group-kilo-spikes` against the
+  deposited recording and the sort directory, deposit the units from a staging
+  directory, and `nbank verify` before the raw copies are deleted. Dry run
+  first; stop at the first failure. Possibly a helper on grafisia for the
+  copy. Still open: whether to archive the curated sort output.
 
 ## Intracellular recordings (abf-zip)
 
