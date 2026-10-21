@@ -367,7 +367,12 @@ def regenerate(waveforms: Waveforms, source: TrialSource) -> dict:
         if field:
             doc[name] = field
     doc["processed_by"] = [
-        p for p in (waveforms.processed_by, f"{PROG} {__version__}") if p
+        p
+        for p in (
+            waveforms.processed_by,
+            f"{pprox.CREATOR_PREFIX}{PROG} {__version__}",
+        )
+        if p
     ]
     doc["derived_from"] = waveforms.source
     doc["trials_from"] = source.name

@@ -23,6 +23,14 @@ import pandas as pd
 
 _base_schema = "https://meliza.org/spec:2/pprox.json#"
 _stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
+# prefix of the program entries in `processed_by`, as in arfx
+CREATOR_PREFIX = "org.meliza.melizalab-tools/"
+
+
+def creator_to_program(entry: str) -> str:
+    """A `processed_by` entry without its domain prefix: output from versions
+    before 2026.10.21 has none."""
+    return entry.removeprefix(CREATOR_PREFIX)
 
 
 class Stimulus(TypedDict):

@@ -717,6 +717,21 @@ def test_known_error_of_the_version():
     )
 
 
+def test_version_with_domain_prefix():
+    """Entries written since 2026.10.21 have the domain prefix; regenerated
+    units are recognized with it too."""
+    prefix = "org.meliza.melizalab-tools/"
+    (f,) = kilo_audit.grade_findings(
+        stopped_early(), [f"{prefix}group-kilo-spikes 2026.10.07"]
+    )
+    assert f["version_note"] == "known-error"
+    regenerated = [
+        f"{prefix}group-kilo-spikes 2026.10.14",
+        f"{prefix}regenerate-pprox 2026.10.21",
+    ]
+    assert kilo_audit.grade_findings(stopped_early(), regenerated) == stopped_early()
+
+
 def test_unexpected_in_a_fixed_version():
     (f,) = kilo_audit.grade_findings(stopped_early(), ["group-kilo-spikes 2026.10.14"])
     assert (f["severity"], f["version_note"]) == ("fail", "unexpected")

@@ -263,7 +263,8 @@ Each regenerated file records how it was generated:
 - `derived_from`: the waveform file's neurobank URL, or its path.
 - `trials_from`: the pprox the trials came from, or the ARF file.
 - `processed_by`: the version that made the waveform file, followed by
-  `regenerate-pprox`.
+  `regenerate-pprox`. Entries are `org.meliza.melizalab-tools/<program>
+  <version>` since 2026.10.21; earlier ones have no prefix.
 
 Check the regenerated files with `audit-kilo-spikes` before depositing them.
 

@@ -9,7 +9,7 @@ import ewave
 import numpy as np
 import pytest
 
-from dlab import get_songs, signal
+from dlab import get_songs, pprox, signal
 
 RATE = 40000
 DATASET = "entry_00004/pcm_000"
@@ -171,7 +171,9 @@ def test_script_deposit(tmp_path, monkeypatch, songs_yaml, no_neurobank):
     assert archive == tmp_path / "archive"
     assert [f.name for f in files] == ["O103.wav"]
     assert kwargs["dtype"] == "vocalization-wav"
-    assert kwargs["created_by"] == f"get-songs {get_songs.SCRIPT_VERSION}"
+    assert kwargs["created_by"] == (
+        f"{pprox.CREATOR_PREFIX}get-songs {get_songs.SCRIPT_VERSION}"
+    )
     assert kwargs["source_dataset"] == DATASET
     assert kwargs["source_interval_ms"] == [90.0, 900.0]
     assert kwargs["highpass_cutoff"] == 500.0

@@ -113,7 +113,7 @@ def test_outputs_metadata(outputs):
             "experimenter": "bple",
             "protocol": "arc6opto1",
             "recording": f"{nb['registry']}resources/E36_5_1/",
-            "processed_by": f"group-kilo-spikes {kilo.SCRIPT_VERSION}",
+            "processed_by": f"org.meliza.melizalab-tools/group-kilo-spikes {kilo.SCRIPT_VERSION}",
             "presenter": "jpresent",
         }
 

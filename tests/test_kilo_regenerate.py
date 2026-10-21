@@ -20,7 +20,7 @@ from pathlib import Path
 import h5py
 import pytest
 
-from dlab import kilo, kilo_regenerate
+from dlab import kilo, kilo_regenerate, pprox
 
 DATA = Path(__file__).parent / "data"
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -72,7 +72,7 @@ def test_regenerated_from_sibling_is_identical(output):
     doc = load(regenerate(output))
     assert without(doc) == without(original(output))
     assert doc["processed_by"][0] == original(output)["processed_by"][0]
-    assert doc["processed_by"][1].startswith("regenerate-pprox ")
+    assert doc["processed_by"][1].startswith(f"{pprox.CREATOR_PREFIX}regenerate-pprox ")
     assert doc["derived_from"] == str(output / f"{UNIT}_spikes.h5")
     assert doc["trials_from"] in {"E36_5_1_c675", "E36_5_1_c676"}
 

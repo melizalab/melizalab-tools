@@ -145,7 +145,7 @@ def processing_version(processed_by: list[str]) -> tuple[str, str] | None:
     version that made a unit's output, or None if neither did (or the version
     isn't a date)."""
     for entry in processed_by:
-        prog, _, version = entry.partition(" ")
+        prog, _, version = pprox.creator_to_program(entry).partition(" ")
         if prog in ("group-kilo-spikes", "group-klopto-spikes"):
             if re.fullmatch(r"\d{4}\.\d{2}\.\d{2}", version):
                 return prog, version
@@ -165,7 +165,9 @@ def grade_findings(findings: list[dict], processed_by: list[str]) -> list[dict]:
     if made_by is None:
         return findings
     prog, version = made_by
-    regenerated = any(p.startswith("regenerate-pprox") for p in processed_by)
+    regenerated = any(
+        pprox.creator_to_program(p).startswith("regenerate-pprox") for p in processed_by
+    )
     out = []
     for f in findings:
         errors = KNOWN_ERRORS.get(f["check"])

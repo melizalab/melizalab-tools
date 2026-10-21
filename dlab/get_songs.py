@@ -32,6 +32,7 @@ import ewave
 import numpy as np
 
 from dlab import neurobank as nbank
+from dlab.pprox import CREATOR_PREFIX
 from dlab.signal import Signal, hp_filter, resample, rescale
 
 # disable locking - neurobank archive is probably on an NFS share
@@ -177,7 +178,7 @@ def script(argv=None):
                 "source_dataset": song["dataset"],
                 "source_interval_ms": song["interval_ms"],
                 "dBFS": song_data.dBFS,
-                "created_by": f"{p.prog} {script_version}",
+                "created_by": f"{CREATOR_PREFIX}{p.prog} {script_version}",
             }
             if args.highpass:
                 metadata.update(
