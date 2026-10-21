@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026.10.21
+
+### group-kilo-spikes
+
+Changes:
+
+- `processed_by` entries are prefixed with `org.meliza.melizalab-tools/`, as
+  arfx does (`org.meliza.melizalab-tools/group-kilo-spikes 2026.10.21`).
+  Output from earlier versions has no prefix; `audit-kilo-spikes` reads both.
+- The outputs record `presenter` (`jpresent` or `oeaudio-present`), found from
+  the messages in the ARF file or `--oeaudio-log`, when the messages say.
+- The waveform files get the recording's metadata, as the pprox files do.
+- `experimenter` and `animal` are taken from the recording's registry record
+  itself, which no longer copies them into its metadata.
+
+All spikes, trials and onsets are unchanged.
+
+### regenerate-pprox
+
+- The same changes: the `processed_by` prefix, `presenter` (`--from-arf`), and
+  `experimenter` and `animal` from the registry record.
+
+### audit-kilo-spikes
+
+- pprox files are validated against the schemas in melizalab-specs; the copies
+  bundled in `dlab/schemas` are gone.
+- `processed_by` entries with or without the `org.meliza.melizalab-tools/`
+  prefix are graded by version.
+
+### get-songs
+
+- `created_by` in the deposited metadata has the `org.meliza.melizalab-tools/`
+  prefix.
+
+### New
+
+- `abf-zip` makes an abfzip archive of the ABF files of an intracellular
+  recording (`abf-zip catalog`, then `abf-zip build`); see README.
+- `nbank deposit` metadata readers for `spikes-pprox`, `spikes-hdf5` and
+  `intracellular-abfzip` resources (entry point `nbank.metadata_readers`)
+  register the searchable fields: animal, experimenter, recording, protocol,
+  processed_by, sorted_by and presenter.
+- `-k key=value` arguments are read as JSON (and `True`, `False`, `None`), as
+  nbank reads them.
+- neurobank 0.13 is required; melizalab-specs and neo are new dependencies.
+
 ## 2026.10.20
 
 ### group-kilo-spikes

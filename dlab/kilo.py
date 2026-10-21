@@ -33,7 +33,7 @@ from dlab.spikes import SpikeWaveforms, save_waveforms
 
 log = logging.getLogger(__name__)
 # version of group-kilo-spikes, recorded in its output files
-SCRIPT_VERSION = "2026.10.20"
+SCRIPT_VERSION = "2026.10.21"
 
 
 class Trial(NamedTuple):

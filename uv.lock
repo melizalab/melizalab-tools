@@ -414,7 +414,7 @@ validate = [
 
 [[package]]
 name = "melizalab-tools"
-version = "2026.10.20"
+version = "2026.10.21"
 source = { editable = "." }
 dependencies = [
     { name = "appdirs" },
@@ -455,7 +455,7 @@ requires-dist = [
     { name = "libtfr", specifier = ">=2.1.9" },
     { name = "melizalab-specs", extras = ["validate"], specifier = ">=0.1" },
     { name = "neo", specifier = ">=0.14,<0.15" },
-    { name = "neurobank", git = "https://github.com/melizalab/neurobank" },
+    { name = "neurobank", specifier = ">=0.13,<0.14" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "quickspikes", specifier = ">=2.0.8" },
@@ -489,10 +489,14 @@ wheels = [
 
 [[package]]
 name = "neurobank"
-version = "0.12.1"
-source = { git = "https://github.com/melizalab/neurobank#34da5da7a2737ede3d35cf62067a2aa58da9a88a" }
+version = "0.13.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6e/4b/adbbd4e5070a30e1398498f0a2d3ef8018832a4faeca69f77987b3ed7902/neurobank-0.13.0.tar.gz", hash = "sha256:8d61d9cf27f8ac3f8eaf2596a0c80a67900e51de64f46938cba4fb25b32dcad2", size = 67897, upload-time = "2026-10-21T13:24:44.194Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/b1/88d77a618500b619d49277d0b46c999f938a37a6368b5854e963bbdf942b/neurobank-0.13.0-py3-none-any.whl", hash = "sha256:124e7946df9914c9d6374040300be4cb0802a892ce1faa3e5e4de0aa5d05e452", size = 75910, upload-time = "2026-10-21T13:24:42.874Z" },
 ]
 
 [[package]]

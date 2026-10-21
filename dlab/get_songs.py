@@ -39,7 +39,7 @@ from dlab.signal import Signal, hp_filter, resample, rescale
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 log = logging.getLogger("dlab")
 # version of get-songs, recorded in the metadata of deposited files
-SCRIPT_VERSION = "2026.10.14"
+SCRIPT_VERSION = "2026.10.21"
 
 
 def get_interval(path: Path, dataset: str, interval_ms: Sequence[float]) -> Signal:

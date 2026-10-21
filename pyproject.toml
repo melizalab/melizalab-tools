@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "melizalab-tools"
-version = "2026.10.20"
+version = "2026.10.21"
 description = "Meliza lab scripts and modules for auditory neurophysiology"
 readme = "README.rst"
 requires-python = ">=3.11"
@@ -32,7 +32,7 @@ dependencies = [
     "libtfr>=2.1.9",
     "melizalab-specs[validate]>=0.1",
     "neo>=0.14,<0.15",
-    "neurobank",
+    "neurobank>=0.13,<0.14",
     "pandas>=2.3.1",
     "pyyaml>=6.0.2",
     "quickspikes>=2.0.8",
@@ -97,6 +97,3 @@ testpaths = ["tests"]
 # deselected by default; run them with `pytest -m slow`
 addopts = "-m 'not slow'"
 markers = ["slow: needs the large example recordings in examples/"]
-
-[tool.uv.sources]
-neurobank = { git = "https://github.com/melizalab/neurobank" }
