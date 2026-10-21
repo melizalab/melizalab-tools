@@ -33,7 +33,7 @@ from dlab.spikes import SpikeWaveforms, save_waveforms
 
 log = logging.getLogger(__name__)
 # version of group-kilo-spikes, recorded in its output files
-SCRIPT_VERSION = "2026.10.21"
+SCRIPT_VERSION = "2026.10.22"
 
 
 class Trial(NamedTuple):
@@ -266,15 +266,36 @@ def find_message_dset(entry):
             return entry[name]
 
 
+# fields of a recording's registry record that describe the recording itself,
+# not its units, which get their own values
+RECORDING_ONLY_FIELDS = ("processed_by", "recording", "presenter")
+
+
 def resource_to_metadata(resource: dict) -> dict:
     """The metadata of a recording's registry record to copy into its outputs:
-    the record's metadata, with experimenter and animal from the record's own
-    fields (which the registry no longer copies into the metadata)."""
-    out = dict(resource["metadata"])
+    the record's metadata, without RECORDING_ONLY_FIELDS, and with experimenter
+    and animal from the record's own fields (which the registry no longer copies
+    into the metadata)."""
+    out = {
+        k: v for k, v in resource["metadata"].items() if k not in RECORDING_ONLY_FIELDS
+    }
     for key in ("experimenter", "animal"):
         if resource.get(key) is not None:
             out[key] = resource[key]
     return out
+
+
+def arf_to_creators(afp: h5.File) -> list[str]:
+    """The programs that wrote the entries of an ARF file (`entry_creator`, e.g.
+    'org.meliza.arfx/arfx-oephys 3.0.2'), in entry order, each once"""
+    creators = (entry.attrs.get("entry_creator") for _, entry in iter_entries(afp))
+    return list(
+        dict.fromkeys(
+            c.decode() if isinstance(c, bytes) else str(c)
+            for c in creators
+            if c is not None
+        )
+    )
 
 
 def arf_to_presenter(afp: h5.File, oeaudio_log: Path | None = None) -> str | None:
@@ -1738,6 +1759,11 @@ def group_spikes_script(argv=None):
         )
         entry_attrs = tuple(entry_to_metadata(e) for _, e in iter_entries(afp))
         presenter = arf_to_presenter(afp, args.oeaudio_log)
+        # provenance, oldest first: the programs that made the ARF file, then this
+        processed_by = [
+            *arf_to_creators(afp),
+            f"{pprox.CREATOR_PREFIX}{p.prog} {version}",
+        ]
         entries = [entry for _, entry in iter_entries(afp)]
         entry_name = entries[0].name if len(entries) == 1 else None
         # the part of the recording that was sorted; only checked for
@@ -2032,7 +2058,7 @@ def group_spikes_script(argv=None):
             trials_to_pprox(clust_trials, params["sampling_rate"]),
             schema=pprox._stimtrial_schema,
             recording=resource_url,
-            processed_by=[f"{pprox.CREATOR_PREFIX}{p.prog} {version}"],
+            processed_by=processed_by,
             kilosort_amplitude=clust_info["Amplitude"],
             kilosort_contam_pct=clust_info["ContamPct"],
             kilosort_source_channel=clust_info["ch"],
@@ -2067,7 +2093,7 @@ def group_spikes_script(argv=None):
                         n_before,
                     ),
                     recording=resource_url,
-                    processed_by=f"{pprox.CREATOR_PREFIX}{p.prog} {version}",
+                    processed_by="; ".join(processed_by),
                     kilosort_amplitude=clust_info["Amplitude"],
                     kilosort_contam_pct=clust_info["ContamPct"],
                     kilosort_source_channel=clust_info["ch"],

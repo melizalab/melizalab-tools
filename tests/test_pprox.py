@@ -607,3 +607,24 @@ def test_split_trial_event_exactly_at_later_split_start_goes_to_that_split():
     assert split_events(df)[1] == pytest.approx([0.0], abs=1e-6), (
         "event at a later split start goes to that split"
     )
+
+
+def test_split_processed_by():
+    assert pprox.split_processed_by(None) == []
+    assert pprox.split_processed_by("a 1; b 2") == ["a 1", "b 2"]
+    assert pprox.split_processed_by(["a 1", "b 2"]) == ["a 1", "b 2"]
+
+
+def test_grouped_by():
+    """The entry of the program that grouped the spikes, wherever it is in the
+    chain, with or without the domain prefix"""
+    gks = f"{pprox.CREATOR_PREFIX}group-kilo-spikes 2026.10.21"
+    arfx = "org.meliza.arfx/arfx-oephys 3.0.2"
+    regen = f"{pprox.CREATOR_PREFIX}regenerate-pprox 2026.10.21"
+    assert pprox.grouped_by([arfx, gks, regen]) == gks
+    assert pprox.grouped_by(f"{arfx}; {gks}") == gks
+    assert pprox.grouped_by(["group-klopto-spikes 2024.01.01"]) == (
+        "group-klopto-spikes 2024.01.01"
+    )
+    assert pprox.grouped_by([arfx]) is None
+    assert pprox.grouped_by(None) is None

@@ -29,10 +29,14 @@ GOLDEN = DATA / "E36_excerpt_golden"
 N_BEFORE, N_AFTER = 60, 150  # the script's default waveform window (2 and 5 ms)
 # fields that differ from the golden files: the version, and presenter (new)
 GOLDEN_IGNORED = frozenset({"processed_by", "presenter"})
+# the entry_creator of the excerpt's entries
+ARF_CREATOR = "org.meliza.arfx/arfx-oephys 2.8.0"
 
 
-def run_excerpt(tmp: Path, sync: str = "ADC3", extra=()) -> Path:
-    """Run group-kilo-spikes on the excerpt in tmp; returns the output directory."""
+def run_excerpt(tmp: Path, sync: str = "ADC3", extra=(), record=None) -> Path:
+    """Run group-kilo-spikes on the excerpt in tmp; returns the output directory.
+    The recording's registry record is the one in E36_excerpt_neurobank.json,
+    unless given."""
     sorting = tmp / "sorting"
     sorting.mkdir(parents=True)
     for path in SORTING.iterdir():
@@ -45,7 +49,7 @@ def run_excerpt(tmp: Path, sync: str = "ADC3", extra=()) -> Path:
     out = tmp / "out"
     out.mkdir()
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(kilo.nbank, "describe", lambda url, name: nb["record"])
+        mp.setattr(kilo.nbank, "describe", lambda url, name: record or nb["record"])
         mp.setattr(
             kilo.StimulusFinder,
             "get_durations",
@@ -113,9 +117,44 @@ def test_outputs_metadata(outputs):
             "experimenter": "bple",
             "protocol": "arc6opto1",
             "recording": f"{nb['registry']}resources/E36_5_1/",
-            "processed_by": f"org.meliza.melizalab-tools/group-kilo-spikes {kilo.SCRIPT_VERSION}",
+            "processed_by": f"{ARF_CREATOR}; "
+            f"org.meliza.melizalab-tools/group-kilo-spikes {kilo.SCRIPT_VERSION}",
             "presenter": "jpresent",
         }
+
+
+def test_record_deposited_with_arf_reader(tmp_path):
+    """A recording deposited with the extracellular-arf reader has processed_by,
+    recording and presenter in its metadata. The unit files get their own values
+    for these (processed_by from the ARF file, then group-kilo-spikes), and the
+    rest of the metadata (pen, site) as it is."""
+    nb = json.loads((DATA / "E36_excerpt_neurobank.json").read_text())
+    animal = nb["record"]["metadata"]["bird"]
+    record = {
+        "name": "E36_5_1",
+        "experimenter": "bple",
+        "animal": animal,
+        "metadata": {
+            "experimenter": "bple",
+            "animal": animal,
+            "protocol": "arc6opto1",
+            "pen": "unknown",
+            "site": "unknown",
+            "recording": "E36_5_1",
+            "presenter": "oeaudio-present",
+            "processed_by": ARF_CREATOR,
+        },
+    }
+    out = run_excerpt(tmp_path, record=record)
+    gks = f"org.meliza.melizalab-tools/group-kilo-spikes {kilo.SCRIPT_VERSION}"
+    doc = json.loads((out / "E36_5_1_c52.pprox").read_text())
+    assert doc["processed_by"] == [ARF_CREATOR, gks]
+    assert doc["recording"] == f"{nb['registry']}resources/E36_5_1/"
+    assert doc["presenter"] == "jpresent"
+    assert (doc["pen"], doc["site"]) == ("unknown", "unknown")
+    with h5py.File(out / "E36_5_1_c52_spikes.h5", "r") as fp:
+        assert fp.attrs["processed_by"] == f"{ARF_CREATOR}; {gks}"
+        assert (fp.attrs["pen"], fp.attrs["site"]) == ("unknown", "unknown")
 
 
 def test_waveforms_are_windows_of_whitened_data(outputs):

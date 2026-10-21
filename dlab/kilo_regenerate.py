@@ -23,8 +23,8 @@ The trial table comes from one of these, in order of preference:
 
 The regenerated files are written to a directory for depositing by hand. Each
 records the waveform file it was derived from (derived_from), the source of its
-trials (trials_from), and both the original version and this script in
-processed_by.
+trials (trials_from), and in processed_by the programs that made the original
+(from the waveform file) followed by this script.
 
 """
 
@@ -121,9 +121,8 @@ class TrialSource:
         return self.doc["pprox"]
 
     @property
-    def processed_by(self) -> str | None:
-        value = self.doc.get("processed_by") or [None]
-        return value if isinstance(value, str) else value[0]
+    def grouped_by(self) -> str | None:
+        return pprox.grouped_by(self.doc.get("processed_by"))
 
 
 def rebuild(waveforms: Waveforms, trials: list[dict], quiet=False) -> list[dict]:
@@ -207,14 +206,16 @@ def choose_trials(
     tables = {trials_key(s.trials) for s, _ in candidates}
     if len(tables) > 1:
         candidates = [
-            (s, w) for s, w in candidates if s.processed_by == waveforms.processed_by
+            (s, w)
+            for s, w in candidates
+            if s.grouped_by == pprox.grouped_by(waveforms.processed_by)
         ]
         tables = {trials_key(s.trials) for s, _ in candidates}
         if len(tables) != 1:
             raise RuntimeError(
                 "the other units of this recording have different trials, and "
                 f"{'several' if tables else 'none'} of them were processed by "
-                f"{waveforms.processed_by}; choose one with --trials"
+                f"{pprox.grouped_by(waveforms.processed_by)}; choose one with --trials"
             )
     for source, waveforms_path in candidates:
         if waveforms_path is None or not Path(waveforms_path).exists():
@@ -367,12 +368,8 @@ def regenerate(waveforms: Waveforms, source: TrialSource) -> dict:
         if field:
             doc[name] = field
     doc["processed_by"] = [
-        p
-        for p in (
-            waveforms.processed_by,
-            f"{pprox.CREATOR_PREFIX}{PROG} {__version__}",
-        )
-        if p
+        *pprox.split_processed_by(waveforms.processed_by),
+        f"{pprox.CREATOR_PREFIX}{PROG} {__version__}",
     ]
     doc["derived_from"] = waveforms.source
     doc["trials_from"] = source.name

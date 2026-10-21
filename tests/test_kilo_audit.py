@@ -364,6 +364,18 @@ def test_different_versions(output):
     ]
 
 
+def test_versions_are_the_grouping_program(output):
+    """Units grouped by the same version don't differ, whatever made the ARF
+    file."""
+    edit_pprox(
+        output,
+        lambda pp: pp.update(
+            processed_by=["org.meliza.arfx/arfx-oephys 3.0.2", *pp["processed_by"][1:]]
+        ),
+    )
+    assert audit(output)["findings"] == []
+
+
 def test_units_from_registry(excerpt_output, monkeypatch):
     """A unit given as a neurobank id is located through the registry, along
     with its waveform file, the resource <id>_spikes; a unit whose waveform

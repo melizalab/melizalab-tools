@@ -27,10 +27,33 @@ _stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
 CREATOR_PREFIX = "org.meliza.melizalab-tools/"
 
 
+# the programs that group a sort's spikes into units
+GROUPING_PROGRAMS = ("group-kilo-spikes", "group-klopto-spikes")
+
+
 def creator_to_program(entry: str) -> str:
     """A `processed_by` entry without its domain prefix: output from versions
     before 2026.10.21 has none."""
     return entry.removeprefix(CREATOR_PREFIX)
+
+
+def split_processed_by(value: list[str] | str | None) -> list[str]:
+    """`processed_by` as a list, oldest first. Waveform files and the registry
+    hold it as one string joined with '; '."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return value.split("; ")
+    return list(value)
+
+
+def grouped_by(processed_by: list[str] | str | None) -> str | None:
+    """The `processed_by` entry of the program that grouped the spikes into
+    units, or None if there isn't one"""
+    for entry in split_processed_by(processed_by):
+        if creator_to_program(entry).partition(" ")[0] in GROUPING_PROGRAMS:
+            return entry
+    return None
 
 
 class Stimulus(TypedDict):

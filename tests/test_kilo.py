@@ -552,3 +552,17 @@ def test_resource_to_metadata():
     assert kilo.resource_to_metadata({"metadata": {"pen": 5}, "animal": None}) == {
         "pen": 5
     }
+
+
+def test_resource_to_metadata_leaves_out_recording_fields():
+    """processed_by, recording and presenter describe the recording; the units
+    get their own."""
+    record = {
+        "metadata": {
+            "pen": 5,
+            "processed_by": "org.meliza.arfx/arfx-oephys 3.0.2",
+            "recording": "r1",
+            "presenter": "jpresent",
+        }
+    }
+    assert kilo.resource_to_metadata(record) == {"pen": 5}

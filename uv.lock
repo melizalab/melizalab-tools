@@ -414,7 +414,7 @@ validate = [
 
 [[package]]
 name = "melizalab-tools"
-version = "2026.10.21"
+version = "2026.10.22"
 source = { editable = "." }
 dependencies = [
     { name = "appdirs" },

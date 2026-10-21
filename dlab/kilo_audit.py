@@ -1270,9 +1270,9 @@ def check_units(units: list[Unit]) -> list[dict]:
                 + "; ".join(", ".join(names) for names in groups),
             )
         )
-    # the version that made the trials (later entries, e.g. from
-    # regenerate-pprox, don't change them)
-    versions = {(unit.processed_by or ["unknown"])[0] for unit in units}
+    # the version that grouped the spikes into trials (the other entries, e.g.
+    # arfx-oephys or regenerate-pprox, don't change them)
+    versions = {pprox.grouped_by(unit.processed_by) or "unknown" for unit in units}
     if len(versions) > 1:
         out.append(
             finding(
@@ -1897,7 +1897,7 @@ def load_reports(paths: Iterable[Path]) -> tuple[list[dict], list[str]]:
 
 
 def unit_version(unit: dict) -> str:
-    return unit["processed_by"][0] if unit.get("processed_by") else "unknown"
+    return pprox.grouped_by(unit.get("processed_by")) or "unknown"
 
 
 def report_findings(reports: list[dict]) -> Iterable[dict]:

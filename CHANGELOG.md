@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.10.22
+
+### group-kilo-spikes
+
+- `processed_by` records the provenance of the outputs, oldest first: the
+  programs that wrote the ARF file's entries (`entry_creator`, e.g.
+  `org.meliza.arfx/arfx-oephys 3.0.2`), then group-kilo-spikes. The waveform
+  files hold the same list joined with "; ".
+- Fixed a crash for recordings deposited with the `extracellular-arf` reader:
+  `processed_by`, `recording` and `presenter` from the recording's registry
+  record are no longer copied into the outputs, which have their own.
+
+### regenerate-pprox and audit-kilo-spikes
+
+- The group-kilo-spikes entry is found in `processed_by` by name rather than
+  by position.
+
 ## 2026.10.21
 
 ### group-kilo-spikes

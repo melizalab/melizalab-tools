@@ -71,8 +71,11 @@ def test_regenerated_from_sibling_is_identical(output):
     is identical to the original, apart from its provenance."""
     doc = load(regenerate(output))
     assert without(doc) == without(original(output))
-    assert doc["processed_by"][0] == original(output)["processed_by"][0]
-    assert doc["processed_by"][1].startswith(f"{pprox.CREATOR_PREFIX}regenerate-pprox ")
+    # the original's provenance (arfx-oephys, group-kilo-spikes), then this script
+    assert doc["processed_by"][:-1] == original(output)["processed_by"]
+    assert doc["processed_by"][-1].startswith(
+        f"{pprox.CREATOR_PREFIX}regenerate-pprox "
+    )
     assert doc["derived_from"] == str(output / f"{UNIT}_spikes.h5")
     assert doc["trials_from"] in {"E36_5_1_c675", "E36_5_1_c676"}
 
