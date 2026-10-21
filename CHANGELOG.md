@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `group-kilo-spikes` creates the output directory if it doesn't exist.
+- `--debug` no longer shows h5py's internal debug messages ("Creating converter
+  from 3 to 5").
+- The log names the unit's channel as the recording does (e.g. `CH26`) for both
+  the recorded amplitude and the waveforms; the waveform message used the
+  sort's 0-based channel index.
+
 ## 2026.10.22
 
 ### group-kilo-spikes

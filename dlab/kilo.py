@@ -1717,6 +1717,8 @@ def group_spikes_script(argv=None):
         events = events[~duplicates]
 
     events.set_index("clust", inplace=True)
+    if not args.dry_run:
+        args.output.mkdir(parents=True, exist_ok=True)
     if args.toelis:
         clusters = events_to_toelis(events, params["sampling_rate"])
         outfile = (args.output / recording_name).with_suffix(".toe_lis")
@@ -2008,9 +2010,11 @@ def group_spikes_script(argv=None):
             "kilosort_group": clust_type,
             "spike_counts": spike_counts,
         }
+        # the recording's name for the cluster's channel; clust_info["ch"] is
+        # its column in the sort's data, which channel_map maps to the
+        # recording's (0-based) channels
+        name = f"CH{int(channel_map[int(clust_info['ch'])]) + 1}"
         if amplitude_entry is not None:
-            channel = int(channel_map[int(clust_info["ch"])])
-            name = f"CH{channel + 1}"
             amplitude = None
             if name in amplitude_entry:
                 amplitude = recorded_amplitude(
@@ -2080,8 +2084,8 @@ def group_spikes_script(argv=None):
             if not args.no_waveforms:
                 outfile = args.output / (outfile.stem + "_spikes.h5")
                 log.info(
-                    "    - waveforms on channel %d -> %s",
-                    clust_info["ch"],
+                    "    - waveforms on %s -> %s",
+                    name,
                     outfile,
                 )
                 save_waveforms(

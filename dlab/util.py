@@ -10,6 +10,9 @@ import numpy as np
 
 # the HTTP libraries used to talk to the registry, which log every request
 HTTP_LOGGERS = ("httpx", "httpcore")
+# libraries whose debug messages are about their own internals (h5py logs each
+# type converter it creates)
+QUIET_LOGGERS = ("h5py",)
 # -k values that aren't JSON but are read as it, as nbank does
 KEYVAL_ALIASES = {"True": True, "False": False, "None": None}
 
@@ -30,7 +33,7 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
 def setup_log(debug=False, debug_http=False):
     """Configure logging for a script: info messages (or debug, if debug is
     True) to stderr. The HTTP libraries only log warnings, unless debug_http is
-    True (which implies debug)."""
+    True (which implies debug), and QUIET_LOGGERS never log debug messages."""
     logging.basicConfig(
         format="%(message)s",
         level=logging.DEBUG if debug or debug_http else logging.INFO,
@@ -39,6 +42,8 @@ def setup_log(debug=False, debug_http=False):
         logging.getLogger(name).setLevel(
             logging.DEBUG if debug_http else logging.WARNING
         )
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.INFO)
 
 
 def _reject_constant(name):

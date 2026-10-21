@@ -112,6 +112,15 @@ def test_setup_log_quiets_http_libraries():
         assert logging.getLogger(name).level == logging.DEBUG
 
 
+def test_setup_log_quiets_h5py():
+    """h5py's debug messages (e.g. 'Creating converter from 3 to 5') are left
+    out, even with debug_http."""
+    import logging
+
+    util.setup_log(True, debug_http=True)
+    assert logging.getLogger("h5py").level == logging.INFO
+
+
 def test_add_log_arguments():
     import argparse
 

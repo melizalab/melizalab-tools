@@ -123,6 +123,12 @@ def test_outputs_metadata(outputs):
         }
 
 
+def test_output_directory_is_created(tmp_path):
+    out = tmp_path / "new" / "units"
+    run_excerpt(tmp_path, extra=["-o", str(out)])
+    assert len(list(out.glob("*.pprox"))) == 3
+
+
 def test_record_deposited_with_arf_reader(tmp_path):
     """A recording deposited with the extracellular-arf reader has processed_by,
     recording and presenter in its metadata. The unit files get their own values

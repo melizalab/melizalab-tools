@@ -762,6 +762,20 @@ def test_recorded_amplitude_uses_channel_map(make_recording, tmp_path):
     assert load_pprox(run(), 1)["recorded_amplitude"]["channel"] == "CH4"
 
 
+def test_log_names_the_recording_channel(make_recording, tmp_path, caplog):
+    """The waveform and amplitude messages name the same channel, the
+    recording's, through channel_map.npy."""
+    data, _ = headstage_channel(CLUSTERS[1]["times"])
+    run = make_recording(
+        channels={"CH4": data}, channel_attrs={"bit_volts": BIT_VOLTS, "units": "uV"}
+    )
+    np.save(tmp_path / "ks" / "channel_map.npy", np.array([0, 1, 3, 2]))
+    with caplog.at_level("INFO", logger="dlab"):
+        run()
+    assert "recorded amplitude on CH4" in caplog.text
+    assert "waveforms on CH4 -> " in caplog.text
+
+
 def test_no_recorded_amplitude_without_channel(make_recording, caplog):
     """Without the unit's channel in the recording, or with
     --no-recorded-amplitude, there's no recorded_amplitude; only the first
