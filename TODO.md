@@ -157,6 +157,10 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   whatever the migration copies from the registry is registered again on
   deposit.
 - [ ] Two resources have no ABF files (6edc858d: one .tif; f5bbaa66: empty).
+- [ ] bad08eac (rallapalli, `20250719_2_2`) holds the files of two sessions,
+  2025-07-19 and 07-21 (the second recording wasn't given its own directory).
+  Split it and deposit the 07-21 files as their own resource, after the
+  migration.
 
 ## Recording practice
 

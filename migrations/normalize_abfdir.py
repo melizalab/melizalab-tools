@@ -28,6 +28,9 @@ table of the recording names for review. Changes nothing in the registry.
 --names takes a TSV of `id` and `recording` (e.g. from analysis control files),
 which is used in place of the recovered name; --animals a TSV of `id` and
 `animal`, used in place of the registered animal. Other columns are ignored.
+--accept takes a TSV of `id`, `why` and optionally `comment`: the records
+reviewed and accepted as they are (their findings become notes), with a comment
+to set in their metadata.
 
 --archive takes the archive's root directory, where the resources are
 readable. The table then lists each resource's files and the dates its ABF
@@ -105,31 +108,42 @@ ABF_NAME = re.compile(r"\d{4}_\d{2}_\d{2}_(\d{4})\.abf", re.IGNORECASE)
 
 def read_directory(root: str, id: str) -> dict:
     """The files of a resource in the archive at root, the dates its ABF files
-    were recorded, and their numbers in Clampex's session, as {"files",
-    "dates", "numbers", "error"}."""
+    were recorded, their numbers in Clampex's session, and the acquisition
+    protocol of each ABF file in name order, as {"files", "dates", "numbers",
+    "protocols", "error"}."""
     src = archive.resource_path(root, id)
     if not src.is_dir():
-        return {"files": [], "dates": [], "numbers": [], "error": f"no directory {src}"}
+        return {
+            "files": [],
+            "dates": [],
+            "numbers": [],
+            "protocols": [],
+            "error": f"no directory {src}",
+        }
     files = abfzip.directory_files(src)
     numbers = sorted(
         int(m.group(1))
         for f in files
         if (m := ABF_NAME.fullmatch(f.rsplit("/", 1)[-1])) is not None
     )
-    dates, errors = set(), []
+    dates, protocols, errors = set(), [], []
     for path in filter(abfzip.is_abf, files):
         with open(src / path, "rb") as fp:
             try:
-                start = abfzip.header_to_start(abfzip.read_header(fp))
+                header = abfzip.read_header(fp)
             except ValueError as err:
                 errors.append(f"{path}: {err}")
+                protocols.append("?")
                 continue
+        start = abfzip.header_to_start(header)
+        protocols.append(abfzip.header_to_protocol(header) or "?")
         if start is not None:
             dates.add(start[:10].replace("-", ""))
     return {
         "files": files,
         "dates": sorted(dates),
         "numbers": numbers,
+        "protocols": protocols,
         "error": "; ".join(errors),
     }
 
@@ -206,8 +220,11 @@ def plan(
         "candidates": [],
     }
 
-    if "name" in metadata:
-        recording, candidates, how = recover(metadata["name"], created)
+    if "name" in metadata or record["name"] in names:
+        if "name" in metadata:
+            recording, candidates, how = recover(metadata["name"], created)
+        else:
+            recording, candidates, how = None, [], "no name"
         if recording is None and abf and len(abf["dates"]) == 1:
             dated = [c for c in candidates if c[:8] == abf["dates"][0]]
             if len(dated) == 1:
@@ -243,6 +260,8 @@ def plan(
         if value is not None:
             update[new] = value
             update[old] = None
+    if "name" not in metadata and name.get("recording"):
+        update["recording"] = name["recording"]
 
     if "filled" in metadata:
         if metadata["filled"] == "biocytin" and metadata.get("biocytin", True) is True:
@@ -275,7 +294,7 @@ def plan(
     if record["name"] in animals:
         animal = update["animal"] = animals[record["name"]]
         notes.append(f"animal given (registered {record['animal']})")
-        if animal not in used:
+        if recording and animal not in used:
             review.append(f"given animal wasn't used for slices on {recording[:8]}")
     elif animal is None:
         found = list(used)
@@ -328,7 +347,7 @@ def plan(
         "_experimenter": experimenter,
         "_created": str(created),
         "_mismatch": mismatch,
-        "_abf": abf or {"files": [], "dates": [], "numbers": []},
+        "_abf": abf or {"files": [], "dates": [], "numbers": [], "protocols": []},
     }
 
 
@@ -368,6 +387,15 @@ def check_order(plans: list[dict]) -> None:
                     )
 
 
+def read_accepted(path) -> dict[str, tuple[str, str]]:
+    """{id: (why, comment)} from the TSV of accepted records"""
+    with open(path, newline="") as fp:
+        return {
+            row["id"].strip(): (row["why"].strip(), (row.get("comment") or "").strip())
+            for row in csv.DictReader(fp, delimiter="\t")
+        }
+
+
 def read_tsv(path, column: str) -> dict[str, str]:
     """{id: value of column} from a TSV with a header row; other columns (such
     as a reason) are ignored"""
@@ -386,6 +414,9 @@ def main(argv=None):
     )
     p.add_argument(
         "--animals", help="TSV of id and animal, used in place of the registered animal"
+    )
+    p.add_argument(
+        "--accept", help="TSV of id, why and comment: records reviewed and accepted"
     )
     p.add_argument("-o", "--output", required=True, help="the change file (JSON lines)")
     p.add_argument("--table", required=True, help="the names, for review (TSV)")
@@ -408,8 +439,17 @@ def main(argv=None):
             )
     names = read_tsv(args.names, "recording") if args.names else {}
     animals = read_tsv(args.animals, "animal") if args.animals else {}
+    accepted = read_accepted(args.accept) if args.accept else {}
 
     records = list(core.search(args.registry_url, dtype=DTYPE))
+    known = {r["name"] for r in records}
+    for option, ids in (
+        ("--names", names),
+        ("--animals", animals),
+        ("--accept", accepted),
+    ):
+        if unknown := sorted(set(ids) - known):
+            p.error(f"{option}: not {DTYPE} resources: {', '.join(unknown)}")
     events = SliceEvents(args.events)
     plans = []
     for i, r in enumerate(records):
@@ -446,6 +486,14 @@ def main(argv=None):
             if others:
                 p["notes"].append(f"other experimenters that day: {', '.join(others)}")
 
+    for p in plans:
+        if p["id"] in accepted:
+            why, comment = accepted[p["id"]]
+            p["notes"] += [*p["review"], f"accepted: {why}"]
+            p["review"] = []
+            if comment:
+                p["update"]["comment"] = comment
+
     with open(args.output, "w") as fp:
         for p in plans:
             line = {k: v for k, v in p.items() if not k.startswith("_")}
@@ -466,6 +514,7 @@ def main(argv=None):
                 "notes",
                 "abf_dates",
                 "abf_numbers",
+                "protocols",
                 "files",
             ]
         )
@@ -485,7 +534,8 @@ def main(argv=None):
                     "; ".join(p["notes"]),
                     " ".join(p["_abf"]["dates"]),
                     numbers(p),
-                    " ".join(p["_abf"]["files"]),
+                    "|".join(p["_abf"]["protocols"]),
+                    "|".join(p["_abf"]["files"]),
                 ]
             )
 
