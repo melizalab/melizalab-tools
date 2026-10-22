@@ -48,6 +48,7 @@ import json
 import re
 import sys
 from collections import Counter, defaultdict
+from pathlib import Path
 
 import httpx
 from nbank import archive, core, registry
@@ -366,6 +367,14 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.registry_url is None:
         p.error("supply a registry url with -r or NBANK_REGISTRY")
+    if args.archive is not None:
+        try:
+            args.archive = archive.get_config(Path(args.archive))["path"]
+        except OSError as err:
+            p.error(
+                f"--archive {args.archive}: not an archive ({err}); give its root "
+                "directory, as `nbank archive list` shows it"
+            )
     names = read_names(args.names) if args.names else {}
 
     records = list(core.search(args.registry_url, dtype=DTYPE))
