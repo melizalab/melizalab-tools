@@ -10,8 +10,11 @@ table of the recording names for review. Changes nothing in the registry.
   `nbank -k` read as integers (e.g. 20140603_1_1 as 2014060311, since Python
   allows underscores as digit separators) are recovered where only one reading
   has a zero-padded date; the others are listed for review.
-- `filled: "biocytin"` becomes `biocytin: true`; `rearing` becomes `condition`;
-  `region` becomes `location`.
+- `filled: "biocytin"` becomes `biocytin: true`; `rearing` becomes `condition`.
+- `location` is the region recorded from: CM for anc4kj, yl6tm, bellanger and
+  dmeliza; NCM for rallapalli, or dNCM or vNCM where he gave `region: dorsal`
+  or `ventral` (which is then deleted). A free-text `location` already there
+  moves to `comment`.
 - `hemisphere` is L or R (an unknown one is deleted); `slice: "saggital"` is
   spelled `sagittal`.
 - Records from 2018 without an experimenter are anc4kj's.
@@ -67,7 +70,17 @@ DTYPE = "intracellular-abfdir"
 RECORDING = re.compile(r"(\d{8})_([1-9]\d*)_([1-9]\d*)")
 # the registry copies the fields into metadata for older clients
 FIELDS = ("experimenter", "animal")
-RENAMED = {"name": "recording", "rearing": "condition", "region": "location"}
+RENAMED = {"name": "recording", "rearing": "condition"}
+# the region each experimenter recorded from
+LOCATIONS = {
+    "anc4kj": "CM",
+    "yl6tm": "CM",
+    "bellanger": "CM",
+    "dmeliza": "CM",
+    "rallapalli": "NCM",
+}
+# rallapalli's `region`, a part of NCM
+SUBREGIONS = {"dorsal": "dNCM", "ventral": "vNCM"}
 # values of other keys, compared in lower case; None deletes the key
 VALUES = {
     "hemisphere": {"l": "L", "left": "L", "r": "R", "right": "R", "unknown": None},
@@ -287,6 +300,22 @@ def plan(
             review.append("no experimenter")
     experimenter = update.get("experimenter", record["experimenter"])
 
+    location = LOCATIONS.get(experimenter)
+    region = metadata.get("region")
+    if location is None:
+        review.append(f"no location for experimenter {experimenter}")
+    elif region is not None and (location != "NCM" or region not in SUBREGIONS):
+        review.append(f"region {region!r} for {location}")
+    else:
+        if region is not None:
+            location = SUBREGIONS[region]
+            update["region"] = None
+        old = metadata.get("location")
+        if old is not None and old != location:
+            update["comment"] = f"location {old}"
+        if old != location:
+            update["location"] = location
+
     mismatch = False
     recording = name.get("recording")
     used = events(parse_date(recording[:8])) if recording else {}
@@ -492,7 +521,9 @@ def main(argv=None):
             p["notes"] += [*p["review"], f"accepted: {why}"]
             p["review"] = []
             if comment:
-                p["update"]["comment"] = comment
+                p["update"]["comment"] = "; ".join(
+                    filter(None, (p["update"].get("comment"), comment))
+                )
 
     with open(args.output, "w") as fp:
         for p in plans:
