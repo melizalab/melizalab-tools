@@ -28,6 +28,14 @@ table of the recording names for review. Changes nothing in the registry.
 --names takes a TSV of `id` and `recording` (e.g. from analysis control files),
 which is used in place of the recovered name.
 
+--archive takes the archive's root directory, where the resources are
+readable. The table then lists each resource's files and the dates its ABF
+files were recorded (from their headers); an ambiguous name is recovered if
+only one reading has that date, and a recording whose date isn't one of them is
+listed for review. Clampex numbers the files of a session in order, so within
+one experimenter's day, a later slice or cell should have later files; ones
+that don't are listed for review. Without it, nothing is read from the archive.
+
 Run with `uv run python migrations/normalize_abfdir.py`. Deleted once the
 migration is done.
 """
@@ -35,13 +43,16 @@ migration is done.
 import argparse
 import csv
 import datetime
+import itertools
 import json
 import re
 import sys
 from collections import Counter, defaultdict
 
 import httpx
-from nbank import core, registry
+from nbank import archive, core, registry
+
+from dlab import abfzip
 
 DTYPE = "intracellular-abfdir"
 RECORDING = re.compile(r"(\d{8})_([1-9]\d*)_([1-9]\d*)")
@@ -80,6 +91,41 @@ class SliceEvents:
                 url, params = r.links.get("next", {}).get("url"), None
             self.cache[date] = found
         return self.cache[date]
+
+
+# Clampex's file names: the date and the file's number in the session
+ABF_NAME = re.compile(r"\d{4}_\d{2}_\d{2}_(\d{4})\.abf", re.IGNORECASE)
+
+
+def read_directory(root: str, id: str) -> dict:
+    """The files of a resource in the archive at root, the dates its ABF files
+    were recorded, and their numbers in Clampex's session, as {"files",
+    "dates", "numbers", "error"}."""
+    src = archive.resource_path(root, id)
+    if not src.is_dir():
+        return {"files": [], "dates": [], "numbers": [], "error": f"no directory {src}"}
+    files = abfzip.directory_files(src)
+    numbers = sorted(
+        int(m.group(1))
+        for f in files
+        if (m := ABF_NAME.fullmatch(f.rsplit("/", 1)[-1])) is not None
+    )
+    dates, errors = set(), []
+    for path in filter(abfzip.is_abf, files):
+        with open(src / path, "rb") as fp:
+            try:
+                start = abfzip.header_to_start(abfzip.read_header(fp))
+            except ValueError as err:
+                errors.append(f"{path}: {err}")
+                continue
+        if start is not None:
+            dates.add(start[:10].replace("-", ""))
+    return {
+        "files": files,
+        "dates": sorted(dates),
+        "numbers": numbers,
+        "error": "; ".join(errors),
+    }
 
 
 # recordings are deposited within this many days
@@ -137,7 +183,9 @@ def recover(value, created: datetime.date) -> tuple[str | None, list[str], str]:
     return None, candidates, "ambiguous" if candidates else "no reading"
 
 
-def plan(record: dict, names: dict[str, str], events: SliceEvents) -> dict:
+def plan(
+    record: dict, names: dict[str, str], events: SliceEvents, abf: dict | None
+) -> dict:
     metadata = {k: v for k, v in record["metadata"].items() if k not in FIELDS}
     created = datetime.date.fromisoformat(record["created_on"][:10])
     update, review, notes = {}, [], []
@@ -150,6 +198,10 @@ def plan(record: dict, names: dict[str, str], events: SliceEvents) -> dict:
 
     if "name" in metadata:
         recording, candidates, how = recover(metadata["name"], created)
+        if recording is None and abf and len(abf["dates"]) == 1:
+            dated = [c for c in candidates if c[:8] == abf["dates"][0]]
+            if len(dated) == 1:
+                recording, how = dated[0], "recovered, ABF date"
         if record["name"] in names:
             given = names[record["name"]]
             if recording is not None and given != recording:
@@ -162,6 +214,10 @@ def plan(record: dict, names: dict[str, str], events: SliceEvents) -> dict:
             review.append(f"name {metadata['name']!r}: {how}")
         elif not RECORDING.fullmatch(recording) or parse_date(recording[:8]) is None:
             review.append(f"recording {recording!r} isn't YYYYMMDD_SLICE_CELL")
+        elif abf and abf["dates"] and recording[:8] not in abf["dates"]:
+            review.append(f"ABF files recorded on {', '.join(abf['dates'])}")
+    if abf and abf["error"]:
+        review.append(abf["error"])
     for old, new in RENAMED.items():
         if old not in metadata:
             continue
@@ -252,7 +308,37 @@ def plan(record: dict, names: dict[str, str], events: SliceEvents) -> dict:
         "_experimenter": experimenter,
         "_created": str(created),
         "_mismatch": mismatch,
+        "_abf": abf or {"files": [], "dates": [], "numbers": []},
     }
+
+
+def cell_order(p: dict) -> tuple[int, int]:
+    _, slice_, cell = RECORDING.fullmatch(p["_name"]["recording"]).groups()
+    return int(slice_), int(cell)
+
+
+def numbers(p: dict) -> str:
+    n = p["_abf"]["numbers"]
+    return f"{n[0]:04d}-{n[-1]:04d}" if n else ""
+
+
+def check_order(plans: list[dict]) -> None:
+    """Lists for review the recordings whose ABF files aren't in the order of
+    their slices and cells, within one experimenter's day"""
+    sessions = defaultdict(list)
+    for p in plans:
+        recording = p["_name"].get("recording")
+        if recording and RECORDING.fullmatch(recording) and p["_abf"]["numbers"]:
+            sessions[(p["_experimenter"], recording[:8])].append(p)
+    for group in sessions.values():
+        group.sort(key=lambda p: (cell_order(p), p["_abf"]["numbers"][0]))
+        for a, b in itertools.pairwise(group):
+            if b["_abf"]["numbers"][0] <= a["_abf"]["numbers"][-1]:
+                for p, other in ((a, b), (b, a)):
+                    p["review"].append(
+                        f"ABF files {numbers(p)} out of order with "
+                        f"{other['_name']['recording']} ({numbers(other)})"
+                    )
 
 
 def read_names(path) -> dict[str, str]:
@@ -272,6 +358,9 @@ def main(argv=None):
     p.add_argument("-o", "--output", required=True, help="the change file (JSON lines)")
     p.add_argument("--table", required=True, help="the names, for review (TSV)")
     p.add_argument(
+        "--archive", help="the archive's root directory, to read the resources' files"
+    )
+    p.add_argument(
         "--events", default=EVENTS, help="the bird database's event log (%(default)s)"
     )
     args = p.parse_args(argv)
@@ -281,7 +370,14 @@ def main(argv=None):
 
     records = list(core.search(args.registry_url, dtype=DTYPE))
     events = SliceEvents(args.events)
-    plans = [plan(r, names, events) for r in records]
+    plans = []
+    for i, r in enumerate(records):
+        abf = None
+        if args.archive and r["locations"] == ["intracellular"]:
+            abf = read_directory(args.archive, r["name"])
+            if i % 100 == 0:
+                print(f"  read {i} of {len(records)}", file=sys.stderr)
+        plans.append(plan(r, names, events, abf))
 
     # two experimenters sharing an animal number slices and cells independently,
     # but one experimenter's recording names are unique for an animal
@@ -292,6 +388,8 @@ def main(argv=None):
     for p in plans:
         if key(p)[2] and seen[key(p)] > 1:
             p["review"].append(f"recording {key(p)[2]} is also another resource's")
+
+    check_order(plans)
 
     by_date = defaultdict(set)
     for p in plans:
@@ -325,6 +423,9 @@ def main(argv=None):
                 "candidates",
                 "review",
                 "notes",
+                "abf_dates",
+                "abf_numbers",
+                "files",
             ]
         )
         for p in sorted(plans, key=lambda p: (not p["review"], p["_created"], p["id"])):
@@ -341,6 +442,9 @@ def main(argv=None):
                     " ".join(n["candidates"]),
                     "; ".join(p["review"]),
                     "; ".join(p["notes"]),
+                    " ".join(p["_abf"]["dates"]),
+                    numbers(p),
+                    " ".join(p["_abf"]["files"]),
                 ]
             )
 
@@ -353,7 +457,7 @@ def main(argv=None):
     print(f"  names: {dict(how)}", file=sys.stderr)
     print(f"  keys set: {dict(changed)}", file=sys.stderr)
     for reason, n in Counter(
-        re.sub(r"[\"'].*?[\"']|\d{8}_\d+_\d+|\d{6,}", "…", r)
+        re.sub(r"[\"'].*?[\"']|\d{8}_\d+_\d+|\d{6,}|/\S+", "…", r)
         for p in plans
         for r in p["review"]
     ).most_common():
