@@ -52,6 +52,7 @@ from nbank import archive, core, registry, util
 
 from dlab import __version__, abfzip, readers
 from dlab.pprox import CREATOR_PREFIX
+from dlab.util import setup_log
 
 log = logging.getLogger("abfdir-to-abfzip")
 
@@ -272,7 +273,7 @@ def main(argv=None):
         p.error("supply a registry url with -r or NBANK_REGISTRY")
     if args.log is None and not args.dry_run:
         p.error("--log is required")
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    setup_log()
 
     try:
         cfg = archive.get_config(args.archive)
