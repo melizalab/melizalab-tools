@@ -53,10 +53,21 @@ Deleted once the migration is done.
    the registry or removing stops the run, and running it again finishes what
    was interrupted.
 
+   nbank 0.8 to 0.10 (2023-02-13 to 2025-07-03) hashed directories by their
+   absolute paths, so the 485 resources deposited then don't match their
+   hashes. `diagnose_abfdir_hashes.py` found the directory 240 of them were
+   deposited from (bellanger's `/archive/intracellular/<recording>`,
+   rallapalli's `/home/mtm7ah/staging/intracellular/<recording>`), and the
+   migration checks those hashes; the other 245 (all yl6tm's, and seven of
+   bellanger's from 2025-04-29 to 05-01) are migrated unverified. No other
+   resource's hash differs, and no file in any of them changed after it was
+   registered. The results are in `abfdir-hashes.tsv`, and the log records how
+   each zip's hash was checked.
+
    ```
    nbank check archive --fix <root>          # creates staging/ in older archives
-   uv run python migrations/abfdir_to_abfzip.py --dry-run <root>
-   uv run python migrations/abfdir_to_abfzip.py --log abfzip-migrated.jsonl <root>
+   uv run python migrations/abfdir_to_abfzip.py --dry-run --hashes migrations/abfdir-hashes.tsv <root>
+   uv run python migrations/abfdir_to_abfzip.py --hashes migrations/abfdir-hashes.tsv --log abfzip-migrated.jsonl <root>
    nbank check all <root>
    ```
 

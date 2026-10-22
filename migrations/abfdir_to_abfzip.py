@@ -12,7 +12,10 @@ For each resource, in this order:
    registry's metadata, has a record for every member, each member matches its
    record's hash, and the records' hashes give the directory's registered hash
    (neurobank hashes a directory from its files' hashes), which ties the zip to
-   the resource it replaces;
+   the resource it replaces. Resources registered with nbank 0.8 to 0.10, which
+   hashed absolute paths, are checked against what diagnose_abfdir_hashes.py
+   found (--hashes): the directory each was deposited from, or none, in which
+   case the zip is accepted unverified;
 3. move it into the archive as `<id>.zip`;
 4. change the resource's sha1 and dtype in the registry, and add `software` and
    `processed_by` to its metadata, in one request (this needs a superuser);
@@ -33,6 +36,7 @@ migration is done.
 """
 
 import argparse
+import csv
 import hashlib
 import json
 import logging
@@ -43,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from diagnose_abfdir_hashes import absolute
 from nbank import archive, core, registry, util
 
 from dlab import __version__, abfzip, readers
@@ -134,10 +139,12 @@ def build_zip(src: Path, record: dict, out: Path) -> None:
         raise Skip(str(err)) from err
 
 
-def check_zip(path: Path, record: dict) -> dict:
+def check_zip(path: Path, record: dict, explanation: str | None) -> tuple[dict, str]:
     """Checks the zip at path against the registry record of the directory it
-    replaces (see the module's docstring), and returns the metadata it adds to
-    the registry's. Raises Skip if it doesn't check."""
+    replaces (see the module's docstring). explanation is the diagnostic's for
+    a directory whose relative hash doesn't match. Returns the metadata the zip
+    adds to the registry's, and how its hash was checked. Raises Skip if it
+    doesn't check."""
     try:
         metadata = readers.read_abfzip_metadata(path)
     except ValueError as err:
@@ -146,7 +153,7 @@ def check_zip(path: Path, record: dict) -> dict:
     added = {k: v for k, v in metadata.items() if k not in expected}
     if {k: metadata.get(k) for k in expected} != expected or set(added) - set(ADDED):
         raise Skip(f"the zip's metadata is {metadata}, not the registry's {expected}")
-    hasher = util.DirectoryHasher()
+    files = {}
     with zipfile.ZipFile(path) as zf:
         catalog = json.loads(zf.read(abfzip.METADATA_NAME))["catalog"]
         members = sorted(n for n in zf.namelist() if n != abfzip.METADATA_NAME)
@@ -158,17 +165,32 @@ def check_zip(path: Path, record: dict) -> dict:
             with zf.open(r["path"]) as fp:
                 if sha1_of(fp) != r["sha1"]:
                     raise Skip(f"{r['path']} in the zip doesn't match its sha1")
-            hasher.add(r["path"], r["sha1"])
-    if hasher.hexdigest() != record["sha1"]:
+            files[r["path"]] = r["sha1"]
+    hasher = util.DirectoryHasher()
+    for p, sha1 in files.items():
+        hasher.add(p, sha1)
+    if hasher.hexdigest() == record["sha1"]:
+        return added, "relative"
+    if explanation is None:
         raise Skip(
             "the files' hashes don't give the directory's registered hash (the "
             "directory has changed)"
         )
-    return added
+    if explanation == "none":
+        return added, "unverified"
+    if explanation.startswith("absolute "):
+        directory = explanation.removeprefix("absolute ")
+        if absolute(files, directory) == record["sha1"]:
+            return added, explanation
+        raise Skip(f"the files' hashes don't give the registered hash as {directory}")
+    raise Skip(f"no check for the explanation {explanation!r}")
 
 
-def migrate(cfg, reg: Registry, record: dict, *, dry_run: bool) -> dict:
-    """Migrates one resource. Returns its log entry."""
+def migrate(
+    cfg, reg: Registry, record: dict, explanation: str | None, *, dry_run: bool
+) -> dict:
+    """Migrates one resource, given the diagnostic's explanation of its hash, if
+    any. Returns its log entry."""
     id = record["name"]
     src = archive.resource_path(cfg, id)
     dst = archive.new_resource_path(cfg, id, f"{id}.zip")
@@ -192,7 +214,7 @@ def migrate(cfg, reg: Registry, record: dict, *, dry_run: bool) -> dict:
 
     if dst.exists():
         # stored by an interrupted run, before the registry was updated
-        added = check_zip(dst, record)
+        added, entry["hash_check"] = check_zip(dst, record, explanation)
         with open(dst, "rb") as fp:
             entry["new_sha1"] = sha1_of(fp)
         if dry_run:
@@ -203,7 +225,7 @@ def migrate(cfg, reg: Registry, record: dict, *, dry_run: bool) -> dict:
         staged.unlink(missing_ok=True)
         build_zip(src, record, staged)
         try:
-            added = check_zip(staged, record)
+            added, entry["hash_check"] = check_zip(staged, record, explanation)
         except Skip:
             staged.unlink()
             raise
@@ -237,6 +259,11 @@ def main(argv=None):
         "--dry-run", action="store_true", help="build and check, change nothing"
     )
     p.add_argument("--log", help="where to append the log (required unless --dry-run)")
+    p.add_argument(
+        "--hashes",
+        type=Path,
+        help="diagnose_abfdir_hashes.py's table of hashes that don't match",
+    )
     p.add_argument("--limit", type=int, help="migrate at most this many resources")
     p.add_argument("archive", type=Path, help="the archive's root directory")
     p.add_argument("ids", nargs="*", help="migrate only these resources")
@@ -257,6 +284,12 @@ def main(argv=None):
         p.error(
             f"{args.archive} has no staging directory; run `nbank check archive --fix`"
         )
+    explanations = {}
+    if args.hashes:
+        with open(args.hashes, newline="") as fp:
+            explanations = {
+                r["id"]: r["explanation"] for r in csv.DictReader(fp, delimiter="\t")
+            }
     auth = tuple(args.auth.split(":", 1)) if args.auth else None
     reg = Registry(args.registry_url, auth)
     name = reg.archive_name(cfg["path"])
@@ -294,7 +327,9 @@ def main(argv=None):
                 record = reg.get(id)
                 if record is None:
                     raise Skip("no longer in the registry")
-                entry = migrate(cfg, reg, record, dry_run=args.dry_run)
+                entry = migrate(
+                    cfg, reg, record, explanations.get(id), dry_run=args.dry_run
+                )
             except Skip as err:
                 entry = {"id": id, "outcome": "skipped", "error": str(err)}
                 log.warning("%s: skipped: %s", id, err)
