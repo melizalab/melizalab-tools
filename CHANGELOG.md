@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `abf-zip` catalogs every file in the recording's directory with its SHA-1
+  hash (`sha1`), not just the ABF files, and records itself in `metadata` as
+  `processed_by` (abfzip 1.0, melizalab-specs 0.1.1). `abf-zip build` refuses a
+  file that has changed since the catalog was written.
 - `group-kilo-spikes` creates the output directory if it doesn't exist.
 - `--debug` no longer shows h5py's internal debug messages ("Creating converter
   from 3 to 5").

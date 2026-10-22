@@ -2,6 +2,7 @@
 """Tests for dlab.abfzip (abf-zip), on three small ABF2 files from the
 intracellular archive (tests/data/abf: header versions 2.4, 2.6 and 2.9)."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -90,10 +91,18 @@ def recording(tmp_path):
     return src
 
 
+def sha1(data: bytes) -> str:
+    return hashlib.sha1(data).hexdigest()
+
+
 def catalog_in(src):
-    """CATALOG with the paths of the recording fixture"""
+    """The catalog of the recording fixture: CATALOG with its paths, then its
+    other files by path, each with its hash"""
     out = [dict(r) for r in CATALOG]
     out[2]["path"] = "later/" + out[2]["path"]
+    out += [{"path": "_1/img_MMStack_Pos0_metadata.txt"}, {"path": "notes.txt"}]
+    for record in out:
+        record["sha1"] = sha1((src / record["path"]).read_bytes())
     return out
 
 
@@ -177,9 +186,15 @@ def test_read_header_invalid(tmp_path, contents):
 
 
 def test_directory_to_catalog(recording):
-    """ABF files anywhere in the directory, in the order they were recorded;
-    other files aren't cataloged."""
+    """Every file, with its hash: ABF files anywhere in the directory in the
+    order they were recorded, then the others by path."""
     assert abfzip.directory_to_catalog(recording) == catalog_in(recording)
+
+
+def test_catalog_hash_is_of_the_file(recording):
+    catalog = abfzip.directory_to_catalog(recording)
+    record = next(r for r in catalog if r["path"] == "later/2025_05_07_0003.abf")
+    assert record["sha1"] == sha1((DATA / "2025_05_07_0003.abf").read_bytes())
 
 
 def test_directory_to_catalog_uppercase(recording):
@@ -224,6 +239,16 @@ def test_build_is_reproducible(recording, tmp_path):
     first = abfzip.build(recording, doc, tmp_path / "a.zip").read_bytes()
     os.utime(recording / "notes.txt", (0, 0))
     assert abfzip.build(recording, doc, tmp_path / "b.zip").read_bytes() == first
+
+
+def test_build_file_changed_since_cataloged(recording, tmp_path):
+    """A file whose hash isn't its record's has changed since the catalog was
+    written; nothing is built."""
+    doc = abfzip.metadata_document(METADATA, catalog_in(recording))
+    (recording / "notes.txt").write_text("cell 6\n")
+    with pytest.raises(ValueError, match=r"notes\.txt has changed"):
+        abfzip.build(recording, doc, tmp_path / "rec.zip")
+    assert not (tmp_path / "rec.zip").exists()
 
 
 def test_build_own_metadata(recording, tmp_path):
@@ -290,10 +315,17 @@ def test_script(single):
     )
     reviewed = single.parent / "rec.json"
     doc = json.loads(reviewed.read_text())
+    abf_sha1 = sha1((DATA / "2017_06_07_0044.abf").read_bytes())
     assert doc == abfzip.metadata_document(
-        METADATA | {"software": "Clampex 10.7.0.3"},
-        [CATALOG[1], CATALOG[1] | {"path": "2017_06_07_0045.abf"}],
+        METADATA
+        | {"software": "Clampex 10.7.0.3", "processed_by": abfzip.PROCESSED_BY},
+        [
+            CATALOG[1] | {"sha1": abf_sha1},
+            CATALOG[1] | {"path": "2017_06_07_0045.abf", "sha1": abf_sha1},
+            {"path": "notes.txt", "sha1": sha1(b"cell 5\n")},
+        ],
     )
+    assert abfzip.PROCESSED_BY.startswith("org.meliza.melizalab-tools/abf-zip ")
     # the reviewer adds a note to a file
     doc["catalog"][1]["note"] = "after bath application"
     reviewed.write_text(json.dumps(doc))
@@ -308,6 +340,13 @@ def test_script_catalog_name_with_underscores(single):
     abfzip.script(["catalog", "-k", "name=20140603_1_1", str(single)])
     doc = json.loads((single.parent / "rec.json").read_text())
     assert doc["metadata"]["name"] == "20140603_1_1"
+
+
+def test_script_catalog_processed_by_with_k(single):
+    """processed_by is abf-zip's to set"""
+    with pytest.raises(ValueError, match="processed_by is set by abf-zip"):
+        abfzip.script(["catalog", "-k", "processed_by=me", str(single)])
+    assert not (single.parent / "rec.json").exists()
 
 
 def test_script_catalog_exists(recording):

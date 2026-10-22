@@ -3,10 +3,11 @@
 
 An abfzip archive (https://meliza.org/spec:4/abfzip/) holds the ABF files of
 one recording, with a metadata.json member that describes the recording
-(`metadata`, registered on deposit) and its files (`catalog`: the acquisition
-protocol, start time, and settings of each ABF file, from its header). The
-recording's metadata includes the software that wrote the files, which must be
-the same for all of them.
+(`metadata`, registered on deposit) and its files (`catalog`: the SHA-1 hash of
+every file, and the acquisition protocol, start time, and settings of each ABF
+file, from its header). The recording's metadata includes the software that
+wrote the files, which must be the same for all of them, and abf-zip's name
+and version as `processed_by`.
 
 Everything in metadata.json is fixed by the archive's hash once it's built, so
 abf-zip works in two steps: `abf-zip catalog` writes metadata.json beside the
@@ -18,6 +19,7 @@ canonical form, so the same files always give the same archive.
 
 import argparse
 import datetime
+import hashlib
 import json
 import logging
 import re
@@ -26,6 +28,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from dlab import __version__
+from dlab.pprox import CREATOR_PREFIX
 from dlab.util import add_log_arguments, setup_log
 
 log = logging.getLogger("dlab")
@@ -34,6 +37,7 @@ PROG = "abf-zip"
 SCHEMA = "https://meliza.org/spec:4/abfzip.json#"
 VERSION = "1.0"
 METADATA_NAME = "metadata.json"
+PROCESSED_BY = f"{CREATOR_PREFIX}{PROG} {__version__}"
 # the size of a block in an ABF file
 ABF_BLOCK_SIZE = 512
 # nOperationMode
@@ -220,11 +224,32 @@ def headers_to_catalog(
     return sorted(records, key=lambda r: (r.get("start", ""), r["path"]))
 
 
+def file_sha1(path: Path) -> str:
+    """The SHA-1 hash of the file at path, in lowercase hexadecimal"""
+    with open(path, "rb") as fp:
+        return hashlib.file_digest(fp, "sha1").hexdigest()
+
+
+def files_to_catalog(
+    src: Path, headers: Iterable[tuple[str, dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """A catalog record with its SHA-1 hash for every file under src: the ABF
+    files with headers (path, header) in the order they were recorded, then
+    the others by path"""
+    records = headers_to_catalog(headers)
+    abf_paths = {r["path"] for r in records}
+    records += [
+        {"path": path} for path in directory_files(src) if path not in abf_paths
+    ]
+    for record in records:
+        record["sha1"] = file_sha1(src / record["path"])
+    return records
+
+
 def directory_to_catalog(src: Path) -> list[dict[str, Any]]:
-    """A catalog record for each ABF file under src, in the order they were
-    recorded. Raises ValueError if there are none, or one isn't a valid ABF
-    file."""
-    return headers_to_catalog(directory_to_headers(src))
+    """A catalog record for every file under src (see files_to_catalog).
+    Raises ValueError if there are no ABF files, or one isn't valid."""
+    return files_to_catalog(src, directory_to_headers(src))
 
 
 def metadata_document(
@@ -299,6 +324,9 @@ def build(src: Path, doc: dict[str, Any], out: Path) -> Path:
     if not any(is_abf(path) for path in files):
         raise ValueError(f"no ABF files in {src}")
     check_metadata(doc, files)
+    for record in doc["catalog"]:
+        if "sha1" in record and file_sha1(src / record["path"]) != record["sha1"]:
+            raise ValueError(f"{record['path']} has changed since it was cataloged")
     return zip_directory(src, out, extra=[(METADATA_NAME, metadata_to_bytes(doc))])
 
 
@@ -308,6 +336,8 @@ def catalog_command(args) -> None:
     if out.exists():
         raise FileExistsError(f"{out} already exists")
     metadata = dict(args.metadata)
+    if "processed_by" in metadata:
+        raise ValueError(f"processed_by is set by {PROG}; don't give it with -k")
     for key in ("experimenter", "animal"):
         value = getattr(args, key)
         if value is not None:
@@ -317,8 +347,8 @@ def catalog_command(args) -> None:
     log.info("- cataloging ABF files in %s", src)
     headers = directory_to_headers(src)
     software = headers_to_software(headers)
-    catalog = headers_to_catalog(headers)
-    for record in catalog:
+    catalog = files_to_catalog(src, headers)
+    for record in filter(lambda r: is_abf(r["path"]), catalog):
         log.info(
             "  - %s: %s, %s",
             record["path"],
@@ -334,6 +364,7 @@ def catalog_command(args) -> None:
             )
     elif software is not None:
         metadata["software"] = software
+    metadata["processed_by"] = PROCESSED_BY
     doc = metadata_document(metadata, catalog)
     check_metadata(doc, directory_files(src))
     out.write_bytes(metadata_to_bytes(doc))

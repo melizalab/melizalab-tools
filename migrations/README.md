@@ -1,7 +1,7 @@
 # intracellular-abfdir normalization
 
-One-off scripts that clean up the registry metadata of the 1,975
-`intracellular-abfdir` resources before they are migrated to
+One-off scripts that clean up the registry metadata of the
+`intracellular-abfdir` resources and then migrate them to
 `intracellular-abfzip`. The migration copies each record's metadata into the
 zip's `metadata.json`, where the hash fixes it, so it has to be right first.
 Deleted once the migration is done.
@@ -38,6 +38,28 @@ Deleted once the migration is done.
    ```
 
    The log has every record before and after; keep it.
+
+3. `abfdir_to_abfzip.py` migrates the normalized resources, one archive at a
+   time. For each resource it checks the directory against its hash, builds
+   `<id>.zip` in the archive's staging directory with `abf-zip`'s builder
+   (metadata from the registry record plus the ABF files' `software`; the
+   catalog from the ABF headers), checks the zip with the reader and against
+   the directory byte for byte, stores it, changes the resource's sha1 and
+   dtype in the registry, and removes the directory last. Resources that fail
+   a check are skipped and logged; an error while storing, updating the
+   registry or removing stops the run, and running it again finishes what was
+   interrupted.
+
+   ```
+   nbank check archive --fix <root>          # creates staging/ in older archives
+   uv run python migrations/abfdir_to_abfzip.py --dry-run <root>
+   uv run python migrations/abfdir_to_abfzip.py --log abfzip-migrated.jsonl <root>
+   nbank check all <root>
+   ```
+
+   Changing a resource's sha1 needs a registry superuser, and the account
+   running it needs write access to the archive. `--limit N` and a list of ids
+   migrate a few first.
 
 ## Correction files
 
