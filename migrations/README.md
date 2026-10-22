@@ -40,15 +40,18 @@ Deleted once the migration is done.
    The log has every record before and after; keep it.
 
 3. `abfdir_to_abfzip.py` migrates the normalized resources, one archive at a
-   time. For each resource it checks the directory against its hash, builds
-   `<id>.zip` in the archive's staging directory with `abf-zip`'s builder
-   (metadata from the registry record plus the ABF files' `software`; the
-   catalog from the ABF headers), checks the zip with the reader and against
-   the directory byte for byte, stores it, changes the resource's sha1 and
-   dtype in the registry, and removes the directory last. Resources that fail
-   a check are skipped and logged; an error while storing, updating the
-   registry or removing stops the run, and running it again finishes what was
-   interrupted.
+   time. For each resource it builds `<id>.zip` in the archive's staging
+   directory with `abf-zip`'s builder: metadata from the registry record plus
+   the ABF files' `software` and `processed_by`
+   (`org.meliza.melizalab-tools/abfdir-to-abfzip <version>`), and a catalog
+   record with its SHA-1 for every file. It checks the zip (the reader, the
+   metadata, each member against its hash, and that the files' hashes give the
+   directory's registered hash, which ties the zip to the resource it
+   replaces), stores it, changes the resource's sha1 and dtype and adds the two
+   metadata keys in the registry, and removes the directory last. Resources
+   that fail a check are skipped and logged; an error while storing, updating
+   the registry or removing stops the run, and running it again finishes what
+   was interrupted.
 
    ```
    nbank check archive --fix <root>          # creates staging/ in older archives

@@ -4,21 +4,23 @@ intracellular-abfzip.
 
 For each resource, in this order:
 
-1. check the directory against its registered hash;
-2. build `<id>.zip` in the archive's staging directory with abf-zip's builder:
+1. build `<id>.zip` in the archive's staging directory with abf-zip's builder:
    `metadata` is the registry record's (experimenter, animal and metadata) plus
-   the ABF files' `software`, and the catalog comes from the ABF headers;
-3. check the zip with the intracellular-abfzip reader, check that its members
-   are the directory's files byte for byte, and that its metadata is what the
-   registry will hold;
-4. move it into the archive as `<id>.zip`;
-5. change the resource's sha1 and dtype in the registry, and add `software` to
-   its metadata, in one request (this needs a superuser);
-6. remove the directory.
+   the ABF files' `software` and this script as `processed_by`; the catalog has
+   a record for every file, with its SHA-1 hash, and the ABF files' headers;
+2. check the zip: it passes the intracellular-abfzip reader, carries the
+   registry's metadata, has a record for every member, each member matches its
+   record's hash, and the records' hashes give the directory's registered hash
+   (neurobank hashes a directory from its files' hashes), which ties the zip to
+   the resource it replaces;
+3. move it into the archive as `<id>.zip`;
+4. change the resource's sha1 and dtype in the registry, and add `software` and
+   `processed_by` to its metadata, in one request (this needs a superuser);
+5. remove the directory.
 
 The directory stays until the registry knows the zip, so the data is on disk at
-every step. A resource whose directory doesn't match its hash, or whose zip
-can't be built or doesn't check, is reported and skipped. An error while storing,
+every step. A resource whose zip can't be built or doesn't check (including a
+directory that no longer matches its hash) is reported and skipped. An error while storing,
 updating the registry or removing stops the run. A resource interrupted after
 step 4 is finished from where it stopped when the script is run again, and one
 already migrated is skipped. --dry-run builds and checks each zip in staging,
@@ -43,13 +45,17 @@ from typing import Any
 import httpx
 from nbank import archive, core, registry, util
 
-from dlab import abfzip, readers
+from dlab import __version__, abfzip, readers
+from dlab.pprox import CREATOR_PREFIX
 
 log = logging.getLogger("abfdir-to-abfzip")
 
 DTYPE_FROM = "intracellular-abfdir"
 DTYPE_TO = "intracellular-abfzip"
 FIELDS = ("experimenter", "animal")
+PROCESSED_BY = f"{CREATOR_PREFIX}abfdir-to-abfzip {__version__}"
+# the metadata the migration adds to the registry's
+ADDED = ("software", "processed_by")
 
 
 class Skip(Exception):
@@ -76,10 +82,8 @@ class Registry:
     def get(self, id: str) -> dict:
         return core.describe(self.url, id)
 
-    def migrate(self, id: str, sha1: str, software: str | None) -> dict:
-        data = {"sha1": sha1, "dtype": DTYPE_TO}
-        if software is not None:
-            data["metadata"] = {"software": software}
+    def migrate(self, id: str, sha1: str, metadata: dict) -> dict:
+        data = {"sha1": sha1, "dtype": DTYPE_TO, "metadata": metadata}
         r = self.session.patch(registry.full_url(self.url, id), json=data)
         if r.status_code >= 400:
             raise RuntimeError(f"{id}: the registry refused the update: {r.text}")
@@ -104,13 +108,14 @@ def registry_metadata(record: dict) -> dict[str, Any]:
     return metadata
 
 
-def build_zip(src: Path, record: dict, out: Path) -> tuple[dict, str | None]:
+def build_zip(src: Path, record: dict, out: Path) -> None:
     """Builds the zip of the directory src for the registry record at out.
-    Returns (its metadata, the software that wrote the ABF files). Raises Skip
-    if the directory doesn't match its hash or can't be built."""
-    if util.hash_directory(src) != record["sha1"]:
-        raise Skip("the directory doesn't match its registered hash")
+    Raises Skip if it can't be built."""
     metadata = registry_metadata(record)
+    if "processed_by" in metadata:
+        raise Skip(
+            f"the registry already has processed_by {metadata['processed_by']!r}"
+        )
     try:
         headers = abfzip.directory_to_headers(src)
         software = abfzip.headers_to_software(headers)
@@ -121,33 +126,45 @@ def build_zip(src: Path, record: dict, out: Path) -> tuple[dict, str | None]:
                     f"files' is {software!r}"
                 )
             metadata["software"] = software
-        doc = abfzip.metadata_document(metadata, abfzip.headers_to_catalog(headers))
-        abfzip.build(src, doc, out)
+        metadata["processed_by"] = PROCESSED_BY
+        catalog = abfzip.files_to_catalog(src, headers)
+        abfzip.build(src, abfzip.metadata_document(metadata, catalog), out)
     except ValueError as err:
         out.unlink(missing_ok=True)
         raise Skip(str(err)) from err
-    return metadata, software
 
 
-def check_zip(path: Path, src: Path, metadata: dict) -> None:
-    """Raises Skip unless the zip at path passes the reader, holds exactly the
-    files of the directory src (and metadata.json), byte for byte, and carries
-    metadata"""
+def check_zip(path: Path, record: dict) -> dict:
+    """Checks the zip at path against the registry record of the directory it
+    replaces (see the module's docstring), and returns the metadata it adds to
+    the registry's. Raises Skip if it doesn't check."""
     try:
-        found = readers.read_abfzip_metadata(path)
+        metadata = readers.read_abfzip_metadata(path)
     except ValueError as err:
         raise Skip(f"the zip fails the reader: {err}") from err
-    if found != metadata:
-        raise Skip(f"the zip's metadata is {found}, not {metadata}")
-    files = abfzip.directory_files(src)
+    expected = registry_metadata(record)
+    added = {k: v for k, v in metadata.items() if k not in expected}
+    if {k: metadata.get(k) for k in expected} != expected or set(added) - set(ADDED):
+        raise Skip(f"the zip's metadata is {metadata}, not the registry's {expected}")
+    hasher = util.DirectoryHasher()
     with zipfile.ZipFile(path) as zf:
+        catalog = json.loads(zf.read(abfzip.METADATA_NAME))["catalog"]
         members = sorted(n for n in zf.namelist() if n != abfzip.METADATA_NAME)
-        if members != files:
-            raise Skip("the zip's members aren't the directory's files")
-        for name in files:
-            with open(src / name, "rb") as a, zf.open(name) as b:
-                if sha1_of(a) != sha1_of(b):
-                    raise Skip(f"{name} in the zip differs from the directory's")
+        if sorted(r["path"] for r in catalog) != members:
+            raise Skip("the zip's catalog doesn't have a record for every member")
+        for r in catalog:
+            if "sha1" not in r:
+                raise Skip(f"{r['path']} has no sha1 in the catalog")
+            with zf.open(r["path"]) as fp:
+                if sha1_of(fp) != r["sha1"]:
+                    raise Skip(f"{r['path']} in the zip doesn't match its sha1")
+            hasher.add(r["path"], r["sha1"])
+    if hasher.hexdigest() != record["sha1"]:
+        raise Skip(
+            "the files' hashes don't give the directory's registered hash (the "
+            "directory has changed)"
+        )
+    return added
 
 
 def migrate(cfg, reg: Registry, record: dict, *, dry_run: bool) -> dict:
@@ -175,16 +192,7 @@ def migrate(cfg, reg: Registry, record: dict, *, dry_run: bool) -> dict:
 
     if dst.exists():
         # stored by an interrupted run, before the registry was updated
-        if util.hash_directory(src) != record["sha1"]:
-            raise Skip("the directory doesn't match its registered hash")
-        metadata = registry_metadata(record)
-        try:
-            software = abfzip.headers_to_software(abfzip.directory_to_headers(src))
-        except ValueError as err:
-            raise Skip(str(err)) from err
-        if software is not None:
-            metadata["software"] = software
-        check_zip(dst, src, metadata)
+        added = check_zip(dst, record)
         with open(dst, "rb") as fp:
             entry["new_sha1"] = sha1_of(fp)
         if dry_run:
@@ -193,9 +201,9 @@ def migrate(cfg, reg: Registry, record: dict, *, dry_run: bool) -> dict:
     else:
         staged = archive.staging_dir(cfg) / f"{id}.zip"
         staged.unlink(missing_ok=True)
-        metadata, software = build_zip(src, record, staged)
+        build_zip(src, record, staged)
         try:
-            check_zip(staged, src, metadata)
+            added = check_zip(staged, record)
         except Skip:
             staged.unlink()
             raise
@@ -208,8 +216,12 @@ def migrate(cfg, reg: Registry, record: dict, *, dry_run: bool) -> dict:
         archive.permission_fixer(cfg)(dst)
         entry["outcome"] = "migrated"
 
-    updated = reg.migrate(id, entry["new_sha1"], software)
-    if updated.get("sha1") != entry["new_sha1"] or updated.get("dtype") != DTYPE_TO:
+    updated = reg.migrate(id, entry["new_sha1"], added)
+    if (
+        updated.get("sha1") != entry["new_sha1"]
+        or updated.get("dtype") != DTYPE_TO
+        or any(updated["metadata"].get(k) != v for k, v in added.items())
+    ):
         raise RuntimeError(f"{id}: the registry's record after the update is {updated}")
     archive.remove(src)
     return entry
