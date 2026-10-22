@@ -151,12 +151,9 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   - telegraph mode 2 (6 files) is cataloged as `"zero current"` (presumed:
     its primary channel is in mV, like current clamp); 0 and 1 agree with
     the channel units.
-- [ ] Normalize the intracellular-abfdir metadata in the registry before the
-  migration (`migrations/normalize_abfdir.py`; plan and what's left in
-  neurobank's TODO.md). The reader returns all of an archive's `metadata`, so
-  whatever the migration copies from the registry is registered again on
-  deposit.
-- [ ] Two resources have no ABF files (6edc858d: one .tif; f5bbaa66: empty).
+- [x] Normalize the intracellular-abfdir metadata in the registry before the
+  migration (done 2026-10-21; `migrations/README.md`). 6edc858d and f5bbaa66,
+  which had no ABF files, were deleted.
 - [ ] bad08eac (rallapalli, `20250719_2_2`) holds the files of two sessions,
   2025-07-19 and 07-21 (the second recording wasn't given its own directory).
   Split it and deposit the 07-21 files as their own resource, after the
