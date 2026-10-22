@@ -26,15 +26,20 @@ table of the recording names for review. Changes nothing in the registry.
   where the log confirms the record's animal.
 
 --names takes a TSV of `id` and `recording` (e.g. from analysis control files),
-which is used in place of the recovered name.
+which is used in place of the recovered name; --animals a TSV of `id` and
+`animal`, used in place of the registered animal. Other columns are ignored.
 
 --archive takes the archive's root directory, where the resources are
 readable. The table then lists each resource's files and the dates its ABF
 files were recorded (from their headers); an ambiguous name is recovered if
 only one reading has that date, and a recording whose date isn't one of them is
-listed for review. Clampex numbers the files of a session in order, so within
-one experimenter's day, a later slice or cell should have later files; ones
-that don't are listed for review. Without it, nothing is read from the archive.
+listed for review, as is one with files from any other day than its date and
+the next (a session past midnight, noted). Clampex numbers the files of a session in order, so on a
+day when one experimenter's file numbers run on from cell to cell (their
+ranges don't overlap), a later slice or cell should have later files; ones that
+don't are listed for review. Days when the numbering restarts (for each cell,
+or partway through) aren't checked. Without it, nothing is read from the
+archive.
 
 Run with `uv run python migrations/normalize_abfdir.py`. Deleted once the
 migration is done.
@@ -185,7 +190,11 @@ def recover(value, created: datetime.date) -> tuple[str | None, list[str], str]:
 
 
 def plan(
-    record: dict, names: dict[str, str], events: SliceEvents, abf: dict | None
+    record: dict,
+    names: dict[str, str],
+    animals: dict[str, str],
+    events: SliceEvents,
+    abf: dict | None,
 ) -> dict:
     metadata = {k: v for k, v in record["metadata"].items() if k not in FIELDS}
     created = datetime.date.fromisoformat(record["created_on"][:10])
@@ -215,8 +224,13 @@ def plan(
             review.append(f"name {metadata['name']!r}: {how}")
         elif not RECORDING.fullmatch(recording) or parse_date(recording[:8]) is None:
             review.append(f"recording {recording!r} isn't YYYYMMDD_SLICE_CELL")
-        elif abf and abf["dates"] and recording[:8] not in abf["dates"]:
-            review.append(f"ABF files recorded on {', '.join(abf['dates'])}")
+        elif abf and abf["dates"]:
+            next_day = parse_date(recording[:8]) + datetime.timedelta(days=1)
+            session = {recording[:8], f"{next_day:%Y%m%d}"}
+            if not session & set(abf["dates"]) or set(abf["dates"]) - session:
+                review.append(f"ABF files recorded on {', '.join(abf['dates'])}")
+            elif recording[:8] not in abf["dates"]:
+                notes.append("ABF files recorded after midnight")
     if abf and abf["error"]:
         review.append(abf["error"])
     for old, new in RENAMED.items():
@@ -258,7 +272,12 @@ def plan(
     recording = name.get("recording")
     used = events(parse_date(recording[:8])) if recording else {}
     animal = record["animal"]
-    if animal is None:
+    if record["name"] in animals:
+        animal = update["animal"] = animals[record["name"]]
+        notes.append(f"animal given (registered {record['animal']})")
+        if animal not in used:
+            review.append(f"given animal wasn't used for slices on {recording[:8]}")
+    elif animal is None:
         found = list(used)
         if len(found) > 1:
             found = [a for a in found if used[a] == experimenter]
@@ -325,13 +344,20 @@ def numbers(p: dict) -> str:
 
 def check_order(plans: list[dict]) -> None:
     """Lists for review the recordings whose ABF files aren't in the order of
-    their slices and cells, within one experimenter's day"""
+    their slices and cells, on days when one experimenter's file numbers run on
+    from cell to cell"""
     sessions = defaultdict(list)
     for p in plans:
         recording = p["_name"].get("recording")
         if recording and RECORDING.fullmatch(recording) and p["_abf"]["numbers"]:
             sessions[(p["_experimenter"], recording[:8])].append(p)
     for group in sessions.values():
+        by_number = sorted(group, key=lambda p: p["_abf"]["numbers"][0])
+        if any(
+            b["_abf"]["numbers"][0] <= a["_abf"]["numbers"][-1]
+            for a, b in itertools.pairwise(by_number)
+        ):
+            continue
         group.sort(key=lambda p: (cell_order(p), p["_abf"]["numbers"][0]))
         for a, b in itertools.pairwise(group):
             if b["_abf"]["numbers"][0] <= a["_abf"]["numbers"][-1]:
@@ -342,10 +368,12 @@ def check_order(plans: list[dict]) -> None:
                     )
 
 
-def read_names(path) -> dict[str, str]:
+def read_tsv(path, column: str) -> dict[str, str]:
+    """{id: value of column} from a TSV with a header row; other columns (such
+    as a reason) are ignored"""
     with open(path, newline="") as fp:
         return {
-            row["id"].strip(): row["recording"].strip()
+            row["id"].strip(): row[column].strip()
             for row in csv.DictReader(fp, delimiter="\t")
         }
 
@@ -355,6 +383,9 @@ def main(argv=None):
     p.add_argument("-r", dest="registry_url", default=registry.default_registry())
     p.add_argument(
         "--names", help="TSV of id and recording, used in place of the recovered names"
+    )
+    p.add_argument(
+        "--animals", help="TSV of id and animal, used in place of the registered animal"
     )
     p.add_argument("-o", "--output", required=True, help="the change file (JSON lines)")
     p.add_argument("--table", required=True, help="the names, for review (TSV)")
@@ -375,7 +406,8 @@ def main(argv=None):
                 f"--archive {args.archive}: not an archive ({err}); give its root "
                 "directory, as `nbank archive list` shows it"
             )
-    names = read_names(args.names) if args.names else {}
+    names = read_tsv(args.names, "recording") if args.names else {}
+    animals = read_tsv(args.animals, "animal") if args.animals else {}
 
     records = list(core.search(args.registry_url, dtype=DTYPE))
     events = SliceEvents(args.events)
@@ -386,7 +418,7 @@ def main(argv=None):
             abf = read_directory(args.archive, r["name"])
             if i % 100 == 0:
                 print(f"  read {i} of {len(records)}", file=sys.stderr)
-        plans.append(plan(r, names, events, abf))
+        plans.append(plan(r, names, animals, events, abf))
 
     # two experimenters sharing an animal number slices and cells independently,
     # but one experimenter's recording names are unique for an animal
@@ -466,7 +498,7 @@ def main(argv=None):
     print(f"  names: {dict(how)}", file=sys.stderr)
     print(f"  keys set: {dict(changed)}", file=sys.stderr)
     for reason, n in Counter(
-        re.sub(r"[\"'].*?[\"']|\d{8}_\d+_\d+|\d{6,}|/\S+", "…", r)
+        re.sub(r"[\"'].*?[\"']|\d{8}_\d+_\d+|\d{6,}|/\S+|\d{4}-\d{4}", "…", r)
         for p in plans
         for r in p["review"]
     ).most_common():
