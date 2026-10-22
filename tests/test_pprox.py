@@ -281,9 +281,21 @@ def test_split_trial_empty():
 
 
 def test_empty():
-    """empty() is a pprox collection with the base schema and no trials."""
+    """empty() is a pprox collection with the base schema, its version, and no
+    trials."""
     pp = pprox.empty()
-    assert pp == {"$schema": pprox._base_schema, "pprox": ()}
+    assert pp == {"$schema": pprox._base_schema, "version": "1.1", "pprox": ()}
+
+
+@pytest.mark.parametrize("schema", [pprox._base_schema, pprox._stimtrial_schema])
+def test_from_trials_gives_the_schema_version(schema):
+    assert pprox.from_trials([], schema=schema)["version"] == "1.1"
+
+
+def test_from_trials_other_schema_has_no_version():
+    """The version of another schema isn't known."""
+    pp = pprox.from_trials([], schema="https://example.org/mine.json#")
+    assert "version" not in pp
 
 
 def test_from_trials_consumes_iterators_and_returns_tuple():

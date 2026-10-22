@@ -206,7 +206,7 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5d/57/dfb3c5c3f1bf5f5ef2e59a22dec4ff1f3d7408b55bfcefcfb0ea69ef21c6/h5py-3.14.0.tar.gz", hash = "sha256:2372116b2e0d5d3e5e705b7f663f7c8d96fa79a4052d250484ef91d24d6a08f4", size = 424323, upload-time = "2025-06-06T14:06:15.01Z" }
 wheels = [
@@ -236,7 +236,7 @@ resolution-markers = [
     "python_full_version == '3.13.*'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version >= '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/db/33/acd0ce6863b6c0d7735007df01815403f5589a21ff8c2e1ee2587a38f548/h5py-3.16.0.tar.gz", hash = "sha256:a0dbaad796840ccaa67a4c144a0d0c8080073c34c76d5a6941d6818678ef2738", size = 446526, upload-time = "2026-03-06T13:49:08.07Z" }
 wheels = [
@@ -400,11 +400,11 @@ wheels = [
 
 [[package]]
 name = "melizalab-specs"
-version = "0.1.0"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/79/ae/111a66d196ef5dcee5d81485c4e68f90db4fb9b1be961480306dc64bf48b/melizalab_specs-0.1.0.tar.gz", hash = "sha256:a8f70454b0380aac24a519640f397f5256d25e1f201b700a7fcd19800ba25edb", size = 17772, upload-time = "2026-10-20T13:36:38.409Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/70/f53fcd6023a437e64c6b36734dc8476e5510a84a0bb9cae81bef5ca05280/melizalab_specs-0.1.2.tar.gz", hash = "sha256:88cb3852e38f83793e7903ec23409b509b32b2d985437581d6244e1044dbb2d8", size = 19095, upload-time = "2026-10-22T12:56:29.112Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/0b/f7992b6dfc1e71d0b64478f445291b2f532cf003d95dc865171ce0a439e6/melizalab_specs-0.1.0-py3-none-any.whl", hash = "sha256:0b3fb7d8e14b96d8c0e88232315859d0f72d17540b4b269c00b6720960b8eb6b", size = 23548, upload-time = "2026-10-20T13:36:37.194Z" },
+    { url = "https://files.pythonhosted.org/packages/35/32/5d8aab82e8ccfd5cc18b921c1a61a4d870fa952eedb2772a2bd8feeea18f/melizalab_specs-0.1.2-py3-none-any.whl", hash = "sha256:8c3d9eb8c6fa08a98bdedd6c7b9ace6673e798ffab9069245a50ebcfbdc85176", size = 25072, upload-time = "2026-10-22T12:56:27.923Z" },
 ]
 
 [package.optional-dependencies]
@@ -453,7 +453,7 @@ requires-dist = [
     { name = "ewave", specifier = ">=1.0.10" },
     { name = "jsonschema", specifier = ">=4.18" },
     { name = "libtfr", specifier = ">=2.1.9" },
-    { name = "melizalab-specs", extras = ["validate"], specifier = ">=0.1" },
+    { name = "melizalab-specs", extras = ["validate"], specifier = ">=0.1.2" },
     { name = "neo", specifier = ">=0.14,<0.15" },
     { name = "neurobank", specifier = ">=0.13,<0.14" },
     { name = "pandas", specifier = ">=2.3.1" },
@@ -1002,7 +1002,7 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -1078,7 +1078,7 @@ resolution-markers = [
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7e/74/66de6258867beb2ef08f35f9f2ac017a52cacd5081714d239ff1a442d458/scipy-1.18.1.tar.gz", hash = "sha256:52c4b7422442aba924d03ad4019852b08a92e64ea187b933135687bfe2747307", size = 30781235, upload-time = "2026-08-21T23:28:50.599Z" }
 wheels = [

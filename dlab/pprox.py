@@ -23,6 +23,8 @@ import pandas as pd
 
 _base_schema = "https://meliza.org/spec:2/pprox.json#"
 _stimtrial_schema = "https://meliza.org/spec:2/stimtrial.json#"
+# the version of each specification that from_trials writes
+_schema_versions = {_base_schema: "1.1", _stimtrial_schema: "1.1"}
 # prefix of the program entries in `processed_by`, as in arfx
 CREATOR_PREFIX = "org.meliza.melizalab-tools/"
 
@@ -85,8 +87,12 @@ def empty() -> Collection:
 def from_trials(
     trials: Iterable[Trial], *, schema: str = _base_schema, **metadata
 ) -> Collection:
-    """Wrap a sequence of trials in a pprox object, optionally specifying top-level metadata"""
+    """Wrap a sequence of trials in a pprox object, optionally specifying top-level
+    metadata. The object gives the version of the schema it follows, if it's one
+    of the lab's."""
     d = {"$schema": schema, "pprox": tuple(trials)}
+    if schema in _schema_versions:
+        d["version"] = _schema_versions[schema]
     d.update(**metadata)
     return d
 

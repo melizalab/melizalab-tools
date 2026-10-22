@@ -15,7 +15,7 @@ import h5py
 import numpy as np
 
 # top-level fields expected to differ between runs or versions
-IGNORED = frozenset({"processed_by"})
+IGNORED = frozenset({"processed_by", "version"})
 
 
 def load(path: Path) -> dict:

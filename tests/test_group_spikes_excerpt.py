@@ -27,8 +27,9 @@ DATA = Path(__file__).parent / "data"
 SORTING = DATA / "E36_excerpt_sorting"
 GOLDEN = DATA / "E36_excerpt_golden"
 N_BEFORE, N_AFTER = 60, 150  # the script's default waveform window (2 and 5 ms)
-# fields that differ from the golden files: the version, and presenter (new)
-GOLDEN_IGNORED = frozenset({"processed_by", "presenter"})
+# fields that differ from the golden files: the program's version, and
+# presenter and the schema's version (new)
+GOLDEN_IGNORED = frozenset({"processed_by", "presenter", "version"})
 # the entry_creator of the excerpt's entries
 ARF_CREATOR = "org.meliza.arfx/arfx-oephys 2.8.0"
 
