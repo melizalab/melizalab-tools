@@ -151,20 +151,12 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   - telegraph mode 2 (6 files) is cataloged as `"zero current"` (presumed:
     its primary channel is in mV, like current clamp); 0 and 1 agree with
     the channel units.
-- [ ] Migration of intracellular-abfdir resources: 788 of 1,976 have an
-  integer `name` because `nbank -k` read e.g. `20140603_1_1` as 2014060311
-  (underscores are digit separators in Python; fixed in neurobank master,
-  which reads -k values as JSON). Recover the names with heuristics
-  (recording date, the ABF file names, `_N_M` patterns); 9- and 11-digit
-  names are ambiguous. Also: 19 resources have only `name` in their metadata,
-  and two have no ABF files (6edc858d: one .tif; f5bbaa66: empty).
-- [ ] Normalize the intracellular-abfdir metadata in the registry (with
-  django-neurobank's normalization) before the migration, so that the
-  archives get the agreed names: `rearing` to `condition`, `region` to
-  `location` (one record already has a free-text `location`), `filled` to
-  `biocytin` (387 records have `filled: "biocytin"`; `biocytin` is a boolean).
-  The reader returns all of an archive's `metadata`, so whatever the
-  migration copies from the registry is registered again on deposit.
+- [ ] Normalize the intracellular-abfdir metadata in the registry before the
+  migration (`migrations/normalize_abfdir.py`; plan and what's left in
+  neurobank's TODO.md). The reader returns all of an archive's `metadata`, so
+  whatever the migration copies from the registry is registered again on
+  deposit.
+- [ ] Two resources have no ABF files (6edc858d: one .tif; f5bbaa66: empty).
 
 ## Recording practice
 
