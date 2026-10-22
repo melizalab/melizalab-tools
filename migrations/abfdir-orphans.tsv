@@ -1,0 +1,17 @@
+id	action	twin	recording	experimenter	animal	why
+c29db4ae-6065-44f5-812c-56820c900b08	remove	c9fd5405-3b13-46f3-bb85-c6b4da1c7b67	20150624_1_1			same 10 files, byte for byte, as c9fd5405: a deposit the registry refused as a duplicate
+cd5be7b7-c77c-4176-8481-4f81def1b79c	remove	04943121-285e-4515-bf35-2e3026fd1053	20150915_1_2			same 5 files, byte for byte, as 04943121: a deposit the registry refused as a duplicate
+0d6bdda9-f92f-4088-b016-4f2bbceeb5b0	remove	2920423d-e8bb-4219-a97f-bb5d05c293da	20150918_1_1			same 10 files, byte for byte, as 2920423d: a deposit the registry refused as a duplicate
+62444418-5a9d-40ae-acf7-19ed75c40816	remove	0757bce3-599c-4829-9fe9-ca93541f1f9d	20160118_1_1			same 11 files, byte for byte, as 0757bce3: a deposit the registry refused as a duplicate
+ac8795a9-2a59-4d3d-93a2-285b1806c119	remove	025f927b-9bbc-4bfa-b0c7-5929b9d1adb2	20160121_1_1			same 13 files, byte for byte, as 025f927b: a deposit the registry refused as a duplicate
+f7c2aee9-a62c-477d-823c-03ca48a30fdc	remove	7844969f-114e-400d-abb5-4295ae8e8c49	20160126_1_1			same 12 files, byte for byte, as 7844969f: a deposit the registry refused as a duplicate
+21c25a2e-e208-4142-a4c6-3e99d4335b64	remove	1261f4ca-8e24-421f-a190-78521be76d17	20160127_1_1			same 11 files, byte for byte, as 1261f4ca: a deposit the registry refused as a duplicate
+4c72d64b-976e-46a5-8987-571eb3e070fa	remove	f7f4be65-f402-4300-8094-3d8528e6fb0a	20160127_2_1			same 10 files, byte for byte, as f7f4be65: a deposit the registry refused as a duplicate
+3753f7e5-282a-4c4f-8aba-5bcaf191f2e0	remove	319f0d35-d12d-4beb-834d-df49b9bc22f5	20160525_2_1			same 26 files, byte for byte, as 319f0d35: a deposit the registry refused as a duplicate
+2df902ae-aa12-4611-b4df-9edb8dd67127	remove	0aa1b493-e145-48e0-af28-1a9b72d36ab7	20170126_1_1			same 18 files, byte for byte, as 0aa1b493: a deposit the registry refused as a duplicate
+70550f86-f18a-4e16-b39e-5ba9f53f7c32	remove	28ebfbd1-cf0c-40bc-a819-7b93b0f75bb9	20170126_2_3			same 24 files, byte for byte, as 28ebfbd1: a deposit the registry refused as a duplicate
+d0b349a3-7229-45cb-8d4f-965a689a34c4	remove	f78721da-baf2-416a-ac8d-c0e249c5ad6a	20170126_2_1			same 18 files, byte for byte, as f78721da: a deposit the registry refused as a duplicate
+f5fd9ba5-e3a7-4c16-b530-93f589c419e6	remove	ec6aa320-e499-4a3e-b11e-a872aa82d23a	20170126_2_2			same 22 files, byte for byte, as ec6aa320: a deposit the registry refused as a duplicate
+f4150549-9f67-4968-aad9-c5ac796b3bba	remove	0a46ff60-e807-4223-a9d9-59b9a005b101	20200120_1_1			same 4 files, byte for byte, as 0a46ff60: a deposit the registry refused as a duplicate
+7cb7dda7-1b2e-47b0-b949-47f50307fe53	register		20150806_1_3	anc4kj	b8f2372a-7fc0-4c42-8aee-caafd6181e68	files 0012-0018 follow 20150806_1_2 (0004-0011); images named 20150806_1_3; red_104 used for slices by anc4kj that day
+df12492e-7a28-40f7-a060-a8bf59afc26b	register		20140625_1_1	anc4kj	c4acc1e2-dd76-4388-a046-b2313f9b9aae	files 0000-0018 over 30 minutes, the battery run twice (one cell); the 2014 rig and protocols; red_20 used for slices by anc4kj that day; slice and cell numbers presumed
