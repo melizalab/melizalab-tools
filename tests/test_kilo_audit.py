@@ -128,6 +128,23 @@ def audit(output, *units, **kwargs):
     return kilo_audit.audit_recording(E36, units, recording="E36_5_1", **kwargs)
 
 
+def test_several_entries_fail_every_unit(output, e36_arf):
+    """Spikes in a recording with more than one entry were assigned to the
+    wrong trials, so every unit fails and its other checks are skipped."""
+    with h5py.File(e36_arf, "a") as fp:
+        (name,) = fp.keys()
+        fp.copy(fp[name], "later")
+        fp["later"].attrs["timestamp"] = fp[name].attrs["timestamp"] + [3600, 0]
+    units = kilo_audit.load_units([str(output)], None)
+    report = kilo_audit.audit_recording(e36_arf, units, recording="E36_5_1")
+    assert report["status"] == "fail"
+    assert report["units"]
+    for unit in report["units"]:
+        assert [(f["check"], f["severity"]) for f in unit["findings"]] == [
+            ("several-entries", "fail")
+        ]
+
+
 def unit_report(report, name=UNIT):
     (unit,) = [u for u in report["units"] if u["name"] == name]
     return unit

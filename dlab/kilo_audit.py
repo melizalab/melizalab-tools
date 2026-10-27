@@ -1330,6 +1330,18 @@ def audit_recording(
                     if name in records
                 ]
                 unit.findings.extend(check_unit_metadata(unit, record, unit_records))
+            if len(entries) > 1:
+                # the trials can't be trusted, so the other checks would mislead
+                unit.findings.append(
+                    finding(
+                        "several-entries",
+                        "fail",
+                        f"the ARF file has {len(entries)} entries: group-kilo-spikes "
+                        "assigns spikes to trials by sample time, which restarts in "
+                        "each entry, so spikes are in the wrong trials",
+                    )
+                )
+                continue
             entry_ids = {
                 t.get("recording", {}).get("entry", 0) for t in unit.trials
             } or {0}

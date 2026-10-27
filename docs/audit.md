@@ -284,6 +284,7 @@ version that fixed them (see [the report](#the-report)).
 |-----------------------------------------------------------------|------------|-----------|---------------------------------------------------------|
 | [`trial-tables-differ`](#trial-tables-differ)                   | warn       | yes       | use the units of one run                                |
 | [`versions-differ`](#versions-differ)                           | info       | —         | none needed                                             |
+| [`several-entries`](#several-entries)                           | fail       | yes       | rerun arfx-oephys, then group-kilo-spikes               |
 | [`recording-unregistered`](#recording-unregistered)             | warn       | yes       | register the recording, or check its id                 |
 | [`metadata-arf-mismatch`](#metadata-arf-mismatch)               | warn       | yes       | correct the registry metadata                           |
 | [`metadata-bird-mismatch`](#metadata-bird-mismatch)             | warn       | yes       | check which recording the file is                       |
@@ -346,6 +347,18 @@ exists.
 harmless, but check whether `trial-tables-differ` was also reported.
 
 **Fixable:** nothing to fix on its own.
+
+#### `several-entries`
+
+**Severity:** fail, for every unit
+
+**Problem:** The ARF file has more than one entry, which comes from a mistake
+with arfx-oephys. group-kilo-spikes assigns spikes to trials by sample time,
+which restarts in each entry, so spikes are in the wrong trials. The unit's
+other checks are skipped. group-kilo-spikes now refuses these files.
+
+**Fixable:** yes. Make the ARF file again with arfx-oephys, so it has one
+entry, and rerun group-kilo-spikes.
 
 ### Findings about the recording: metadata
 
