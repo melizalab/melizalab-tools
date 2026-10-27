@@ -12,6 +12,14 @@
 - The log names the unit's channel as the recording does (e.g. `CH26`) for both
   the recorded amplitude and the waveforms; the waveform message used the
   sort's 0-based channel index.
+- `get-songs --deposit` works again; it failed on every file with neurobank
+  0.13.
+- `dlab.neurobank.find_resources` uses neurobank's lookup
+  (`nbank.core.find_resources`). Downloads are cached where `nbank` caches
+  them (`NBANK_CACHE`, or `neurobank` in the user cache directory), so files
+  in the old `dlab` cache are downloaded again once; that cache can be
+  deleted. Downloads from a host other than the registry's use that host's
+  `~/.netrc` entry. `fetch_resource` and `dlab.cache` are gone.
 
 ## 2026.10.22
 

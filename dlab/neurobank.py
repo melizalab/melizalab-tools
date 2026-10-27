@@ -1,20 +1,16 @@
 # -*- mode: python -*-
 """Functions for interfacing with the neurobank repository"""
 
-import concurrent.futures
 import json
 import logging
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import urlparse
 
-from httpx import Client, HTTPStatusError, NetRCAuth
-from nbank import registry, util
-from nbank.archive import resolve_extension
+from httpx import HTTPStatusError, NetRCAuth
+from nbank import cache, core, registry
 from nbank.core import deposit, describe, describe_many
 from nbank.registry import log_error
-
-from dlab import cache
 
 log = logging.getLogger(__name__)
 default_registry = registry.default_registry()
@@ -35,59 +31,26 @@ def find_resources(
 ) -> Iterator[MaybeResourcePath]:
     """Locate resources using neurobank or a local directory.
 
-    This function will try to locate resources from the following locations:
-    - a local directory (alt_base, if set),
-    - a local neurobank archive (using registry_url and alt_base, if provided),
-    - a local cache of previously fetched resources
-    - a remote HTTP archive (using registry_url, caching the file for local access later;
-      credentials for archives that need them are read from ~/.netrc)
+    Looks for each resource in alt_base (a directory of files named by id), and
+    then where the registry says it is: a neurobank archive on this host (with
+    alt_base, if set, replacing the directory that contains the archive), the
+    cache, or a download into the cache unless no_download is set. Credentials
+    are from default_auth (~/.netrc).
 
-    Yields results as they become available. The result for each requested id is
-    a Path if the resource was successfully located, or a
-    FileNotFoundError if the resource cannot be located.
+    Yields (id, result) as results become available, where result is a Path, or a
+    FileNotFoundError if the resource can't be found. See
+    nbank.core.find_resources.
 
     """
-    to_locate = set(resource_ids)
-    if alt_base is not None:
-        path = Path(alt_base)
-        for resource_id in resource_ids:
-            stem = path / resource_id
-            try:
-                yield (resource_id, resolve_extension(stem))
-                to_locate.remove(resource_id)
-                log.debug("%s: found in alt_base", resource_id)
-            except FileNotFoundError:
-                pass
-    if len(to_locate) == 0:
-        return
-    url, query = registry.get_locations_bulk(registry_url, to_locate)
-    # default_auth supplies credentials from ~/.netrc, by host, for archives that
-    # need them to download
-    with (
-        Client(auth=default_auth) as client,
-        concurrent.futures.ThreadPoolExecutor() as executor,
-    ):
-        response = util.query_registry_bulk(client, url, query)
-        future_to_name = {
-            executor.submit(
-                fetch_resource,
-                client,
-                resource,
-                alt_base=alt_base,
-                no_download=no_download,
-            ): resource["name"]
-            for resource in response
-        }
-        for future in concurrent.futures.as_completed(future_to_name):
-            resource_id = future_to_name[future]
-            try:
-                result = future.result()
-            except FileNotFoundError as err:
-                result = err
-            to_locate.remove(resource_id)
-            yield (resource_id, result)
-    for resource_id in to_locate:
-        yield (resource_id, FileNotFoundError(f"no such resource {resource_id}"))
+    base = None if alt_base is None else Path(alt_base)
+    yield from core.find_resources(
+        registry_url,
+        *resource_ids,
+        local_dir=base,
+        alt_base=base,
+        download=not no_download,
+        auth=default_auth,
+    )
 
 
 def find_resource(
@@ -108,52 +71,6 @@ def find_resource(
             return result
         else:
             raise result
-
-
-def fetch_resource(
-    client: Client,
-    resource: dict,
-    *,
-    alt_base: Path | str | None = None,
-    no_download: bool = False,
-) -> Path:
-    """Fetch a resource.
-
-    Given a sequence of locations where a resource could be found, this function
-    will try to locate the file, prioritizing local archives.
-
-    """
-    resource_id = resource["name"]
-    filename = resource.get("filename", resource_id)
-    for location in resource["locations"]:
-        loc = util.parse_location(location, alt_base=alt_base, http_session=client)
-        if hasattr(loc, "path"):
-            log.debug("- found in local repository: %s", location)
-            return loc.path
-        elif hasattr(loc, "url"):
-            target = cache.locate(
-                filename, Path(urlparse(loc.url).netloc) / "resources"
-            )
-            if target.exists():
-                log.debug("- found in local cache: %s", target)
-                return target
-            if no_download:
-                log.debug("- found at %s but configured not to download", loc.url)
-                continue
-            log.debug("- fetching from %s", loc.url)
-            try:
-                return loc.fetch(target)
-            except HTTPStatusError as err:
-                log.warning(
-                    "%s: failed to retrieve from %s (http status %d)",
-                    resource_id,
-                    loc.url,
-                    err.response.status_code,
-                )
-    raise FileNotFoundError(
-        f"{resource_id} is registered, but is not in a local archive or the cache,"
-        " and could not be downloaded"
-    )
 
 
 def describe_resources(
@@ -237,7 +154,8 @@ def main(argv=None):
     if args.clear_cache:
         # the cache is organized by the host of each resource's archive, which
         # may differ from the registry host, so clear all of it
-        cache.clear("")
+        log.info("clearing local cache dir %s", cache.cache_dir())
+        shutil.rmtree(cache.cache_dir(), ignore_errors=True)
 
     if len(args.id) > 0:
         for name, location in find_resources(
@@ -254,7 +172,6 @@ __all__ = [
     "deposit",
     "describe",
     "describe_resources",
-    "fetch_resource",
     "find_resource",
     "find_resources",
     "log_error",

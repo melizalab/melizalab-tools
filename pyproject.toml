@@ -25,7 +25,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "appdirs>=1.4.4",
     "arf>=2.7.2",
     "ewave>=1.0.10",
     "jsonschema>=4.18",
