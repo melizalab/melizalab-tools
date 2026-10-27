@@ -122,7 +122,7 @@ def add_registry_argument(parser, dest="registry_url"):
         "--registry",
         dest=dest,
         help="URL of the registry service. "
-        f"Default is to use the environment variable '{registry._env_registry}'",
+        "Default is to use the environment variable 'NBANK_REGISTRY'",
         default=default_registry,
     )
 
