@@ -83,6 +83,48 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
   69 MB/s, whatever the number of units); on fast disks that would be slower
   than now.
 
+## neurobank 1.0
+
+Found by running this suite against nbank master (2026-10-27): 14 failures,
+all in `test_neurobank.py` and `test_kilo_audit.py`. Release order is in
+neurobank's TODO: deploy django-neurobank 1.0, backfill location keys, then
+nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
+
+- [ ] `get-songs --deposit` fails on nbank 0.13 already: `deposit()` takes
+  `metadata=metadata`, not `**metadata`. Fix and release now, apart from 1.0
+- [ ] `dlab.neurobank` on nbank's lookup (`nbank.core.find_resources`): dlab's
+  `alt_base` (a directory of files named by id) is nbank's `local_dir`, and
+  `no_download` is `download=False`. dlab also passes `alt_base` to
+  `parse_location`, where it remaps archive roots (nbank's `alt_base`);
+  decide whether to keep that second meaning
+  (`test_local_archive_location_remapped_by_alt_base`). `--clear-cache`
+  clears nbank's cache (old dlab caches are downloaded again once). Keep
+  `add_registry_argument` (it reads `registry._env_registry`, which is
+  private) and `describe_resources`
+- [ ] `kilo_audit.fetch_locations`: use `nbank.util.registry_session` instead
+  of a bare httpx `Client`. Works as is (reads need no API version), but skips
+  the version check
+- [ ] nbank reports a copy in an archive this user can't read as not on this
+  host (0.13 raised `PermissionError`, by accident of its glob), so
+  `kilo_audit.unavailable_reason` never says "check its permissions". Drop
+  that reason, or detect an unreadable archive here
+  (`test_local_copy_unreadable_archive`)
+- [ ] `core.search` leaves out superseded resources: decide whether
+  `kilo_audit` and `kilo_regenerate` should see them
+- [ ] Tests: locations need a `key` (the stored file name; nbank no longer
+  globs). With keys added, 11 of the 13 lookup failures pass.
+  `test_describe_uses_registry_for_ids_not_in_alt_base` patches
+  `nbank.core.httpx`, which `describe_many` no longer uses: mock the registry
+  with respx, including `info/` for the version check
+- [ ] `migrations/` uses `archive.get_config`, `util.DirectoryHasher` and
+  `util.hash_directory`, gone in 1.0, and archive internals. The migrations
+  are done: move them to `attic/`, or note that they need nbank 0.13
+- [ ] `abf-zip` imports `ParseKeyVal` from `nbank.script`, which is
+  re-exported but not documented as API
+- [ ] Code that opens files inside abfzip resources (neurobank's TODO: extract
+  members, or an `AxonRawIO` that reads at `member_extent`)
+- [ ] Require `neurobank>=1.0,<2` (`>=1.0.0rc1` for the release candidate)
+
 ## Deposited data and the registry
 
 - [ ] Existing klopto outputs (e.g. E36's) have placeholder `led_start` /
