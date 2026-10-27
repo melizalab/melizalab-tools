@@ -20,6 +20,9 @@
   in the old `dlab` cache are downloaded again once; that cache can be
   deleted. Downloads from a host other than the registry's use that host's
   `~/.netrc` entry. `fetch_resource` and `dlab.cache` are gone.
+- `find-kilo-units` lists a recording whose archive can't be read here as "in
+  an archive that is missing or not accessible on this host", with the others
+  not on this host.
 
 ## 2026.10.22
 

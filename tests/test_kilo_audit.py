@@ -1043,32 +1043,13 @@ def test_local_copy(tmp_path):
 @pytest.mark.skipif(
     not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root reads anything"
 )
-def test_local_copy_unreadable_archive(tmp_path):
-    """If this host's user can't read the archive's directories (as on the VM
-    before it was given the archive's group), the copy doesn't count, and the
-    reason says why, so find-kilo-units lists the recording as unavailable
-    instead of stopping."""
-    from nbank import archive
-
-    root = local_archive(tmp_path / "archive", "A_1")
-    shard = archive.resource_path(root, "A_1").parent
-    shard.chmod(0)
-    try:
-        assert kilo_audit.local_copy([archived("A_1", root)]) is None
-        assert kilo_audit.unavailable_reason([archived("A_1", root)]) == (
-            "in an archive here that this user can't read (check its permissions)"
-        )
-    finally:
-        shard.chmod(0o755)
-
-
 def test_unavailable_reason(tmp_path):
     tape = {"scheme": "tape", "root": "T1:4", "resource_name": "A_1"}
     web = {"scheme": "https", "root": "https://x/", "resource_name": "A_1"}
     elsewhere = archived("A_1", tmp_path / "not_mounted")
     assert kilo_audit.unavailable_reason([tape, web]) == "only on https, tape"
     assert kilo_audit.unavailable_reason([tape, elsewhere]) == (
-        "in an archive that isn't on this host"
+        "in an archive that is missing or not accessible on this host"
     )
     assert kilo_audit.unavailable_reason([]) == "no locations in the registry"
 
@@ -1083,6 +1064,7 @@ def test_fetch_locations(monkeypatch):
         yield {"name": "A_1", "locations": [{"scheme": "tape"}]}
 
     monkeypatch.setattr("nbank.util.query_registry_bulk", query_registry_bulk)
+    monkeypatch.setattr("nbank.util.check_registry_version", lambda *args: None)
     found = kilo_audit.fetch_locations("https://registry/", ["A_1", "B_1"])
     assert found == {"A_1": [{"scheme": "tape"}]}
     assert queries == [("https://registry/bulk/locations/", {"names": ["A_1", "B_1"]})]
@@ -1118,7 +1100,10 @@ def test_find_units_skips_recordings_not_on_this_host(
     # the log says why, by count
     assert "2 recordings (2 units) skipped" in caplog.text
     assert "  - 1 only on tape" in caplog.text
-    assert "  - 1 in an archive that isn't on this host" in caplog.text
+    assert (
+        "  - 1 in an archive that is missing or not accessible on this host"
+        in caplog.text
+    )
     assert control.read_text() == "A_1\tA_1_c1,A_1_c2\n"
     assert unavailable.read_text() == "A_10\tA_10_c1\nB_1\tB_1_c5\n"
     assert orphans.read_text() == "B_1\tB_1_c7_spikes\n"

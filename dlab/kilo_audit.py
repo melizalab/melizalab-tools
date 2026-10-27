@@ -1583,17 +1583,16 @@ def group_units(
 def fetch_locations(registry_url: str, names: Iterable[str]) -> dict[str, list]:
     """The locations of resources, by name, from the registry's bulk locations
     endpoint (the resource records only give them as strings)"""
-    from httpx import Client
     from nbank import registry, util
 
     names = list(names)
     if not names:
         return {}
     url, query = registry.get_locations_bulk(registry_url, names)
-    with Client(auth=nbank.default_auth) as client:
+    with util.registry_session(registry_url, auth=nbank.default_auth) as session:
         return {
             r["name"]: r.get("locations", [])
-            for r in util.query_registry_bulk(client, url, query)
+            for r in util.query_registry_bulk(session, url, query)
         }
 
 
@@ -1605,35 +1604,15 @@ def unavailable_reason(locations: list) -> str:
     schemes = {loc.get("scheme") for loc in locations if isinstance(loc, dict)}
     if not schemes:
         return "no locations in the registry"
-    if any(_unreadable(loc) for loc in locations):
-        return "in an archive here that this user can't read (check its permissions)"
     if schemes & set(local_schemes()):
-        return "in an archive that isn't on this host"
+        return "in an archive that is missing or not accessible on this host"
     return "only on " + ", ".join(sorted(map(str, schemes)))
-
-
-def _unreadable(location) -> bool:
-    """True if location is in a neurobank archive on this host whose
-    directories this user can't read"""
-    from nbank.registry import local_schemes
-    from nbank.util import parse_location
-
-    if not isinstance(location, dict) or location.get("scheme") not in local_schemes():
-        return False
-    try:
-        parse_location(location)
-    except PermissionError:
-        return True
-    except (KeyError, ValueError):
-        pass
-    return False
 
 
 def local_copy(locations: list) -> Path | None:
     """The path of a resource in a neurobank archive on this host, given its
     locations (see fetch_locations), or None. Copies elsewhere (other hosts,
-    http, tape) are not used: the audit scripts never download. A copy in an
-    archive here that this user can't read doesn't count."""
+    http, tape) are not used: the audit scripts never download."""
     from nbank.registry import local_schemes
     from nbank.util import parse_location
 
@@ -1644,8 +1623,7 @@ def local_copy(locations: list) -> Path | None:
             continue
         try:
             resource = parse_location(location)
-        except (KeyError, ValueError, PermissionError):
-            # an unreadable archive is reported by unavailable_reason
+        except (KeyError, ValueError):
             continue
         if resource is not None:
             return resource.path
