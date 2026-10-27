@@ -108,8 +108,9 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
   host (0.13 raised `PermissionError`, by accident of its glob), so
   `kilo_audit.unavailable_reason` never says "check its permissions". Dropped;
   the reason is now "missing or not accessible on this host", as nbank says
-- [ ] `core.search` leaves out superseded resources: decide whether
-  `kilo_audit` and `kilo_regenerate` should see them
+- [x] `core.search` leaves out superseded resources: decide whether
+  `kilo_audit` and `kilo_regenerate` should see them. No change: superseding
+  is rare, and a bad sort is purged and replaced instead
 - [x] Tests: locations need a `key` (the stored file name; nbank no longer
   globs). With keys added, 11 of the 13 lookup failures pass.
   `test_describe_uses_registry_for_ids_not_in_alt_base` patches
