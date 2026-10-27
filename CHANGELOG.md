@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `dlab.abfio` reads the ABF files in an abfzip archive (an
+  `intracellular-abfzip` resource) in place, without unpacking it:
+  `abf_members(path)` lists them, and `ZippedAxonIO(path, member)` and
+  `ZippedAxonRawIO` are neo's `AxonIO` and `AxonRawIO` for one of them.
 - `abf-zip` catalogs every file in the recording's directory with its SHA-1
   hash (`sha1`), not just the ABF files, and records itself in `metadata` as
   `processed_by` (abfzip 1.0, melizalab-specs 0.1.1). `abf-zip build` refuses a

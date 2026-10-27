@@ -121,8 +121,10 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
   are done: the scripts are removed; the README and TSVs stay as the record
 - [x] `abf-zip` imports `ParseKeyVal` from `nbank.script`, which is
   re-exported but not documented as API. Public in nbank 1.0
-- [ ] Code that opens files inside abfzip resources (neurobank's TODO: extract
-  members, or an `AxonRawIO` that reads at `member_extent`)
+- [x] Code that opens files inside abfzip resources (neurobank's TODO: extract
+  members, or an `AxonRawIO` that reads at `member_extent`): `dlab.abfio`.
+  Untested on ABF1 files (the test files are ABF2); add one if the archive has
+  any
 - [ ] Require `neurobank>=1.0,<2` (`>=1.0.0rc1` for the release candidate)
 
 ## Deposited data and the registry
