@@ -90,7 +90,7 @@ all in `test_neurobank.py` and `test_kilo_audit.py`. Release order is in
 neurobank's TODO: deploy django-neurobank 1.0, backfill location keys, then
 nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
 
-- [ ] `get-songs --deposit` fails on nbank 0.13 already: `deposit()` takes
+- [x] `get-songs --deposit` fails on nbank 0.13 already: `deposit()` takes
   `metadata=metadata`, not `**metadata`. Fix and release now, apart from 1.0
 - [ ] `dlab.neurobank` on nbank's lookup (`nbank.core.find_resources`): dlab's
   `alt_base` (a directory of files named by id) is nbank's `local_dir`, and

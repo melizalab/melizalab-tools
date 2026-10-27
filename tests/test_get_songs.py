@@ -158,26 +158,31 @@ def test_script_prefers_neurobank(tmp_path, monkeypatch, songs_yaml, source):
 def test_script_deposit(tmp_path, monkeypatch, songs_yaml, no_neurobank):
     """With --deposit, each output file is deposited with metadata describing
     how it was made."""
-    deposits = []
+    import inspect
 
-    def deposit(archive, files, **kwargs):
-        deposits.append((archive, files, kwargs))
+    deposits = []
+    signature = inspect.signature(get_songs.nbank.deposit)
+
+    def deposit(*args, **kwargs):
+        # the call has to fit the real deposit
+        deposits.append(signature.bind(*args, **kwargs).arguments)
         yield {"name": "id"}
 
     monkeypatch.setattr(get_songs.nbank, "deposit", deposit)
     monkeypatch.chdir(tmp_path)
     run(songs_yaml, "--deposit", str(tmp_path / "archive"), "--highpass", "500")
-    ((archive, files, kwargs),) = deposits
-    assert archive == tmp_path / "archive"
-    assert [f.name for f in files] == ["O103.wav"]
-    assert kwargs["dtype"] == "vocalization-wav"
-    assert kwargs["created_by"] == (
+    (args,) = deposits
+    assert args["archive_path"] == tmp_path / "archive"
+    assert [f.name for f in args["files"]] == ["O103.wav"]
+    assert args["dtype"] == "vocalization-wav"
+    metadata = args["metadata"]
+    assert metadata["created_by"] == (
         f"{pprox.CREATOR_PREFIX}get-songs {get_songs.SCRIPT_VERSION}"
     )
-    assert kwargs["source_dataset"] == DATASET
-    assert kwargs["source_interval_ms"] == [90.0, 900.0]
-    assert kwargs["highpass_cutoff"] == 500.0
-    assert kwargs["dBFS"] == pytest.approx(-20, abs=0.05), "default --dBFS"
+    assert metadata["source_dataset"] == DATASET
+    assert metadata["source_interval_ms"] == [90.0, 900.0]
+    assert metadata["highpass_cutoff"] == 500.0
+    assert metadata["dBFS"] == pytest.approx(-20, abs=0.05), "default --dBFS"
 
 
 def http_error(status, **response):

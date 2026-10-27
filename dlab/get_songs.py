@@ -195,7 +195,7 @@ def script(argv=None):
                         auth=nbank.default_auth,
                         hash=True,
                         auto_id=True,
-                        **metadata,
+                        metadata=metadata,
                     )
                 )
             except nbank.HTTPStatusError as err:
