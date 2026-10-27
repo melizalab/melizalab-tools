@@ -116,11 +116,11 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
   `test_describe_uses_registry_for_ids_not_in_alt_base` patches
   `nbank.core.httpx`, which `describe_many` no longer uses: mock the registry
   with respx, including `info/` for the version check
-- [ ] `migrations/` uses `archive.get_config`, `util.DirectoryHasher` and
+- [x] `migrations/` uses `archive.get_config`, `util.DirectoryHasher` and
   `util.hash_directory`, gone in 1.0, and archive internals. The migrations
-  are done: move them to `attic/`, or note that they need nbank 0.13
-- [ ] `abf-zip` imports `ParseKeyVal` from `nbank.script`, which is
-  re-exported but not documented as API
+  are done: the scripts are removed; the README and TSVs stay as the record
+- [x] `abf-zip` imports `ParseKeyVal` from `nbank.script`, which is
+  re-exported but not documented as API. Public in nbank 1.0
 - [ ] Code that opens files inside abfzip resources (neurobank's TODO: extract
   members, or an `AxonRawIO` that reads at `member_extent`)
 - [ ] Require `neurobank>=1.0,<2` (`>=1.0.0rc1` for the release candidate)
