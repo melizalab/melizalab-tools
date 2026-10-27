@@ -111,6 +111,25 @@ def make_recording(request, tmp_path, fake_neurobank):
     return make
 
 
+def test_refuses_recordings_with_more_than_one_entry(make_recording, tmp_path):
+    """Spike times are assigned to trials by sample, which restarts in each
+    entry, so a recording with more than one entry is refused and nothing is
+    written."""
+    run = make_recording()
+    with arf.open_file(tmp_path / "rec.arf", "a") as fp:
+        add_entry(
+            fp,
+            "entry_1",
+            2000.0,
+            nsamples=NSAMPLES,
+            clicks=ONSETS,
+            messages=oeaudio_messages(STIMULI),
+        )
+    with pytest.raises(RuntimeError, match="has 2 entries"):
+        run()
+    assert list((tmp_path / "out").iterdir()) == []
+
+
 def load_pprox(out, cluster):
     with open(out / f"rec_c{cluster}.pprox") as fp:
         return json.load(fp)

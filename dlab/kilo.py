@@ -1744,6 +1744,14 @@ def group_spikes_script(argv=None):
 
     log.info("- splitting '%s' into trials:", datafile)
     with h5.File(datafile, "r") as afp:
+        # spikes are assigned to trials by sample time, which restarts in each
+        # entry (see TODO.md)
+        n_entries = sum(1 for _ in iter_entries(afp))
+        if n_entries > 1:
+            raise RuntimeError(
+                f"'{datafile}' has {n_entries} entries; group-kilo-spikes only "
+                "handles recordings with one. Run arfx-oephys again to make it"
+            )
         mapfile = args.sortdir / "channel_map.npy"
         channel_map = (
             np.load(mapfile).ravel() if mapfile.exists() else np.arange(nchannels)

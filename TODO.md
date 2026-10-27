@@ -15,8 +15,10 @@ Completed items are moved to COMPLETED (not tracked), for release notes.
 - [ ] Spikes are assigned to trials with
   `trials.recording_start.searchsorted(events.time)`, which assumes trial
   starts increase through the file and share the kilosort sample frame. With
-  more than one entry, trial positions restart at 0 for each entry. No such
-  files exist yet, but they may; fixing it won't change single-entry output.
+  more than one entry, trial positions restart at 0 for each entry, so
+  group-kilo-spikes refuses such files for now (they come from a mistake with
+  arfx-oephys); remove the guard when this is fixed. Fixing it won't change
+  single-entry output.
   Needs: how the kilosort input (temp_wh.dat) is assembled from several
   entries (order, and any gaps between them).
 

@@ -7,6 +7,9 @@
   `processed_by` (abfzip 1.0, melizalab-specs 0.1.1). `abf-zip build` refuses a
   file that has changed since the catalog was written.
 - `group-kilo-spikes` creates the output directory if it doesn't exist.
+- `group-kilo-spikes` refuses an ARF file with more than one entry, whose
+  spikes it would assign to the wrong trials; run arfx-oephys again to make a
+  file with one entry.
 - `--debug` no longer shows h5py's internal debug messages ("Creating converter
   from 3 to 5").
 - The log names the unit's channel as the recording does (e.g. `CH26`) for both
