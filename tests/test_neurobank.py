@@ -204,7 +204,12 @@ def test_local_archive_location(tmp_path, registry):
     registry.resources["abcd1234"] = {
         "name": "abcd1234",
         "locations": [
-            {"scheme": "neurobank", "root": str(root), "resource_name": "abcd1234"}
+            {
+                "scheme": "neurobank",
+                "root": str(root),
+                "resource_name": "abcd1234",
+                "key": "abcd1234",
+            }
         ],
     }
     result = find("abcd1234")
@@ -226,6 +231,7 @@ def test_local_archive_location_remapped_by_alt_base(tmp_path, registry):
                 "scheme": "neurobank",
                 "root": f"/nonexistent/{copy.name}",
                 "resource_name": "abcd1234",
+                "key": "abcd1234",
             }
         ],
     }
@@ -242,7 +248,13 @@ def test_local_archive_preferred_over_download(tmp_path, registry):
     root = make_local_archive(tmp_path, "abcd1234")
     registry.add_http("abcd1234")
     registry.resources["abcd1234"]["locations"].insert(
-        0, {"scheme": "neurobank", "root": str(root), "resource_name": "abcd1234"}
+        0,
+        {
+            "scheme": "neurobank",
+            "root": str(root),
+            "resource_name": "abcd1234",
+            "key": "abcd1234",
+        },
     )
     result = find("abcd1234")
     assert result["abcd1234"] == root / "resources" / "ab" / "abcd1234", (
@@ -262,6 +274,7 @@ def test_unavailable_local_location_falls_through_to_remote(tmp_path, registry):
             "scheme": "neurobank",
             "root": str(tmp_path / "not-mounted"),
             "resource_name": "abcd1234",
+            "key": "abcd1234",
         },
     )
     result = find("abcd1234")
@@ -414,7 +427,13 @@ def test_no_download_still_uses_local_archive(tmp_path, registry):
     root = make_local_archive(tmp_path, "abcd1234")
     registry.add_http("abcd1234")
     registry.resources["abcd1234"]["locations"].insert(
-        0, {"scheme": "neurobank", "root": str(root), "resource_name": "abcd1234"}
+        0,
+        {
+            "scheme": "neurobank",
+            "root": str(root),
+            "resource_name": "abcd1234",
+            "key": "abcd1234",
+        },
     )
     path = find("abcd1234", no_download=True)["abcd1234"]
     assert path.parent == root / "resources" / "ab", (

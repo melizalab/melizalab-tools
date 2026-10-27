@@ -851,7 +851,12 @@ def local_archive(root: Path, *names: str) -> Path:
 
 
 def archived(name: str, root: Path) -> dict:
-    return {"scheme": "neurobank", "root": str(root), "resource_name": name}
+    return {
+        "scheme": "neurobank",
+        "root": str(root),
+        "resource_name": name,
+        "key": f"{name}.arf",
+    }
 
 
 @pytest.fixture
