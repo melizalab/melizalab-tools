@@ -187,8 +187,8 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
   - The session directory's copy is checked by size only. Hashing it
     belongs in arfx-oephys, which reads every byte anyway (if arfx gets
     more work).
-  - [ ] (c) `--cleanup`: remove the ARF and raw directory once the registry has
-    the ARF's name and sha1 with a location
+  - [x] (c) `prep-oephys cleanup <manifest>`: remove the ARF and raw
+    directory once the registry has the ARF's name and sha1 with a location
   - [ ] the `oephys = ["arfx>=3.1.1"]` extra, once arfx 3.1.1 is on PyPI (its
     `presenter_metadata`, `--experimenter` and `--animal` are needed)
 - [ ] Scripts for the sorting workflow, once the new setup has been tried by

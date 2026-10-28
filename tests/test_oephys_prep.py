@@ -62,12 +62,14 @@ def make_session(tmp_path, *recordings, name=SESSION_DIR):
 
 class Fake:
     """The colony and the registry. Records the bodies checked; check_errors are
-    the registry's objections to each check, in turn."""
+    the registry's objections to each check, in turn; resources are the
+    registered resources, by name."""
 
     def __init__(self, animals=(COBALT, PINK), check_errors=()):
         self.animals = list(animals)
         self.check_errors = list(check_errors)
         self.checked = []
+        self.resources = {}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -92,6 +94,9 @@ class Fake:
             self.checked.append(json.loads(request.content))
             errors = self.check_errors.pop(0) if self.check_errors else {}
             return httpx.Response(200, json=[errors])
+        for name, record in self.resources.items():
+            if path == f"/neurobank/resources/{name}/":
+                return httpx.Response(200, json=record)
         return httpx.Response(404, json={"detail": "not found"})
 
 
@@ -522,7 +527,7 @@ def script_env(tmp_path, monkeypatch, fake, arf_metadata):
 
 def test_script(script_env, tmp_path):
     session, target, commands = script_env
-    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 0
+    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 0
     [cmd] = commands
     assert cmd[:3] == ["arfx-oephys", "-f", str(tmp_path / "C182_1_4.arf")]
     assert (target / "C182_1_4.arf").read_text() == "arf"
@@ -533,7 +538,10 @@ def test_script(script_env, tmp_path):
 
 def test_script_dry_run_writes_nothing(script_env, tmp_path, capsys):
     session, target, commands = script_env
-    assert prep.script(["-r", REGISTRY, "--dry-run", str(session), str(target)]) == 0
+    assert (
+        prep.script(["-r", REGISTRY, "convert", "--dry-run", str(session), str(target)])
+        == 0
+    )
     assert commands == []
     assert list(target.iterdir()) == []
     assert capsys.readouterr().out.rstrip().endswith(str(session))
@@ -542,7 +550,7 @@ def test_script_dry_run_writes_nothing(script_env, tmp_path, capsys):
 def test_script_wont_overwrite(script_env, tmp_path):
     session, target, commands = script_env
     (target / "C182_1_4.json").write_text("{}")
-    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 1
+    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 1
     assert commands == []
 
 
@@ -550,7 +558,7 @@ def test_script_removes_an_arf_the_registry_refuses(script_env, tmp_path, fake):
     session, target, _ = script_env
     # the first check (of the values) passes, the second (of the ARF) doesn't
     fake.check_errors = [{}, {"sha1": ["already registered as C182_1_3"]}]
-    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 1
+    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 1
     assert not (tmp_path / "C182_1_4.arf").exists()
     assert list(target.iterdir()) == []
 
@@ -558,7 +566,7 @@ def test_script_removes_an_arf_the_registry_refuses(script_env, tmp_path, fake):
 def test_script_reuses_the_arf_of_a_failed_copy(script_env, tmp_path):
     session, target, commands = script_env
     (tmp_path / "C182_1_4.arf").write_text("arf")
-    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 0
+    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 0
     assert commands == []
     assert (target / "C182_1_4.arf").read_text() == "arf"
     assert (target / "C182_1_4.json").exists()
@@ -568,6 +576,88 @@ def test_script_keeps_a_reused_arf_the_registry_refuses(script_env, tmp_path, fa
     session, target, commands = script_env
     (tmp_path / "C182_1_4.arf").write_text("arf")
     fake.check_errors = [{}, {"sha1": ["already registered as C182_1_3"]}]
-    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 1
+    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 1
     assert commands == []
     assert (tmp_path / "C182_1_4.arf").exists()
+
+
+@pytest.fixture
+def prepared(script_env, tmp_path, fake):
+    """A recording that prep-oephys has converted and copied, and whose ARF is
+    registered, in an archive. Returns the manifest's path."""
+    session, target, _ = script_env
+    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 0
+    manifest = target / "C182_1_4.json"
+    sha1 = json.loads(manifest.read_text())["sha1"]
+    fake.resources["C182_1_4"] = {
+        "name": "C182_1_4",
+        "sha1": sha1,
+        "locations": ["chorus"],
+    }
+    return manifest
+
+
+def cleanup(manifest, answer="y"):
+    return prep.cleanup(Answers(answer), REGISTRY, manifest)
+
+
+def test_cleanup(prepared, tmp_path):
+    assert cleanup(prepared) == 0
+    assert not (tmp_path / "C182_1_4.arf").exists()
+    assert not (tmp_path / SESSION_DIR).exists()
+    # the copies in the target are left for the sorting workstation
+    assert (tmp_path / "share" / SESSION_DIR).is_dir()
+
+
+def test_cleanup_asks_first(prepared, tmp_path):
+    assert cleanup(prepared, answer="n") == 1
+    assert (tmp_path / "C182_1_4.arf").exists()
+    assert (tmp_path / SESSION_DIR).is_dir()
+
+
+def test_cleanup_after_the_arf_is_gone(prepared, tmp_path):
+    (tmp_path / "C182_1_4.arf").unlink()
+    assert cleanup(prepared) == 0
+    assert not (tmp_path / SESSION_DIR).exists()
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (lambda fake, tmp: fake.resources.clear(), "isn't registered"),
+        (
+            lambda fake, tmp: fake.resources["C182_1_4"].update(sha1="0" * 40),
+            "different hash",
+        ),
+        (
+            lambda fake, tmp: fake.resources["C182_1_4"].update(locations=[]),
+            "no location",
+        ),
+        (
+            lambda fake, tmp: (tmp / "C182_1_4.arf").write_text("other"),
+            "isn't the ARF that was prepared",
+        ),
+    ],
+)
+def test_cleanup_needs_the_arf_registered(
+    prepared, tmp_path, fake, caplog, change, problem
+):
+    change(fake, tmp_path)
+    assert cleanup(prepared) == 1
+    assert problem in caplog.text
+    assert (tmp_path / SESSION_DIR).is_dir()
+
+
+def test_cleanup_only_on_the_recording_computer(prepared, tmp_path, caplog):
+    manifest = json.loads(prepared.read_text())
+    manifest["source"]["host"] = "elsewhere"
+    prepared.write_text(json.dumps(manifest))
+    assert cleanup(prepared) == 1
+    assert "prepared on elsewhere" in caplog.text
+    assert (tmp_path / SESSION_DIR).is_dir()
+
+
+def test_cleanup_command(prepared, tmp_path, monkeypatch):
+    monkeypatch.setattr("builtins.input", Answers("y"))
+    assert prep.script(["-r", REGISTRY, "cleanup", str(prepared)]) == 0
+    assert not (tmp_path / SESSION_DIR).exists()

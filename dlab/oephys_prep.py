@@ -15,7 +15,9 @@ directory, the registry checks the ARF as it would be deposited, and the ARF
 and the session directory are copied to the target (the spike sorting
 workstation's share) with `<name>.json`, which records the ARF's hash and
 metadata and where they came from. The ARF is deposited from the target once
-the sort is curated.
+the sort is curated. Then `prep-oephys cleanup <name>.json` removes the ARF
+and the session directory from the recording computer, if the registry has
+the ARF.
 
 """
 
@@ -527,54 +529,78 @@ def write_manifest(recording: Session, outputs: Outputs, resource: dict) -> None
         fp.write("\n")
 
 
-def script(argv=None):
-    from nbank import registry, util
+def cleanup_problems(
+    manifest: dict, record: dict | None, arf_sha1: str | None
+) -> list[str]:
+    """Why the recording's files on this host can't be removed yet: the registry
+    must have the ARF (by name and hash, with a location), and the ARF here, if
+    it's still here, must be the one that was prepared"""
+    name = manifest["name"]
+    problems = []
+    host = socket.gethostname()
+    if manifest["source"]["host"] != host:
+        problems.append(
+            f"{name} was prepared on {manifest['source']['host']}, not {host}"
+        )
+    if record is None:
+        problems.append(f"{name} isn't registered")
+    else:
+        if record["sha1"] != manifest["sha1"]:
+            problems.append(f"{name} is registered with a different hash")
+        if not record["locations"]:
+            problems.append(f"{name} has no location in the registry")
+    if arf_sha1 is not None and arf_sha1 != manifest["sha1"]:
+        problems.append(f"{manifest['source']['arf']} isn't the ARF that was prepared")
+    return problems
+
+
+def cleanup(input: Ask, registry_url: str, manifest_path: Path) -> int:
+    """Removes the ARF and the session directory a manifest names from this
+    host, once the registry has the ARF. Asks first. Returns the exit status."""
+    from nbank import core
+
+    with open(manifest_path) as fp:
+        manifest = json.load(fp)
+    arf = Path(manifest["source"]["arf"])
+    session = Path(manifest["source"]["session"])
+    record = core.describe(registry_url, manifest["name"])
+    arf_sha1 = file_sha1(arf) if arf.exists() else None
+    problems = cleanup_problems(manifest, record, arf_sha1)
+    if problems:
+        for problem in problems:
+            log.error("error: %s", problem)
+        return 1
+    log.info(
+        "%s is registered, in %s", manifest["name"], ", ".join(record["locations"])
+    )
+    there = [p for p in (arf, session) if p.exists()]
+    if not there:
+        log.info("nothing left to remove")
+        return 0
+    print("to remove:")
+    for path in there:
+        print(f"  {path}")
+    if not ask(input, "remove them? (y/n)", "n").lower().startswith("y"):
+        return 1
+    arf.unlink(missing_ok=True)
+    shutil.rmtree(session, ignore_errors=True)
+    log.info("removed")
+    return 0
+
+
+def convert_command(args) -> int:
+    from nbank import util
 
     from dlab.neurobank import default_auth
 
-    p = argparse.ArgumentParser(
-        prog=PROG,
-        description="Confirm an open-ephys recording's metadata and check them "
-        "with the registry, for spike sorting",
-    )
-    p.add_argument(
-        "-v", "--version", action="version", version=f"%(prog)s {__version__}"
-    )
-    add_log_arguments(p)
-    p.add_argument(
-        "-r",
-        dest="registry_url",
-        default=registry.default_registry(),
-        help="URL of the registry (default: the NBANK_REGISTRY environment variable)",
-    )
-    p.add_argument(
-        "--colony",
-        metavar="URL",
-        help="URL of the bird colony's API (default: birds/api/ on the "
-        "registry's server)",
-    )
-    p.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="confirm the metadata and show the arfx-oephys command, but don't "
-        "write or copy anything",
-    )
-    p.add_argument("path", type=Path, help="the session directory")
-    p.add_argument(
-        "target",
-        type=Path,
-        help="the directory to copy the ARF and the session directory to",
-    )
-    args = p.parse_args(argv)
-    setup_log(args.debug, args.debug_http)
-    if args.registry_url is None:
-        p.error("give the registry's URL with -r or NBANK_REGISTRY")
     if not args.target.is_dir():
-        p.error(f"{args.target} isn't a directory")
+        log.error("error: %s isn't a directory", args.target)
+        return 1
     try:
         recording = find_session(args.path)
     except ValueError as err:
-        p.error(str(err))
+        log.error("error: %s", err)
+        return 1
     presenter = read_presenter_metadata(recording.recording)
     colony = args.colony or colony_url(args.registry_url)
     with (
@@ -626,3 +652,70 @@ def script(argv=None):
         outputs.target_arf.name,
     )
     return 0
+
+
+def cleanup_command(args) -> int:
+    return cleanup(input, args.registry_url, args.manifest)
+
+
+def script(argv=None):
+    from nbank import registry
+
+    p = argparse.ArgumentParser(
+        prog=PROG,
+        description="Prepare an open-ephys recording for spike sorting: confirm "
+        "its metadata, convert it to ARF, and copy it to the sorting workstation; "
+        "then remove it once the ARF is deposited",
+    )
+    p.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    add_log_arguments(p)
+    p.add_argument(
+        "-r",
+        dest="registry_url",
+        default=registry.default_registry(),
+        help="URL of the registry (default: the NBANK_REGISTRY environment variable)",
+    )
+    sub = p.add_subparsers(title="commands", required=True)
+
+    pp = sub.add_parser(
+        "convert",
+        help="confirm the metadata, convert the recording to ARF, and copy both "
+        "to the target",
+    )
+    pp.set_defaults(func=convert_command)
+    pp.add_argument(
+        "--colony",
+        metavar="URL",
+        help="URL of the bird colony's API (default: birds/api/ on the "
+        "registry's server)",
+    )
+    pp.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="confirm the metadata and show the arfx-oephys command, but don't "
+        "write or copy anything",
+    )
+    pp.add_argument("path", type=Path, help="the session directory")
+    pp.add_argument(
+        "target",
+        type=Path,
+        help="the directory to copy the ARF and the session directory to",
+    )
+
+    pp = sub.add_parser(
+        "cleanup",
+        help="remove the ARF and the session directory from this host, once the "
+        "ARF is deposited",
+    )
+    pp.set_defaults(func=cleanup_command)
+    pp.add_argument(
+        "manifest", type=Path, help="the manifest (<name>.json) in the target"
+    )
+
+    args = p.parse_args(argv)
+    setup_log(args.debug, args.debug_http)
+    if args.registry_url is None:
+        p.error("give the registry's URL with -r or NBANK_REGISTRY")
+    return args.func(args)
