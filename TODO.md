@@ -94,7 +94,7 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
 
 - [x] `get-songs --deposit` fails on nbank 0.13 already: `deposit()` takes
   `metadata=metadata`, not `**metadata`. Fix and release now, apart from 1.0
-- [ ] `dlab.neurobank` on nbank's lookup (`nbank.core.find_resources`): dlab's
+- [x] `dlab.neurobank` on nbank's lookup (`nbank.core.find_resources`): dlab's
   `alt_base` (a directory of files named by id) is nbank's `local_dir`, and
   `no_download` is `download=False`. dlab also passes `alt_base` to
   `parse_location`, where it remaps archive roots (nbank's `alt_base`);
@@ -103,28 +103,30 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
   clears nbank's cache (old dlab caches are downloaded again once). Keep
   `add_registry_argument` (it reads `registry._env_registry`, which is
   private) and `describe_resources`
-- [ ] `kilo_audit.fetch_locations`: use `nbank.util.registry_session` instead
+- [x] `kilo_audit.fetch_locations`: use `nbank.util.registry_session` instead
   of a bare httpx `Client`. Works as is (reads need no API version), but skips
   the version check
-- [ ] nbank reports a copy in an archive this user can't read as not on this
+- [x] nbank reports a copy in an archive this user can't read as not on this
   host (0.13 raised `PermissionError`, by accident of its glob), so
-  `kilo_audit.unavailable_reason` never says "check its permissions". Drop
-  that reason, or detect an unreadable archive here
-  (`test_local_copy_unreadable_archive`)
-- [ ] `core.search` leaves out superseded resources: decide whether
-  `kilo_audit` and `kilo_regenerate` should see them
-- [ ] Tests: locations need a `key` (the stored file name; nbank no longer
+  `kilo_audit.unavailable_reason` never says "check its permissions". Dropped;
+  the reason is now "missing or not accessible on this host", as nbank says
+- [x] `core.search` leaves out superseded resources: decide whether
+  `kilo_audit` and `kilo_regenerate` should see them. No change: superseding
+  is rare, and a bad sort is purged and replaced instead
+- [x] Tests: locations need a `key` (the stored file name; nbank no longer
   globs). With keys added, 11 of the 13 lookup failures pass.
   `test_describe_uses_registry_for_ids_not_in_alt_base` patches
   `nbank.core.httpx`, which `describe_many` no longer uses: mock the registry
   with respx, including `info/` for the version check
-- [ ] `migrations/` uses `archive.get_config`, `util.DirectoryHasher` and
+- [x] `migrations/` uses `archive.get_config`, `util.DirectoryHasher` and
   `util.hash_directory`, gone in 1.0, and archive internals. The migrations
-  are done: move them to `attic/`, or note that they need nbank 0.13
-- [ ] `abf-zip` imports `ParseKeyVal` from `nbank.script`, which is
-  re-exported but not documented as API
-- [ ] Code that opens files inside abfzip resources (neurobank's TODO: extract
-  members, or an `AxonRawIO` that reads at `member_extent`)
+  are done: the scripts are removed; the README and TSVs stay as the record
+- [x] `abf-zip` imports `ParseKeyVal` from `nbank.script`, which is
+  re-exported but not documented as API. Public in nbank 1.0
+- [x] Code that opens files inside abfzip resources (neurobank's TODO: extract
+  members, or an `AxonRawIO` that reads at `member_extent`): `dlab.abfio`.
+  Untested on ABF1 files (the test files are ABF2); add one if the archive has
+  any
 - [ ] Require `neurobank>=1.0,<2` (`>=1.0.0rc1` for the release candidate)
 
 ## Deposited data and the registry
@@ -171,6 +173,26 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
   KS-good clusters, and merge same-channel units whose spike trains never
   come within 1.5 ms. Scripts and tables (pair_sites.py, siblings.py) were
   in the session scratchpad, not kept.
+- [ ] `prep-oephys` on grafisia (workflow agreed 2026-10-28; on sturnus the ARF
+  and the units are deposited by hand with `nbank deposit` and
+  `group-kilo-spikes`, as Bao curates the unit files between them):
+  - [x] (a) refuse a session with more than one recording; prompt for the
+    metadata, defaulting to what the recording says (presenter metadata, and
+    the session directory's `<animal>_<date>_<time>_<protocol>`); look up the
+    animal in the colony (by band number until bird-colony's `color` filter
+    takes the abbreviation); check name, experimenter and animal with the
+    registry; list changed values in `revised_after_recording`; print the
+    arfx-oephys command
+  - [x] (b) run arfx-oephys, the registry's dry-run check on the ARF, copy the
+    ARF and raw directory to the target, and write `<name>.json` (sha1,
+    metadata, source host and path)
+  - The session directory's copy is checked by size only. Hashing it
+    belongs in arfx-oephys, which reads every byte anyway (if arfx gets
+    more work).
+  - [x] (c) `prep-oephys cleanup <manifest>`: remove the ARF and raw
+    directory once the registry has the ARF's name and sha1 with a location
+  - [ ] the `oephys = ["arfx>=3.1.1"]` extra, once arfx 3.1.1 is on PyPI (its
+    `presenter_metadata`, `--experimenter` and `--animal` are needed)
 - [ ] Scripts for the sorting workflow, once the new setup has been tried by
   hand a few times. The setup (2026-10-21): grafisia makes the ARF and copies
   it with the raw data to the sorting machine's share; sturnus mounts that

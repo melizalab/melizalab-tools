@@ -1,83 +1,45 @@
 # intracellular-abfdir normalization
 
-One-off scripts that clean up the registry metadata of the
-`intracellular-abfdir` resources and then migrate them to
-`intracellular-abfzip`. The migration copies each record's metadata into the
-zip's `metadata.json`, where the hash fixes it, so it has to be right first.
-Deleted once the migration is done.
+The record of how the registry metadata of the `intracellular-abfdir`
+resources was cleaned up (2026-10-21) and the resources migrated to
+`intracellular-abfzip` (2026-10-22). The migration copied each record's
+metadata into the zip's `metadata.json`, where the hash fixes it, so it had to
+be right first. The scripts ran with nbank 0.13 and were removed after the
+migration; they are in commit ff93823.
 
-## How it runs
+## How it ran
 
-1. `normalize_abfdir.py` reads the registry, the archive and the bird
-   database, and writes a plan. It changes nothing.
+1. `normalize_abfdir.py` read the registry, the archive and the bird database,
+   and wrote a plan (`abfdir-changes.jsonl`): one line per resource, with the
+   `update` to send, the record as it was, anything left for review, and notes
+   on how decisions were made.
+2. `apply_abfdir_changes.py` sent the updates, checking each record the
+   registry returned. Its log, `abfdir-applied.jsonl` (kept outside the
+   repository), has every record before and after.
+3. `abfdir_to_abfzip.py` migrated the resources one archive at a time. For each
+   it built `<id>.zip` in the archive's staging directory with `abf-zip`'s
+   builder (metadata from the registry record plus the ABF files' `software`
+   and `processed_by`, `org.meliza.melizalab-tools/abfdir-to-abfzip
+   <version>`), checked it (the reader, the metadata, each member against its
+   hash, and that the files' hashes give the directory's registered hash),
+   stored it, changed the resource's sha1 and dtype in the registry, and
+   removed the directory. Its log is `abfzip-migrated.jsonl` (also kept
+   outside the repository).
 
-   ```
-   uv run python migrations/normalize_abfdir.py \
-       --archive <intracellular archive root> \
-       --names migrations/abfdir-names.tsv \
-       --animals migrations/abfdir-animals.tsv \
-       --accept migrations/abfdir-accept.tsv \
-       -o abfdir-changes.jsonl --table abfdir-names.tsv
-   ```
-
-   - `abfdir-changes.jsonl`: one line per resource, with the `update` to send
-     (`null` deletes a key), the record as it was (`before`), anything left for
-     `review`, and `notes` on how decisions were made.
-   - `abfdir-names.tsv` (the `--table`): the evidence for each resource's name
-     and animal, including its files, ABF dates, Clampex file numbers and
-     protocols. For review only.
-
-2. `apply_abfdir_changes.py` sends the updates. It applies only records with
-   nothing left for review, skips any record that changed since the plan or is
-   already done (so it can be rerun), checks each record the registry returns,
-   and stops at the first problem. `--dry-run` checks and changes nothing.
-
-   ```
-   uv run python migrations/apply_abfdir_changes.py --dry-run abfdir-changes.jsonl
-   uv run python migrations/apply_abfdir_changes.py --log abfdir-applied.jsonl abfdir-changes.jsonl
-   ```
-
-   The log has every record before and after; keep it.
-
-3. `abfdir_to_abfzip.py` migrates the normalized resources, one archive at a
-   time. For each resource it builds `<id>.zip` in the archive's staging
-   directory with `abf-zip`'s builder: metadata from the registry record plus
-   the ABF files' `software` and `processed_by`
-   (`org.meliza.melizalab-tools/abfdir-to-abfzip <version>`), and a catalog
-   record with its SHA-1 for every file. It checks the zip (the reader, the
-   metadata, each member against its hash, and that the files' hashes give the
-   directory's registered hash, which ties the zip to the resource it
-   replaces), stores it, changes the resource's sha1 and dtype and adds the two
-   metadata keys in the registry, and removes the directory last. Resources
-   that fail a check are skipped and logged; an error while storing, updating
-   the registry or removing stops the run, and running it again finishes what
-   was interrupted.
-
-   nbank 0.8 to 0.10 (2023-02-13 to 2025-07-03) hashed directories by their
-   absolute paths, so the 485 resources deposited then don't match their
-   hashes. `diagnose_abfdir_hashes.py` found the directory 240 of them were
-   deposited from (bellanger's `/archive/intracellular/<recording>`,
-   rallapalli's `/home/mtm7ah/staging/intracellular/<recording>`), and the
-   migration checks those hashes; the other 245 (all yl6tm's, and seven of
-   bellanger's from 2025-04-29 to 05-01) are migrated unverified. No other
-   resource's hash differs, and no file in any of them changed after it was
-   registered. The results are in `abfdir-hashes.tsv`, and the log records how
-   each zip's hash was checked.
-
-   ```
-   nbank check archive --fix <root>          # creates staging/ in older archives
-   uv run python migrations/abfdir_to_abfzip.py --dry-run --hashes migrations/abfdir-hashes.tsv <root>
-   uv run python migrations/abfdir_to_abfzip.py --hashes migrations/abfdir-hashes.tsv --log abfzip-migrated.jsonl <root>
-   nbank check all <root>
-   ```
-
-   Changing a resource's sha1 needs a registry superuser, and the account
-   running it needs write access to the archive. `--limit N` and a list of ids
-   migrate a few first.
+nbank 0.8 to 0.10 (2023-02-13 to 2025-07-03) hashed directories by their
+absolute paths, so the 485 resources deposited then don't match their hashes.
+`diagnose_abfdir_hashes.py` found the directory 240 of them were deposited from
+(bellanger's `/archive/intracellular/<recording>`, rallapalli's
+`/home/mtm7ah/staging/intracellular/<recording>`), and the migration checked
+those hashes; the other 245 (all yl6tm's, and seven of bellanger's from
+2025-04-29 to 05-01) were migrated unverified. No other resource's hash
+differed, and no file in any of them changed after it was registered. The
+results are in `abfdir-hashes.tsv`. Duplicate deposits found along the way
+(`identify_orphans.py`, `resolve_orphans.py`) are in `abfdir-orphans.tsv`.
 
 ## Correction files
 
-Decisions the script can't make are in three TSVs, each with a `why` column:
+Decisions the scripts couldn't make are in three TSVs, each with a `why` column:
 
 - `abfdir-names.tsv`: recording names, by id.
 - `abfdir-animals.tsv`: animals, by id.

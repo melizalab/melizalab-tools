@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from dlab import cache, neurobank
+from dlab import neurobank
 
 REGISTRY = "http://registry.test/neurobank/"
 REMOTE_ROOT = "archive.test/neurobank/resources"
@@ -54,7 +54,11 @@ class FakeRegistry:
 
     @property
     def downloads(self):
-        return [r for r in self.requests if r.method == "GET"]
+        return [
+            r
+            for r in self.requests
+            if r.method == "GET" and not r.url.path.endswith("/info/")
+        ]
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -66,6 +70,8 @@ class FakeRegistry:
                 json.dumps(self.resources[n]) for n in names if n in self.resources
             ]
             return httpx.Response(200, text="\n".join(lines))
+        if request.url.path.endswith("/info/"):
+            return httpx.Response(200, json={"api_version": "2.0"})
         # GET on the http archive: http://archive.test/neurobank/resources/<name>/
         if self.auth_required and "authorization" not in request.headers:
             return httpx.Response(403)
@@ -80,23 +86,16 @@ class FakeRegistry:
 def registry(monkeypatch):
     """Route all HTTP traffic to a FakeRegistry via httpx.MockTransport.
 
-    Patches the Client used by dlab.neurobank and the one nbank.core uses
-    for describe_many, so the real nbank query and fetch code runs but nothing
-    touches the network. Returns the fake so tests can add resources and inspect
-    the requests that were made.
+    Patches the Client that nbank's registry sessions use, so the real nbank
+    query and fetch code runs but nothing touches the network. Returns the fake
+    so tests can add resources and inspect the requests that were made.
     """
+    import nbank.util
+
     fake = FakeRegistry()
     real_client = httpx.Client
     monkeypatch.setattr(
-        neurobank,
-        "Client",
-        lambda *a, **kw: real_client(*a, transport=httpx.MockTransport(fake), **kw),
-    )
-    # describe_many builds its own client inside nbank.core
-    import nbank.core
-
-    monkeypatch.setattr(
-        nbank.core.httpx,
+        nbank.util,
         "Client",
         lambda *a, **kw: real_client(*a, transport=httpx.MockTransport(fake), **kw),
     )
@@ -107,14 +106,14 @@ def registry(monkeypatch):
 def cache_dir(tmp_path, monkeypatch):
     """Keep the tests away from the real user cache"""
     path = tmp_path / "cache"
-    monkeypatch.setattr(cache, "user_dir", str(path))
+    monkeypatch.setenv("NBANK_CACHE", str(path))
     return path
 
 
 @pytest.fixture
 def remote_cache(cache_dir):
     """Where resources fetched from REMOTE_ROOT's host are cached"""
-    return cache_dir / "archive.test" / "resources"
+    return cache_dir / "archive.test"
 
 
 def find(*ids, **kwargs):
@@ -204,7 +203,12 @@ def test_local_archive_location(tmp_path, registry):
     registry.resources["abcd1234"] = {
         "name": "abcd1234",
         "locations": [
-            {"scheme": "neurobank", "root": str(root), "resource_name": "abcd1234"}
+            {
+                "scheme": "neurobank",
+                "root": str(root),
+                "resource_name": "abcd1234",
+                "key": "abcd1234",
+            }
         ],
     }
     result = find("abcd1234")
@@ -226,6 +230,7 @@ def test_local_archive_location_remapped_by_alt_base(tmp_path, registry):
                 "scheme": "neurobank",
                 "root": f"/nonexistent/{copy.name}",
                 "resource_name": "abcd1234",
+                "key": "abcd1234",
             }
         ],
     }
@@ -242,7 +247,13 @@ def test_local_archive_preferred_over_download(tmp_path, registry):
     root = make_local_archive(tmp_path, "abcd1234")
     registry.add_http("abcd1234")
     registry.resources["abcd1234"]["locations"].insert(
-        0, {"scheme": "neurobank", "root": str(root), "resource_name": "abcd1234"}
+        0,
+        {
+            "scheme": "neurobank",
+            "root": str(root),
+            "resource_name": "abcd1234",
+            "key": "abcd1234",
+        },
     )
     result = find("abcd1234")
     assert result["abcd1234"] == root / "resources" / "ab" / "abcd1234", (
@@ -253,7 +264,7 @@ def test_local_archive_preferred_over_download(tmp_path, registry):
 
 def test_unavailable_local_location_falls_through_to_remote(tmp_path, registry):
     """If the archive named by a local location is not reachable from this host,
-    fetch_resource moves on to the next location instead of failing.
+    the next location is tried instead of failing.
     """
     registry.add_http("abcd1234", b"remote")
     registry.resources["abcd1234"]["locations"].insert(
@@ -262,6 +273,7 @@ def test_unavailable_local_location_falls_through_to_remote(tmp_path, registry):
             "scheme": "neurobank",
             "root": str(tmp_path / "not-mounted"),
             "resource_name": "abcd1234",
+            "key": "abcd1234",
         },
     )
     result = find("abcd1234")
@@ -333,7 +345,7 @@ def test_each_id_is_reported_once(tmp_path, registry):
 
 
 def test_download_is_stored_in_cache(registry, remote_cache):
-    """A remote resource is downloaded to <cache>/<archive host>/resources/<name>,
+    """A remote resource is downloaded to <cache>/<archive host>/<name>,
     and that path is returned.
     """
     registry.add_http("abcd1234", b"payload")
@@ -349,7 +361,7 @@ def test_cache_dir_is_keyed_by_host_of_the_resource_url(registry, cache_dir):
     """
     registry.add_http("abcd1234")
     find("abcd1234")
-    assert (cache_dir / "archive.test" / "resources" / "abcd1234").exists(), (
+    assert (cache_dir / "archive.test" / "abcd1234").exists(), (
         "cache should be keyed by the archive host"
     )
     assert not (cache_dir / "registry.test").exists(), (
@@ -414,7 +426,13 @@ def test_no_download_still_uses_local_archive(tmp_path, registry):
     root = make_local_archive(tmp_path, "abcd1234")
     registry.add_http("abcd1234")
     registry.resources["abcd1234"]["locations"].insert(
-        0, {"scheme": "neurobank", "root": str(root), "resource_name": "abcd1234"}
+        0,
+        {
+            "scheme": "neurobank",
+            "root": str(root),
+            "resource_name": "abcd1234",
+            "key": "abcd1234",
+        },
     )
     path = find("abcd1234", no_download=True)["abcd1234"]
     assert path.parent == root / "resources" / "ab", (
@@ -464,7 +482,7 @@ def test_failed_location_falls_through_to_next(registry):
     registry.mirror_files["abcd1234"] = b"from mirror"
     path = find("abcd1234")["abcd1234"]
     assert path.read_bytes() == b"from mirror"
-    assert path.parent.parent.name == "mirror.test", (
+    assert path.parent.name == "mirror.test", (
         "mirror download should be cached under the mirror's host"
     )
 
@@ -504,15 +522,6 @@ def test_find_resource_passes_no_download(registry):
     with pytest.raises(FileNotFoundError):
         neurobank.find_resource("abcd1234", registry_url=REGISTRY, no_download=True)
     assert registry.downloads == [], "no_download should be forwarded"
-
-
-# fetch_resource
-
-
-def test_fetch_resource_without_locations_raises():
-    """fetch_resource raises FileNotFoundError when given an empty location list."""
-    with httpx.Client() as client, pytest.raises(FileNotFoundError):
-        neurobank.fetch_resource(client, {"name": "abcd1234", "locations": []})
 
 
 # describe_resources
@@ -664,20 +673,27 @@ def test_main_clear_cache_removes_downloaded_resources(registry, remote_cache):
     assert not remote_cache.exists()
 
 
-def test_download_uses_default_auth(registry, remote_cache, monkeypatch):
-    """Downloads use the credentials in default_auth (from ~/.netrc), so
-    archives that need a login can be fetched."""
+def test_download_uses_default_auth(tmp_path, registry, remote_cache, monkeypatch):
+    """Downloads use the credentials in default_auth (from ~/.netrc) for the
+    archive's host, so archives that need a login can be fetched."""
     registry.auth_required = True
     registry.add_http("abcd1234", b"secret")
-    monkeypatch.setattr(neurobank, "default_auth", httpx.BasicAuth("user", "pass"))
+    netrc = tmp_path / ".netrc"
+    netrc.write_text("machine archive.test login user password pass\n")
+    netrc.chmod(0o600)
+    monkeypatch.setattr(neurobank, "default_auth", httpx.NetRCAuth(str(netrc)))
     assert find("abcd1234")["abcd1234"].read_bytes() == b"secret"
     assert registry.downloads[0].headers["authorization"].startswith("Basic ")
 
 
-def test_download_without_credentials_fails(registry, remote_cache, monkeypatch):
+def test_download_without_credentials_fails(
+    tmp_path, registry, remote_cache, monkeypatch
+):
     """Without credentials, an archive that needs a login refuses the download,
     which is reported as not found."""
     registry.auth_required = True
     registry.add_http("abcd1234", b"secret")
+    # nbank reads ~/.netrc when there's no default_auth
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(neurobank, "default_auth", None)
     assert isinstance(find("abcd1234")["abcd1234"], FileNotFoundError)

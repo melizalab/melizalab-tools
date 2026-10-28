@@ -25,7 +25,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "appdirs>=1.4.4",
     "arf>=2.7.2",
     "ewave>=1.0.10",
     "jsonschema>=4.18",
@@ -52,6 +51,7 @@ find-kilo-units = "dlab.kilo_audit:find_units_script"
 collect-kilo-audit = "dlab.kilo_audit:collect_script"
 regenerate-pprox = "dlab.kilo_regenerate:script"
 abf-zip = "dlab.abfzip:script"
+prep-oephys = "dlab.oephys_prep:script"
 
 [project.entry-points."nbank.metadata_readers"]
 spikes-pprox = "dlab.readers:read_pprox_metadata"
