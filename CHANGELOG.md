@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.28
 
 Requires melizalab-specs 0.1.2.
 
