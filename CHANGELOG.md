@@ -2,47 +2,34 @@
 
 ## Unreleased
 
-- `prep-oephys` prepares an open-ephys recording for spike sorting, on the
-  recording computer: it confirms the metadata with the user (starting from
-  what the stimulus presenter logged and the session directory's name), looks
-  up the animal in the bird colony, checks the values with the registry, runs
-  arfx-oephys, and copies the ARF and the session directory to the sorting
-  workstation's share with a manifest (`prep-oephys convert`). Values changed
-  from the recording are listed in `revised_after_recording`. Once the ARF is
-  deposited, `prep-oephys cleanup <manifest>` removes the ARF and the session
-  directory from the recording computer. The continuous channels are stored
-  as `EXTRAC_RAW` (wideband), or the type given with `-T`. Needs arfx 3.1.1.
-- `dlab.abfio` reads the ABF files in an abfzip archive (an
-  `intracellular-abfzip` resource) in place, without unpacking it:
-  `abf_members(path)` lists them, and `ZippedAxonIO(path, member)` and
-  `ZippedAxonRawIO` are neo's `AxonIO` and `AxonRawIO` for one of them.
-- `abf-zip` catalogs every file in the recording's directory with its SHA-1
-  hash (`sha1`), not just the ABF files, and records itself in `metadata` as
-  `processed_by` (abfzip 1.0, melizalab-specs 0.1.1). `abf-zip build` refuses a
-  file that has changed since the catalog was written.
-- `group-kilo-spikes` creates the output directory if it doesn't exist.
-- `group-kilo-spikes` refuses an ARF file with more than one entry, whose
-  spikes it would assign to the wrong trials; run arfx-oephys again to make a
-  file with one entry.
-- `audit-kilo-spikes` fails every unit of a recording whose ARF file has more
-  than one entry (`several-entries`), since group-kilo-spikes put their spikes
-  in the wrong trials.
-- `--debug` no longer shows h5py's internal debug messages ("Creating converter
-  from 3 to 5").
-- The log names the unit's channel as the recording does (e.g. `CH26`) for both
-  the recorded amplitude and the waveforms; the waveform message used the
-  sort's 0-based channel index.
-- `get-songs --deposit` works again; it failed on every file with neurobank
-  0.13.
-- `dlab.neurobank.find_resources` uses neurobank's lookup
-  (`nbank.core.find_resources`). Downloads are cached where `nbank` caches
-  them (`NBANK_CACHE`, or `neurobank` in the user cache directory), so files
-  in the old `dlab` cache are downloaded again once; that cache can be
-  deleted. Downloads from a host other than the registry's use that host's
-  `~/.netrc` entry. `fetch_resource` and `dlab.cache` are gone.
-- `find-kilo-units` lists a recording whose archive can't be read here as "in
-  an archive that is missing or not accessible on this host", with the others
-  not on this host.
+Requires neurobank 1.0 and melizalab-specs 0.1.2.
+
+- `prep-oephys convert` prepares an open-ephys recording for spike sorting:
+  it confirms the metadata with the user (defaults from the presenter's log and
+  the session directory's name), looks up the animal in the bird colony, checks
+  the values with the registry, converts the recording to ARF (`EXTRAC_RAW`, or
+  `-T`), and copies the ARF and the session directory to the sorting
+  workstation with a manifest. Values changed from the recording are listed in
+  `revised_after_recording`. `prep-oephys cleanup` removes the files from the
+  recording computer once the ARF is deposited. Needs arfx 3.1.1.
+- `dlab.abfio` reads the ABF files in an abfzip archive in place with neo
+  (`abf_members`, `ZippedAxonIO`, `ZippedAxonRawIO`).
+- `abf-zip` catalogs every file with its SHA-1 and records itself as
+  `processed_by` (abfzip 1.0); `abf-zip build` refuses a file changed since the
+  catalog was written.
+- pprox files record their schema's version (`1.1`).
+- `group-kilo-spikes` refuses an ARF file with more than one entry, as it would
+  put the spikes in the wrong trials, and `audit-kilo-spikes` fails every unit
+  of such a recording (`several-entries`).
+- `group-kilo-spikes` creates its output directory, and names the waveforms'
+  channel as the recording does (e.g. `CH26`).
+- `--debug` no longer shows h5py's debug messages.
+- `dlab.neurobank.find_resources` uses `nbank.core.find_resources` and nbank's
+  download cache (the old `dlab` cache can be deleted). `fetch_resource` and
+  `dlab.cache` are removed.
+- `find-kilo-units` reports a recording in an archive it can't read as missing
+  or not accessible.
+- `get-songs --deposit` works again; it failed with neurobank 0.13.
 
 ## 2026.10.22
 
