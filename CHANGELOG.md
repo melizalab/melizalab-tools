@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `prep-oephys` prepares an open-ephys recording for spike sorting, on the
+  recording computer: it confirms the metadata with the user (starting from
+  what the stimulus presenter logged and the session directory's name), looks
+  up the animal in the bird colony, checks the values with the registry, runs
+  arfx-oephys, and copies the ARF and the session directory to the sorting
+  workstation's share with a manifest. Values changed from the recording are
+  listed in `revised_after_recording`. Needs arfx 3.1.1.
 - `dlab.abfio` reads the ABF files in an abfzip archive (an
   `intracellular-abfzip` resource) in place, without unpacking it:
   `abf_members(path)` lists them, and `ZippedAxonIO(path, member)` and

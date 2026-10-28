@@ -10,6 +10,13 @@ animal is looked up in the bird colony, and the name, experimenter and animal
 are checked with the registry. Values that differ from what the recording
 says are listed in the entry attribute `revised_after_recording`.
 
+Then arfx-oephys writes the recording to `<name>.arf` beside the session
+directory, the registry checks the ARF as it would be deposited, and the ARF
+and the session directory are copied to the target (the spike sorting
+workstation's share) with `<name>.json`, which records the ARF's hash and
+metadata and where they came from. The ARF is deposited from the target once
+the sort is curated.
+
 """
 
 import argparse
@@ -18,8 +25,11 @@ import json
 import logging
 import re
 import shlex
+import shutil
+import socket
+import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import astuple, dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -27,6 +37,7 @@ from urllib.parse import urljoin
 import httpx
 
 from dlab import __version__
+from dlab.abfzip import file_sha1
 from dlab.util import add_log_arguments, setup_log
 
 log = logging.getLogger("dlab")
@@ -39,8 +50,9 @@ REVISED = "revised_after_recording"
 # required, as they're part of the name
 FIELDS = ("pen", "site", "probe", "x", "y", "z")
 REQUIRED = ("pen", "site")
-# the fields that check_with_registry reports errors for
-CHECKED = ("name", "experimenter", "animal", "metadata")
+# what the registry can't check before the ARF is written, and can't check
+# at all here, as the resource has no location yet
+NOT_YET_CHECKED = ("sha1", "locations")
 
 SESSION_DIR_RX = re.compile(
     r"(?P<animal>[^_]+)_(?P<time>\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})"
@@ -304,16 +316,21 @@ def resource_body(values: dict[str, Any], presenter: dict[str, Any]) -> dict:
     }
 
 
-def check_with_registry(session: httpx.Client, registry_url: str, body: dict) -> list:
-    """The registry's objections to the name, experimenter, animal or metadata of
-    the resource, as messages"""
+def check_with_registry(
+    session: httpx.Client,
+    registry_url: str,
+    body: dict,
+    ignore: tuple[str, ...] = NOT_YET_CHECKED,
+) -> list[str]:
+    """The registry's objections to the resource, except to the fields in
+    ignore, as messages"""
     from nbank import registry
 
     url, bodies = registry.check_resources(registry_url, [body])
     r = session.post(url, json=bodies)
     r.raise_for_status()
     [errors] = r.json()
-    return registry.field_messages({k: v for k, v in errors.items() if k in CHECKED})
+    return registry.field_messages({k: v for k, v in errors.items() if k not in ignore})
 
 
 def revised_fields(recorded: dict[str, Any], values: dict[str, Any]) -> list[str]:
@@ -392,6 +409,124 @@ def prepare(
         defaults = values
 
 
+@dataclass
+class Outputs:
+    """The files prep-oephys writes: the ARF beside the session directory, and
+    in the target, the ARF, the session directory, and the manifest"""
+
+    arf: Path
+    target_arf: Path
+    target_session: Path
+    manifest: Path
+
+    @classmethod
+    def for_recording(cls, recording: Session, name: str, target: Path) -> "Outputs":
+        return cls(
+            arf=recording.path.parent / f"{name}.arf",
+            target_arf=target / f"{name}.arf",
+            target_session=target / recording.path.name,
+            manifest=target / f"{name}.json",
+        )
+
+    def existing(self) -> list[Path]:
+        return [p for p in astuple(self) if p.exists()]
+
+
+def convert(cmd: list[str], arffile: Path) -> None:
+    """Runs arfx-oephys. Raises RuntimeError if it fails, after removing what it
+    wrote."""
+    log.info("converting: %s", shlex.join(cmd))
+    try:
+        result = subprocess.run(cmd)
+    except FileNotFoundError as err:
+        raise RuntimeError(
+            "arfx-oephys isn't installed: install melizalab-tools[oephys]"
+        ) from err
+    if result.returncode != 0:
+        arffile.unlink(missing_ok=True)
+        raise RuntimeError(f"arfx-oephys failed (exit status {result.returncode})")
+
+
+def read_arf_metadata(arffile: Path) -> dict[str, Any]:
+    """The metadata nbank deposit will register for an ARF, from arfx's reader"""
+    from arfx.nbank import read_metadata
+
+    return read_metadata(arffile)
+
+
+def check_arf(
+    session: httpx.Client, registry_url: str, arffile: Path, values: dict[str, Any]
+) -> dict:
+    """Checks the ARF as nbank deposit would register it: its metadata must
+    have the confirmed values, and the registry must accept it. Returns the
+    resource, with the ARF's hash. Raises ValueError if it fails."""
+    metadata = read_arf_metadata(arffile)
+    confirmed = {k: v for k, v in values.items() if k not in ("name", "animal")}
+    confirmed["animal"] = confirmed.pop("animal_uuid")
+    differ = sorted(
+        k for k, v in confirmed.items() if v is not None and metadata.get(k) != v
+    )
+    if differ:
+        raise ValueError(
+            f"{arffile}: the metadata in the ARF differ from the confirmed "
+            f"values ({', '.join(differ)})"
+        )
+    body = {
+        "name": values["name"],
+        "dtype": DTYPE,
+        "sha1": file_sha1(arffile),
+        "experimenter": metadata.pop("experimenter"),
+        "animal": metadata.pop("animal"),
+        "metadata": metadata,
+    }
+    errors = check_with_registry(session, registry_url, body, ignore=("locations",))
+    if errors:
+        raise ValueError(
+            f"{arffile}: the registry would refuse it: {'; '.join(errors)}"
+        )
+    return body
+
+
+def copy_to_target(recording: Session, outputs: Outputs, sha1: str) -> None:
+    """Copies the session directory and the ARF to the target, checking each
+    file's size, and the ARF's hash. Raises OSError if a copy fails or differs,
+    after removing the copies."""
+    try:
+        log.info("copying %s to %s", recording.path, outputs.target_session)
+        shutil.copytree(recording.path, outputs.target_session)
+        for src in recording.path.rglob("*"):
+            dst = outputs.target_session / src.relative_to(recording.path)
+            if src.is_file() and src.stat().st_size != dst.stat().st_size:
+                raise OSError(f"{dst}: the copy isn't the same size as {src}")
+        log.info("copying %s to %s", outputs.arf, outputs.target_arf)
+        shutil.copyfile(outputs.arf, outputs.target_arf)
+        if file_sha1(outputs.target_arf) != sha1:
+            raise OSError(f"{outputs.target_arf}: the copy doesn't match {outputs.arf}")
+    except BaseException:
+        shutil.rmtree(outputs.target_session, ignore_errors=True)
+        outputs.target_arf.unlink(missing_ok=True)
+        raise
+
+
+def write_manifest(recording: Session, outputs: Outputs, resource: dict) -> None:
+    """Writes the manifest: the resource as it will be registered, and where its
+    ARF and session directory came from"""
+    manifest = {
+        **resource,
+        "source": {
+            "host": socket.gethostname(),
+            "arf": str(outputs.arf.resolve()),
+            "session": str(recording.path.resolve()),
+        },
+        "session": outputs.target_session.name,
+        "prepared_by": f"{PROG} {__version__}",
+        "prepared_on": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+    with open(outputs.manifest, "w") as fp:
+        json.dump(manifest, fp, indent=2)
+        fp.write("\n")
+
+
 def script(argv=None):
     from nbank import registry, util
 
@@ -418,11 +553,24 @@ def script(argv=None):
         help="URL of the bird colony's API (default: birds/api/ on the "
         "registry's server)",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="confirm the metadata and show the arfx-oephys command, but don't "
+        "write or copy anything",
+    )
     p.add_argument("path", type=Path, help="the session directory")
+    p.add_argument(
+        "target",
+        type=Path,
+        help="the directory to copy the ARF and the session directory to",
+    )
     args = p.parse_args(argv)
     setup_log(args.debug, args.debug_http)
     if args.registry_url is None:
         p.error("give the registry's URL with -r or NBANK_REGISTRY")
+    if not args.target.is_dir():
+        p.error(f"{args.target} isn't a directory")
     try:
         recording = find_session(args.path)
     except ValueError as err:
@@ -436,9 +584,45 @@ def script(argv=None):
         values, revised = prepare(
             input, client, colony, session, args.registry_url, recording, presenter
         )
-    if revised:
-        log.info("revised after the recording: %s", ", ".join(revised))
-    cmd = arfx_command(
-        recording, values, revised, presenter, Path(f"{values['name']}.arf")
+        if revised:
+            log.info("revised after the recording: %s", ", ".join(revised))
+        outputs = Outputs.for_recording(recording, values["name"], args.target)
+        existing = [p for p in outputs.existing() if p != outputs.arf]
+        if existing:
+            log.error("error: already there: %s", ", ".join(map(str, existing)))
+            return 1
+        # an ARF from a run whose copy failed is checked and copied again
+        reuse = outputs.arf.exists()
+        cmd = arfx_command(recording, values, revised, presenter, outputs.arf)
+        if args.dry_run:
+            if reuse:
+                log.info("%s is already written and won't be again", outputs.arf)
+            print(shlex.join(cmd))
+            return 0
+        try:
+            if reuse:
+                log.info("%s is already written; checking it", outputs.arf)
+            else:
+                convert(cmd, outputs.arf)
+            resource = check_arf(session, args.registry_url, outputs.arf, values)
+        except (RuntimeError, ValueError) as err:
+            if reuse:
+                log.error("error: %s; remove it to convert the recording again", err)
+            else:
+                # an ARF the registry would refuse has to be written again
+                outputs.arf.unlink(missing_ok=True)
+                log.error("error: %s", err)
+            return 1
+    try:
+        copy_to_target(recording, outputs, resource["sha1"])
+    except OSError as err:
+        log.error("error: %s; run again to copy %s", err, outputs.arf)
+        return 1
+    write_manifest(recording, outputs, resource)
+    log.info(
+        "%s is ready for sorting in %s; deposit %s once the sort is curated",
+        values["name"],
+        args.target,
+        outputs.target_arf.name,
     )
-    print(shlex.join(cmd))
+    return 0

@@ -4,11 +4,15 @@ httpx.MockTransport, and the user's answers are scripted."""
 
 import datetime
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import httpx
 import pytest
 
 from dlab import oephys_prep as prep
+from dlab.abfzip import file_sha1
 
 REGISTRY = "https://example.org/neurobank/"
 COLONY = prep.colony_url(REGISTRY)
@@ -348,3 +352,222 @@ def test_arfx_command_overrides_only_the_presenters_values(tmp_path):
     cmd = prep.arfx_command(session, values, ["protocol"], {}, tmp_path / "a.arf")
     assert "--override-presenter-metadata" not in cmd
     assert 'revised_after_recording=["protocol"]' in cmd
+
+
+# the ARF's metadata, as arfx's reader returns them for the confirmed values
+ARF_METADATA = {
+    "experimenter": "tbyron",
+    "animal": COBALT["uuid"],
+    "processed_by": "org.meliza.arfx/arfx-oephys 3.1.1",
+    **{k: v for k, v in PRESENTER.items() if k != "experimenter"},
+}
+CONFIRMED = {
+    "name": "C182_1_4",
+    "experimenter": "tbyron",
+    "animal": "C182",
+    "animal_uuid": COBALT["uuid"],
+    "protocol": "chorus",
+    "pen": 1,
+    "site": 4,
+    "probe": None,
+    "x": 893.4,
+    "y": -749.5,
+    "z": -2500,
+}
+
+
+@pytest.fixture
+def arf_metadata(monkeypatch):
+    metadata = dict(ARF_METADATA)
+    monkeypatch.setattr(prep, "read_arf_metadata", lambda path: dict(metadata))
+    return metadata
+
+
+def make_outputs(tmp_path):
+    recording = prep.find_session(make_session(tmp_path))
+    target = tmp_path / "share"
+    target.mkdir()
+    return recording, prep.Outputs.for_recording(recording, "C182_1_4", target)
+
+
+def test_outputs(tmp_path):
+    _, outputs = make_outputs(tmp_path)
+    assert outputs.arf == tmp_path / "C182_1_4.arf"
+    assert outputs.target_arf == tmp_path / "share/C182_1_4.arf"
+    assert outputs.target_session == tmp_path / "share" / SESSION_DIR
+    assert outputs.manifest == tmp_path / "share/C182_1_4.json"
+    assert outputs.existing() == []
+    outputs.manifest.write_text("{}")
+    assert outputs.existing() == [outputs.manifest]
+
+
+def test_convert_runs_the_command(tmp_path):
+    arffile = tmp_path / "a.arf"
+    cmd = [sys.executable, "-c", f"open({str(arffile)!r}, 'w').write('arf')"]
+    prep.convert(cmd, arffile)
+    assert arffile.read_text() == "arf"
+
+
+def test_a_failed_conversion_leaves_nothing(tmp_path):
+    arffile = tmp_path / "a.arf"
+    script = f"open({str(arffile)!r}, 'w').write('arf'); raise SystemExit(2)"
+    with pytest.raises(RuntimeError, match="exit status 2"):
+        prep.convert([sys.executable, "-c", script], arffile)
+    assert not arffile.exists()
+
+
+def test_convert_without_arfx(tmp_path):
+    with pytest.raises(RuntimeError, match="isn't installed"):
+        prep.convert(["no-such-command-for-prep-oephys"], tmp_path / "a.arf")
+
+
+def test_check_arf(tmp_path, client, fake, arf_metadata):
+    arffile = tmp_path / "a.arf"
+    arffile.write_text("arf")
+    resource = prep.check_arf(client, REGISTRY, arffile, CONFIRMED)
+    metadata = {
+        k: v for k, v in ARF_METADATA.items() if k not in ("experimenter", "animal")
+    }
+    assert resource == {
+        "name": "C182_1_4",
+        "dtype": "extracellular-arf",
+        "sha1": file_sha1(arffile),
+        "experimenter": "tbyron",
+        "animal": COBALT["uuid"],
+        "metadata": metadata,
+    }
+    assert fake.checked == [[resource]]
+
+
+def test_check_arf_needs_the_confirmed_values(tmp_path, client, arf_metadata):
+    arffile = tmp_path / "a.arf"
+    arffile.write_text("arf")
+    arf_metadata["pen"] = 2
+    with pytest.raises(ValueError, match=r"differ from the confirmed values \(pen\)"):
+        prep.check_arf(client, REGISTRY, arffile, CONFIRMED)
+
+
+def test_check_arf_reports_the_registrys_objections(
+    tmp_path, client, fake, arf_metadata
+):
+    arffile = tmp_path / "a.arf"
+    arffile.write_text("arf")
+    fake.check_errors = [
+        {"sha1": ["already registered as C182_1_3"], "locations": ["x"]}
+    ]
+    with pytest.raises(ValueError, match="sha1: already registered") as err:
+        prep.check_arf(client, REGISTRY, arffile, CONFIRMED)
+    assert "locations" not in str(err.value)
+
+
+def test_copy_to_target(tmp_path):
+    recording, outputs = make_outputs(tmp_path)
+    outputs.arf.write_text("arf")
+    prep.copy_to_target(recording, outputs, file_sha1(outputs.arf))
+    assert outputs.target_arf.read_text() == "arf"
+    copied = outputs.target_session / "Record Node 101/experiment1/recording1"
+    assert (copied / "structure.oebin").read_text() == "{}"
+
+
+def test_a_copy_that_differs_is_removed(tmp_path):
+    recording, outputs = make_outputs(tmp_path)
+    outputs.arf.write_text("arf")
+    with pytest.raises(OSError, match="doesn't match"):
+        prep.copy_to_target(recording, outputs, "0" * 40)
+    assert outputs.existing() == [outputs.arf]
+
+
+def test_write_manifest(tmp_path):
+    recording, outputs = make_outputs(tmp_path)
+    resource = {"name": "C182_1_4", "sha1": "ab" * 20}
+    prep.write_manifest(recording, outputs, resource)
+    manifest = json.loads(outputs.manifest.read_text())
+    assert manifest["name"] == "C182_1_4"
+    assert manifest["sha1"] == "ab" * 20
+    assert manifest["source"]["session"] == str(recording.path.resolve())
+    assert manifest["source"]["arf"] == str(outputs.arf.resolve())
+    assert manifest["session"] == SESSION_DIR
+    assert manifest["prepared_by"].startswith("prep-oephys ")
+
+
+@pytest.fixture
+def script_env(tmp_path, monkeypatch, fake, arf_metadata):
+    """Runs the script against the fakes: the presenter logged PRESENTER, the
+    user accepts every default, and arfx-oephys writes 'arf'."""
+    import nbank.util
+
+    real_client = httpx.Client
+
+    def fake_client(*args, **kwargs):
+        return real_client(*args, transport=httpx.MockTransport(fake), **kwargs)
+
+    monkeypatch.setattr(prep.httpx, "Client", fake_client)
+    monkeypatch.setattr(nbank.util, "Client", fake_client)
+    monkeypatch.setattr(nbank.util, "check_registry_version", lambda *a: None)
+    monkeypatch.setattr(prep, "read_presenter_metadata", lambda path: PRESENTER)
+    monkeypatch.setattr("builtins.input", Answers(*ACCEPT_ALL))
+    commands = []
+
+    def run(cmd):
+        commands.append(cmd)
+        Path(cmd[2]).write_text("arf")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(prep.subprocess, "run", run)
+    session = make_session(tmp_path)
+    target = tmp_path / "share"
+    target.mkdir()
+    return session, target, commands
+
+
+def test_script(script_env, tmp_path):
+    session, target, commands = script_env
+    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 0
+    [cmd] = commands
+    assert cmd[:3] == ["arfx-oephys", "-f", str(tmp_path / "C182_1_4.arf")]
+    assert (target / "C182_1_4.arf").read_text() == "arf"
+    assert (target / SESSION_DIR).is_dir()
+    manifest = json.loads((target / "C182_1_4.json").read_text())
+    assert manifest["sha1"] == file_sha1(target / "C182_1_4.arf")
+
+
+def test_script_dry_run_writes_nothing(script_env, tmp_path, capsys):
+    session, target, commands = script_env
+    assert prep.script(["-r", REGISTRY, "--dry-run", str(session), str(target)]) == 0
+    assert commands == []
+    assert list(target.iterdir()) == []
+    assert capsys.readouterr().out.rstrip().endswith(str(session))
+
+
+def test_script_wont_overwrite(script_env, tmp_path):
+    session, target, commands = script_env
+    (target / "C182_1_4.json").write_text("{}")
+    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 1
+    assert commands == []
+
+
+def test_script_removes_an_arf_the_registry_refuses(script_env, tmp_path, fake):
+    session, target, _ = script_env
+    # the first check (of the values) passes, the second (of the ARF) doesn't
+    fake.check_errors = [{}, {"sha1": ["already registered as C182_1_3"]}]
+    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 1
+    assert not (tmp_path / "C182_1_4.arf").exists()
+    assert list(target.iterdir()) == []
+
+
+def test_script_reuses_the_arf_of_a_failed_copy(script_env, tmp_path):
+    session, target, commands = script_env
+    (tmp_path / "C182_1_4.arf").write_text("arf")
+    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 0
+    assert commands == []
+    assert (target / "C182_1_4.arf").read_text() == "arf"
+    assert (target / "C182_1_4.json").exists()
+
+
+def test_script_keeps_a_reused_arf_the_registry_refuses(script_env, tmp_path, fake):
+    session, target, commands = script_env
+    (tmp_path / "C182_1_4.arf").write_text("arf")
+    fake.check_errors = [{}, {"sha1": ["already registered as C182_1_3"]}]
+    assert prep.script(["-r", REGISTRY, str(session), str(target)]) == 1
+    assert commands == []
+    assert (tmp_path / "C182_1_4.arf").exists()

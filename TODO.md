@@ -181,9 +181,12 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
     takes the abbreviation); check name, experimenter and animal with the
     registry; list changed values in `revised_after_recording`; print the
     arfx-oephys command
-  - [ ] (b) run arfx-oephys, the registry's dry-run check on the ARF, copy the
+  - [x] (b) run arfx-oephys, the registry's dry-run check on the ARF, copy the
     ARF and raw directory to the target, and write `<name>.json` (sha1,
     metadata, source host and path)
+  - The session directory's copy is checked by size only. Hashing it
+    belongs in arfx-oephys, which reads every byte anyway (if arfx gets
+    more work).
   - [ ] (c) `--cleanup`: remove the ARF and raw directory once the registry has
     the ARF's name and sha1 with a location
   - [ ] the `oephys = ["arfx>=3.1.1"]` extra, once arfx 3.1.1 is on PyPI (its
