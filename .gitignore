@@ -8,5 +8,6 @@ attic/
 .venv/
 .venv-linux/
 dist/
-examplesTODO.md
+examples
+TODO.md
 COMPLETED
