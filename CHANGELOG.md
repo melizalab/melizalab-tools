@@ -11,7 +11,8 @@ Requires neurobank 1.0 and melizalab-specs 0.1.2.
   `-T`), and copies the ARF and the session directory to the sorting
   workstation with a manifest. Values changed from the recording are listed in
   `revised_after_recording`. `prep-oephys cleanup` removes the files from the
-  recording computer once the ARF is deposited. Needs arfx 3.1.1.
+  recording computer once the ARF is deposited. Install with the `oephys`
+  extra, for arfx 3.1.1.
 - `dlab.abfio` reads the ABF files in an abfzip archive in place with neo
   (`abf_members`, `ZippedAxonIO`, `ZippedAxonRawIO`).
 - `abf-zip` catalogs every file with its SHA-1 and records itself as

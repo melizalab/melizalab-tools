@@ -60,6 +60,7 @@ intracellular-abfzip = "dlab.readers:read_abfzip_metadata"
 
 [project.optional-dependencies]
 audio = ["samplerate>=0.2.3"]
+oephys = ["arfx>=3.1.1"]
 
 [dependency-groups]
 dev = [
