@@ -2,19 +2,20 @@
 
 ## Unreleased
 
-- `abf-zip` catalogs every file in the recording's directory with its SHA-1
-  hash (`sha1`), not just the ABF files, and records itself in `metadata` as
-  `processed_by` (abfzip 1.0, melizalab-specs 0.1.1). `abf-zip build` refuses a
-  file that has changed since the catalog was written.
-- `group-kilo-spikes` creates the output directory if it doesn't exist.
-- `group-kilo-spikes` refuses an ARF file with more than one entry, whose
-  spikes it would assign to the wrong trials; run arfx-oephys again to make a
-  file with one entry.
-- `--debug` no longer shows h5py's internal debug messages ("Creating converter
-  from 3 to 5").
-- The log names the unit's channel as the recording does (e.g. `CH26`) for both
-  the recorded amplitude and the waveforms; the waveform message used the
-  sort's 0-based channel index.
+Requires melizalab-specs 0.1.2.
+
+- `dlab.abfio` reads the ABF files in an abfzip archive in place with neo
+  (`abf_members`, `ZippedAxonIO`, `ZippedAxonRawIO`).
+- `abf-zip` catalogs every file with its SHA-1 and records itself as
+  `processed_by` (abfzip 1.0); `abf-zip build` refuses a file changed since the
+  catalog was written.
+- pprox files record their schema's version (`1.1`).
+- `group-kilo-spikes` refuses an ARF file with more than one entry, as it would
+  put the spikes in the wrong trials.
+- `group-kilo-spikes` creates its output directory, and names the waveforms'
+  channel as the recording does (e.g. `CH26`).
+- `--debug` no longer shows h5py's debug messages.
+- `get-songs --deposit` works again; it failed with neurobank 0.13.
 
 ## 2026.10.22
 
