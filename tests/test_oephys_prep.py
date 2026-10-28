@@ -100,6 +100,28 @@ class Fake:
         return httpx.Response(404, json={"detail": "not found"})
 
 
+real_arfx_oephys = prep.arfx_oephys
+
+
+@pytest.fixture(autouse=True)
+def arfx_oephys(monkeypatch):
+    """arfx-oephys is run by name, whatever this environment has installed"""
+    monkeypatch.setattr(prep, "arfx_oephys", lambda: "arfx-oephys")
+
+
+def test_arfx_oephys_from_this_environment(tmp_path, monkeypatch):
+    script = tmp_path / "arfx-oephys"
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(prep.sysconfig, "get_path", lambda name: str(tmp_path))
+    assert real_arfx_oephys() == str(script)
+
+
+def test_arfx_oephys_from_the_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep.sysconfig, "get_path", lambda name: str(tmp_path))
+    assert real_arfx_oephys() == "arfx-oephys"
+
+
 @pytest.fixture
 def fake():
     return Fake()
@@ -124,7 +146,7 @@ class Answers:
 
 
 # answers that accept every default, choosing cobalt 182 from the two animals
-ACCEPT_ALL = ("", "", "1", "y", "", "", "", "", "", "", "", "")
+ACCEPT_ALL = ("", "", "1", "y", "", "", "", "", "", "", "", "", "", "")
 
 
 def run(tmp_path, client, answers, presenter=PRESENTER):
@@ -150,7 +172,7 @@ def test_find_session_from_the_recording_directory(tmp_path):
 
 def test_find_session_refuses_several_recordings(tmp_path):
     path = make_session(tmp_path, "experiment1/recording1", "experiment1/recording2")
-    with pytest.raises(ValueError, match="holds 2 recordings"):
+    with pytest.raises(ValueError, match=r"holds 2 recordings.*still working out"):
         prep.find_session(path)
 
 
@@ -248,7 +270,7 @@ def test_accepting_what_was_recorded(tmp_path, client, fake):
 
 def test_revised_values_are_listed(tmp_path, client):
     # experimenter, animal (pink 182 instead of cobalt), pen and site changed
-    answers = Answers("dmeliza", "", "2", "y", "", "2", "5", "", "", "", "", "")
+    answers = Answers("dmeliza", "", "2", "y", "", "2", "5", "", "", "", "", "", "", "")
     values, revised = run(tmp_path, client, answers)
     assert values["animal_uuid"] == PINK["uuid"]
     assert values["name"] == "C182_2_5"
@@ -258,7 +280,7 @@ def test_revised_values_are_listed(tmp_path, client):
 
 def test_a_different_animal_is_revised_and_renames(tmp_path, client, fake):
     fake.animals.append({**COBALT, "uuid": "0123abcd-0000-4000-8000-0000000000ff"})
-    answers = Answers("", "0123abcd", "y", "", "", "", "", "", "", "", "")
+    answers = Answers("", "0123abcd", "y", "", "", "", "", "", "", "", "", "", "")
     values, revised = run(tmp_path, client, answers)
     assert values["name"] == "0123abcd_1_4"
     assert revised == ["animal"]
@@ -266,10 +288,13 @@ def test_a_different_animal_is_revised_and_renames(tmp_path, client, fake):
 
 def test_values_entered_for_jpresent_are_not_revisions(tmp_path, client):
     answers = Answers(
-        "tbyron", "", "1", "y", "", "3", "1", "A1x32", "", "", "-2100", ""
+        "tbyron", "", "1", "y", "", "3", "1", "A1x32", "L", "NCM", "", "", "-2100", ""
     )
     values, revised = run(tmp_path, client, answers, presenter={})
     assert values["probe"] == "A1x32"
+    assert values["hemisphere"] == "L"
+    assert values["location"] == "NCM"
+    assert "location (brain area; provisional until histology): " in answers.prompts
     assert values["z"] == -2100
     assert values["name"] == "C182_3_1"
     assert revised == []
@@ -277,7 +302,7 @@ def test_values_entered_for_jpresent_are_not_revisions(tmp_path, client):
 
 def test_required_values_are_asked_again(tmp_path, client):
     answers = Answers(
-        "", "tbyron", "", "1", "y", "", "", "1", "x", "2", "", "", "", "", ""
+        "", "tbyron", "", "1", "y", "", "", "1", "x", "2", "", "", "", "", "", "", ""
     )
     values, _ = run(tmp_path, client, answers, presenter={})
     assert values["pen"] == 1
@@ -294,8 +319,8 @@ def test_registry_objections_ask_again_with_the_answers_as_defaults(
     tmp_path, client, fake
 ):
     fake.check_errors = [{"experimenter": ["no such user 'tbyrn'"], "sha1": ["x"]}]
-    first = ("tbyrn", "", "1", "y", "", "", "", "", "", "", "", "")
-    second = ("tbyron", "", "1", "y", "", "", "", "", "", "", "", "")
+    first = ("tbyrn", "", "1", "y", "", "", "", "", "", "", "", "", "", "")
+    second = ("tbyron", "", "1", "y", "", "", "", "", "", "", "", "", "", "")
     answers = Answers(*first, *second)
     values, revised = run(tmp_path, client, answers)
     assert values["experimenter"] == "tbyron"
@@ -306,8 +331,8 @@ def test_registry_objections_ask_again_with_the_answers_as_defaults(
 
 def test_a_name_the_user_gave_is_kept_when_asked_again(tmp_path, client, fake):
     fake.check_errors = [{"name": ["taken"]}]
-    first = ("", "", "1", "y", "", "", "", "", "", "", "", "C182_1_4b")
-    second = ("", "", "1", "y", "", "", "", "", "", "", "", "")
+    first = ("", "", "1", "y", "", "", "", "", "", "", "", "", "", "C182_1_4b")
+    second = ("", "", "1", "y", "", "", "", "", "", "", "", "", "", "")
     values, _ = run(tmp_path, client, Answers(*first, *second))
     assert values["name"] == "C182_1_4b"
 
@@ -330,6 +355,8 @@ def test_arfx_command(tmp_path):
         "arfx-oephys",
         "-f",
         str(tmp_path / "a.arf"),
+        "-T",
+        "EXTRAC_RAW",
         "--experimenter",
         "tbyron",
         "--animal",
@@ -349,6 +376,13 @@ def test_arfx_command(tmp_path):
         "--override-presenter-metadata",
         str(session.path),
     ]
+
+
+def test_arfx_command_datatype(tmp_path):
+    session = prep.find_session(make_session(tmp_path))
+    values = {"experimenter": "tbyron", "animal_uuid": COBALT["uuid"]}
+    cmd = prep.arfx_command(session, values, [], {}, tmp_path / "a.arf", "EXTRAC_HP")
+    assert cmd[3:5] == ["-T", "EXTRAC_HP"]
 
 
 def test_arfx_command_overrides_only_the_presenters_values(tmp_path):
@@ -529,7 +563,13 @@ def test_script(script_env, tmp_path):
     session, target, commands = script_env
     assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 0
     [cmd] = commands
-    assert cmd[:3] == ["arfx-oephys", "-f", str(tmp_path / "C182_1_4.arf")]
+    assert cmd[:5] == [
+        "arfx-oephys",
+        "-f",
+        str(tmp_path / "C182_1_4.arf"),
+        "-T",
+        "EXTRAC_RAW",
+    ]
     assert (target / "C182_1_4.arf").read_text() == "arf"
     assert (target / SESSION_DIR).is_dir()
     manifest = json.loads((target / "C182_1_4.json").read_text())
@@ -545,6 +585,14 @@ def test_script_dry_run_writes_nothing(script_env, tmp_path, capsys):
     assert commands == []
     assert list(target.iterdir()) == []
     assert capsys.readouterr().out.rstrip().endswith(str(session))
+
+
+def test_script_datatype(script_env):
+    session, target, commands = script_env
+    argv = ["-r", REGISTRY, "convert", "-T", "EXTRAC_HP", str(session), str(target)]
+    assert prep.script(argv) == 0
+    [cmd] = commands
+    assert cmd[3:5] == ["-T", "EXTRAC_HP"]
 
 
 def test_script_wont_overwrite(script_env, tmp_path):

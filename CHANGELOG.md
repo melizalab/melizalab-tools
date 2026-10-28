@@ -10,7 +10,8 @@
   workstation's share with a manifest (`prep-oephys convert`). Values changed
   from the recording are listed in `revised_after_recording`. Once the ARF is
   deposited, `prep-oephys cleanup <manifest>` removes the ARF and the session
-  directory from the recording computer. Needs arfx 3.1.1.
+  directory from the recording computer. The continuous channels are stored
+  as `EXTRAC_RAW` (wideband), or the type given with `-T`. Needs arfx 3.1.1.
 - `dlab.abfio` reads the ABF files in an abfzip archive (an
   `intracellular-abfzip` resource) in place, without unpacking it:
   `abf_members(path)` lists them, and `ZippedAxonIO(path, member)` and

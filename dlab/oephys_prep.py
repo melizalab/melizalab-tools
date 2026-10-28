@@ -30,6 +30,7 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sysconfig
 from collections.abc import Callable
 from dataclasses import astuple, dataclass
 from pathlib import Path
@@ -50,8 +51,18 @@ DTYPE = "extracellular-arf"
 REVISED = "revised_after_recording"
 # prompted for after the experimenter, animal and protocol; pen and site are
 # required, as they're part of the name
-FIELDS = ("pen", "site", "probe", "x", "y", "z")
+FIELDS = ("pen", "site", "probe", "hemisphere", "location", "x", "y", "z")
 REQUIRED = ("pen", "site")
+# what the prompts say about some fields
+HINTS = {
+    "location": "brain area; provisional until histology",
+    "x": "microns",
+    "y": "microns",
+    "z": "microns from the top of the brain",
+}
+# the ARF data type of the continuous channels (arfx-oephys -T); the recordings
+# are wideband
+DATATYPE = "EXTRAC_RAW"
 # what the registry can't check before the ARF is written, and can't check
 # at all here, as the resource has no location yet
 NOT_YET_CHECKED = ("sha1", "locations")
@@ -87,7 +98,8 @@ def find_session(path: Path) -> Session:
         names = ", ".join(str(p.relative_to(path)) for p in recordings)
         raise ValueError(
             f"{path} holds {len(recordings)} recordings ({names}); an ARF file "
-            "can only hold one, so move the others to their own session directories"
+            "can only hold one, and we're still working out how to handle a "
+            "session directory with more than one"
         )
     [recording] = recordings
     for dir in (recording, *recording.parents):
@@ -287,8 +299,9 @@ def ask_values(
     values["protocol"] = ask(input, "protocol", defaults.get("protocol"), required=True)
     for field in FIELDS:
         parse = parse_int if field in REQUIRED else parse_value
+        label = f"{field} ({HINTS[field]})" if field in HINTS else field
         values[field] = ask(
-            input, field, defaults.get(field), parse=parse, required=field in REQUIRED
+            input, label, defaults.get(field), parse=parse, required=field in REQUIRED
         )
     # a name the user gave is kept; one by the convention follows the answers
     name = default_name(values["animal"], values["pen"], values["site"])
@@ -350,19 +363,29 @@ def revised_fields(recorded: dict[str, Any], values: dict[str, Any]) -> list[str
     return sorted(revised)
 
 
+def arfx_oephys() -> str:
+    """The arfx-oephys installed with this environment's Python, so that it's
+    the arfx that prep-oephys was installed with, or else the one on the PATH"""
+    found = shutil.which("arfx-oephys", path=sysconfig.get_path("scripts"))
+    return found or "arfx-oephys"
+
+
 def arfx_command(
     session: Session,
     values: dict[str, Any],
     revised: list[str],
     presenter: dict[str, Any],
     arffile: Path,
+    datatype: str = DATATYPE,
 ) -> list[str]:
     """The arfx-oephys command that writes the recording to arffile with the
     values. Values are JSON, so that a string that looks like a number stays one."""
     cmd = [
-        "arfx-oephys",
+        arfx_oephys(),
         "-f",
         str(arffile),
+        "-T",
+        datatype,
         "--experimenter",
         values["experimenter"],
         "--animal",
@@ -619,7 +642,9 @@ def convert_command(args) -> int:
             return 1
         # an ARF from a run whose copy failed is checked and copied again
         reuse = outputs.arf.exists()
-        cmd = arfx_command(recording, values, revised, presenter, outputs.arf)
+        cmd = arfx_command(
+            recording, values, revised, presenter, outputs.arf, args.datatype
+        )
         if args.dry_run:
             if reuse:
                 log.info("%s is already written and won't be again", outputs.arf)
@@ -690,6 +715,14 @@ def script(argv=None):
         metavar="URL",
         help="URL of the bird colony's API (default: birds/api/ on the "
         "registry's server)",
+    )
+    pp.add_argument(
+        "-T",
+        dest="datatype",
+        default=DATATYPE,
+        metavar="DATATYPE",
+        help="ARF data type of the continuous channels (default: %(default)s; see "
+        "arfx-oephys --help-datatypes)",
     )
     pp.add_argument(
         "--dry-run",
