@@ -171,6 +171,23 @@ nbank 1.0rc1 on the lab hosts and a release here pinned to it, then 1.0.
   KS-good clusters, and merge same-channel units whose spike trains never
   come within 1.5 ms. Scripts and tables (pair_sites.py, siblings.py) were
   in the session scratchpad, not kept.
+- [ ] `prep-oephys` on grafisia (workflow agreed 2026-10-28; on sturnus the ARF
+  and the units are deposited by hand with `nbank deposit` and
+  `group-kilo-spikes`, as Bao curates the unit files between them):
+  - [x] (a) refuse a session with more than one recording; prompt for the
+    metadata, defaulting to what the recording says (presenter metadata, and
+    the session directory's `<animal>_<date>_<time>_<protocol>`); look up the
+    animal in the colony (by band number until bird-colony's `color` filter
+    takes the abbreviation); check name, experimenter and animal with the
+    registry; list changed values in `revised_after_recording`; print the
+    arfx-oephys command
+  - [ ] (b) run arfx-oephys, the registry's dry-run check on the ARF, copy the
+    ARF and raw directory to the target, and write `<name>.json` (sha1,
+    metadata, source host and path)
+  - [ ] (c) `--cleanup`: remove the ARF and raw directory once the registry has
+    the ARF's name and sha1 with a location
+  - [ ] the `oephys = ["arfx>=3.1.1"]` extra, once arfx 3.1.1 is on PyPI (its
+    `presenter_metadata`, `--experimenter` and `--animal` are needed)
 - [ ] Scripts for the sorting workflow, once the new setup has been tried by
   hand a few times. The setup (2026-10-21): grafisia makes the ARF and copies
   it with the raw data to the sorting machine's share; sturnus mounts that
