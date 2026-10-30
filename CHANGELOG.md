@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.30
 
 Requires neurobank 1.0 and melizalab-specs 0.1.2.
 
