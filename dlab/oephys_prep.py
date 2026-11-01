@@ -512,17 +512,28 @@ def check_arf(
     return body
 
 
+def copy_contents(src: Path, dst: Path) -> None:
+    """Copies the directory src to dst, which mustn't exist, checking each file's
+    size. Only the contents are copied: a network share may refuse to set
+    permissions and times."""
+    dst.mkdir()
+    for path in sorted(src.rglob("*")):
+        target = dst / path.relative_to(src)
+        if path.is_dir():
+            target.mkdir()
+        else:
+            shutil.copyfile(path, target)
+            if path.stat().st_size != target.stat().st_size:
+                raise OSError(f"{target}: the copy isn't the same size as {path}")
+
+
 def copy_to_target(recording: Session, outputs: Outputs, sha1: str) -> None:
     """Copies the session directory and the ARF to the target, checking each
     file's size, and the ARF's hash. Raises OSError if a copy fails or differs,
     after removing the copies."""
     try:
         log.info("copying %s to %s", recording.path, outputs.target_session)
-        shutil.copytree(recording.path, outputs.target_session)
-        for src in recording.path.rglob("*"):
-            dst = outputs.target_session / src.relative_to(recording.path)
-            if src.is_file() and src.stat().st_size != dst.stat().st_size:
-                raise OSError(f"{dst}: the copy isn't the same size as {src}")
+        copy_contents(recording.path, outputs.target_session)
         log.info("copying %s to %s", outputs.arf, outputs.target_arf)
         shutil.copyfile(outputs.arf, outputs.target_arf)
         if file_sha1(outputs.target_arf) != sha1:

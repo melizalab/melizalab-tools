@@ -508,6 +508,20 @@ def test_copy_to_target(tmp_path):
     assert (copied / "structure.oebin").read_text() == "{}"
 
 
+def test_copy_to_a_share_that_refuses_permissions_and_times(tmp_path, monkeypatch):
+    # e.g. a CIFS mount without Unix extensions
+    def refuse(*args, **kwargs):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr("os.chmod", refuse)
+    monkeypatch.setattr("os.utime", refuse)
+    recording, outputs = make_outputs(tmp_path)
+    outputs.arf.write_text("arf")
+    prep.copy_to_target(recording, outputs, file_sha1(outputs.arf))
+    copied = outputs.target_session / "Record Node 101/experiment1/recording1"
+    assert (copied / "structure.oebin").read_text() == "{}"
+
+
 def test_a_copy_that_differs_is_removed(tmp_path):
     recording, outputs = make_outputs(tmp_path)
     outputs.arf.write_text("arf")
