@@ -387,7 +387,7 @@ validate = [
 
 [[package]]
 name = "melizalab-tools"
-version = "2026.10.30"
+version = "2026.11.1"
 source = { editable = "." }
 dependencies = [
     { name = "arf" },
