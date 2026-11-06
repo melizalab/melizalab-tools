@@ -1,0 +1,17 @@
+## Procedures
+
+* [[Extracellular/Recording]] - how to set up equipment and software and record extracellularly in vivo
+
+## Analysis
+
+* [[Extracellular/KiloSort]] - guide to sorting spikes with kilosort and the Phy GUI
+
+### Old protocols
+
+* [[Extracellular/MountainSort]] - guide to sorting spikes with mountainsort
+* [[Extracellular/MountainView]] - guide to cluster analysis with mountainview
+
+## Resources
+
+### General
+* [[Extracellular/Ephys Almanac]] - tips and tricks for working with the ephys rig and analysis process

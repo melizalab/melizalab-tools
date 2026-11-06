@@ -1,0 +1,164 @@
+This guide describes how to sort spikes from extracellular recordings using [kilosort](https://github.com/MouseLand/Kilosort) and [phy](https://github.com/cortex-lab/phy). The work is split across three computers:
+
+- **grafisia** (the recording computer): `prep-oephys convert` checks the recording's metadata, converts it to ARF, and copies the ARF and the raw recording to the Alienware.
+- **the Alienware** (the sorting workstation): sort with kilosort and curate with phy. Its `ephys` share appears as `E:\ephys` on the Alienware, sorted by experimenter (e.g. `E:\ephys\Bao\P325_2025-11-17_13-31-57_arc5-syn`). On grafisia and on sturnus, it's mounted at `/mnt/spike_sorting`.
+- **sturnus** (or **basilornis**): deposit the ARF, make the unit files (`group-kilo-spikes`), and deposit them.
+
+Nothing gets deposited until the sort is curated. The metadata (experimenter, animal, pen, site, protocol, coordinates, etc.) is entered once, in step 1, and stored in the ARF file; `nbank deposit` and `group-kilo-spikes` read it from the files from then on, so there are no `-k` options to copy from one recording to the next.
+
+### 0. Beginner's note:
+
+ - See [initial setup instructions](#InitialSetup) if this is your first time setting up kilosort on a computer.
+
+ - In the instructions below, replace `dmeliza` with your username, and `P56_1_3` with the name of your recording. You will need to adjust other names as well.
+
+ - <b>If you're using Kilosort 2.5 on MATLAB:</b> Kilosort 2.5 deletes files needed for ARF conversion (i.e. `timestamps.npy`) from the recording it sorts. Step 1 makes the ARF before the recording reaches the Alienware, so this only affects the copy there; just don't run `prep-oephys` on a copy that Kilosort 2.5 has sorted. Kilosort 4 is recommended for new projects. Try to use the same sorter for all the recordings in a project, as there are differences in yield and drift correction.
+
+ - Since the network drive only has a 2TB capacity, do not use the Alienware drive as long-term storage of ephys data. Delete your files from it once the unit files are deposited (step 7).
+
+### 1. Prepare the recording (on grafisia)
+
+Run `prep-oephys convert` on the session directory, giving your folder on the share as the target:
+
+`prep-oephys convert /home/melizalab/open-ephys/P56_2026-02-06_11-27-05_chorus /mnt/spike_sorting/dmeliza/`
+
+The session directory must contain only one recording (one `experimentN/recordingM`). We're still working out how to deal with a session directory that holds several recordings, and how to combine multiple recordings at the same location. The script will:
+
+ - ask for the recording's metadata. Each question starts with what the recording says, from the session directory's name (`<animal>_<date>_<time>_<protocol>`) and the metadata `oeaudio-present` logged (`jpresent` doesn't log any). Press Enter to accept a value, or type a new one. The questions are: experimenter (your registry username), animal, protocol, pen, site, probe, hemisphere, location (the brain area: provisional, as it isn't known for certain until the histology), and the x, y, z coordinates (microns; z from the top of the brain). Pen and site are required.
+ - look up the animal in the bird colony by its band (e.g. `P56`) or the start of its UUID, and shows who it is, with the events in its history nearest the recording. If several animals have that band number, pick the right one from the list.
+ - propose the recording's name (`P56_1_3`: the band, or the first 8 characters of the UUID if the bird isn't banded, then pen and site), and checks the name, experimenter and animal with the registry. If the registry objects (a name already taken, an unknown username), it asks again.
+ - convert the recording to `P56_1_3.arf` beside the session directory, with `arfx-oephys`, and checks the ARF with the registry as it would be deposited. The continuous channels are stored as wideband (`EXTRAC_RAW`); use `-T` for another ARF data type.
+ - copy the ARF and the session directory to the target, along with a sidecar (e.g., `P56_1_3.json`) that has a record of the ARF's hash and metadata and where they came from.
+
+Any value you change from what the recording says is listed in the recording's metadata as `revised_after_recording`, so that a correction made after the fact can be found later. To see what it would do without writing anything, add `--dry-run`. If the copy fails, the ARF file is retained and you can run the same command without having to redo the conversion. The raw data and ARF file stay on grafisia until cleanup (see below).
+
+### 2. Automated Sorting - Pick one of the two options below
+
+#### a. Kilosort 2.5 (MATLAB)
+
+ - Run `MATLAB`. Once the MATLAB window opens, navigate to your `Kilosort-2.5` folder (located on `C:\Users\melizalab\Desktop`). Right-click on `npy-matlab` and select `Add to Path/Selected Folder and Subfolders`. Then, in the command window, run `kilosort`.
+ - On the `kilosort` terminal, click on `Select data file` and navigate to the `continuous.dat` file in your data folder. Then, set your working directory and your results output: this usually defaults to the same folder as your data, but it's recommended to create a new folder for both (i.e. `E:\ephys\Bao\P325_1_1`).
+ - Select the correct probe layout. The number of channels should automatically fill as well as the parameters. We are using the system parameters but the parameters can be changed by following the instructions on `set advanced options`.
+ - Click through the raw trace file to check that your channels were recording and that you did not lose the ground. Press 'C' to switch from heatmap to trace view, and use '1' and '2' to switch between raw and whitened traces.
+ - Select `Run All`.
+
+Additional documentation on automated sorting can be found on the [Kilosort Wiki](https://github.com/MouseLand/Kilosort/wiki/1.-The-GUI).
+
+#### b. Kilosort 4 (Python) - Recommended
+  - In the terminal on the Alienware, run `conda activate kilosort`, followed by `python -m kilosort`. The kilosort GUI will pop up.
+  - Click on `Select Binary File` and navigate to the `continuous.dat` file in your recording folder.
+  - Select the output directory and probe layout. You can import new probe layouts from Kilosort2.5's `.mat` channel map files.
+  - Make sure the number of channels is set to 136 for 128-channel probes, or 72 for 64-channel probes.
+  - Set `nblocks` to 5 for multi-drift correction.
+  - Make sure `tmax` is set to 'inf'.
+  - Check `Save Preprocessed Copy`, otherwise you won't be able to create `.pprox` files.
+  - Bao's extra settings: `Th (universal)` and `Th (learned)` set to 11, under `Extra settings`: `nearest templates = 64`, `acg threshold = 0.15`, `ccg threshold = 0.2`, `x centers = 6`. You can pick `x centers` based on the distance your electrodes span/250um.
+  - Click `Load`. The raw recording data should show up and you can scroll through them.
+  - Click `Run`.
+
+### 3. Manual cluster selection
+
+ - Activate your phy2 virtual environment (`conda activate spike`).
+ - Navigate to your sorting result directory (i.e. `cd E:\ephys\Bao\P325_1_1`).
+ - Open the phy-gui: `phy template-gui params.py`
+ - Use `Alt+M` to mark a cluster as bad, `Alt+G` to mark as good.
+ - Make sure to click Save before exiting.
+
+The [Phy Documentation](https://phy.readthedocs.io/en/latest/) and [Practical User's Guide](https://github.com/kwikteam/phy-contrib/blob/master/docs/template-gui.md) are excellent resources for selecting clusters.
+
+If you don't get any good clusters, stop here. There is no need to deposit bad data. Make sure to press 'Save' before exiting.
+
+### 4. Deposit the recording (on sturnus)
+
+Deposit the ARF from the share into the archive for your protocol. The metadata come from the file, so no `-k` options are needed:
+
+`nbank deposit -d extracellular-arf /home/data/chorus /mnt/spike_sorting/dmeliza/P56_1_3.arf`
+
+This moves the ARF from the share into the archive (`/home/data/chorus/resources/P5/P56_1_3.arf`). Add `--dry-run` first if you want to see what the registry would make of it. The reason for depositing the recording first is to ensure that the unit files are all referenced to a unique URL for the recording.
+
+### 5. Generate pprox files (on sturnus)
+
+This part of the process parses the ARF file to determine when each trial started and stopped in the raw recording, and what stimulus was presented, then uses this information to sort the spikes into the correct trials and files. It takes the recording's metadata from the registry.
+
+The below command will not work unless you've curated your data in `phy`. By default, the script will also store spike waveforms in hdf5 files.
+
+`group-kilo-spikes -o /home/data/chorus/staging/P56_1_3 --sync ADC3 /home/data/chorus/resources/P5/P56_1_3.arf /mnt/spike_sorting/dmeliza/P56_1_3`
+
+The last argument is the phy sorting result folder on the share. The output directory can be in your home directory, on `/scratch/`, or in the `staging` directory for the neurobank archive where the files are going (this avoids a copy and is faster).
+
+#### Optogenetic stimulation and other auxiliary channels
+
+If the recording has an LED or laser, or any other device whose pulses were recorded on an ADC channel, add `--aux` to record its pulses in each trial. For an LED recorded on `ADC4`:
+
+`group-kilo-spikes -o <output-folder> --sync ADC3 --aux led=ADC4:condition <path to ARF file> <phy output folder>`
+
+ - `led` is the name the pulses get in the pprox file. You can choose any name; use the same one for every recording in an experiment.
+ - `ADC4` is the channel the light source's TTL or monitor output was recorded on. Check your rig's wiring if you're not sure.
+ - `:condition` is optional. It tells the script that jpresent commanded the pulses with `condition` messages, so the script checks each pulse against them. Leave it off for recordings without these messages (e.g. oeaudio-present). With it, a pulse that nothing commanded, or a commanded pulse that didn't happen (e.g. the LED failed), is reported as a warning. The script still finishes, and the pprox file records the pulses that were actually on the channel.
+ - For more than one device, repeat the option, e.g. `--aux led=ADC4:condition --aux laser=ADC5`.
+
+Each trial in the pprox file gets an `aux` list with one entry per pulse that started in the trial: its name and its start and end times in seconds relative to the stimulus onset, e.g. `{"name": "led", "interval": [0.0, 1.0]}`. A trial without a pulse has an empty list. The script prints how many pulses it found on each channel. With `:condition`, it also prints how many `condition` messages there were and how many of them were followed by a pulse; these should be equal. Without it, compare the pulse count with the number of light trials you expected.
+
+### 6. Deposit the units (on sturnus)
+
+Check and curate the unit files if needed, then deposit them. Again, the metadata come from the files, so there's no need for any `-k` options here.
+
+`nbank deposit -d spikes-pprox /home/data/chorus /scratch/dmeliza/staging/P56_1_3/*.pprox`
+
+`nbank deposit -d spikes-hdf5 /home/data/chorus /scratch/dmeliza/staging/P56_1_3/*_spikes.h5`
+
+### 7. Cleanup
+
+On grafisia, remove the ARF and the session directory:
+
+`prep-oephys cleanup /mnt/spike_sorting/dmeliza/P56_1_3.json`
+
+This only removes them once the registry has the ARF with the same hash, in an archive, and asks before removing anything. Then delete your files for the recording from the Alienware: the session directory, the sorting result folder, and `P56_1_3.json`.
+
+Move your raw open-ephys output folder to a subdirectory on `/mnt/staging/extracellular_data/`, but this is a temporary store and old recordings are subject to deletion as that drive fills up. 
+
+### 8. Re-sorting a recording
+
+If you still have the raw open-ephys output, proceed from the start of this guide. If this directory has been deleted, you can use `arfx-collect-sampled` to rebuild the `continuous.dat` file that kilosort reads from the deposited ARF file. The rebuilt file is byte-identical to the original, so kilosort will see exactly the same data. Kilosort only needs the binary file, the probe layout, and its settings. The other files in the raw recording folder (timestamps, events, `structure.oebin`) aren't needed.
+
+ - Find the deposited ARF file with `nbank locate P56_1_3` (on sturnus).
+ - Rebuild the binary file with arfx 3.0.2 or later. Write it into a new folder that holds nothing else, because kilosort may pick up any other `.dat`, `.bin` or channel map file in the same folder:
+
+   `arfx-collect-sampled P56_1_3.arf /mnt/spike_sorting/dmeliza/P56_1_3_resort/continuous.dat`
+
+This takes a few minutes and writes a file as large as the original (about 35 GB for a 72-minute recording with 136 channels). It writes every channel in the ARF file, in the order they were recorded: the headstage channels, then the ADC channels. If some channels weren't saved to the ARF file, the rebuilt file has fewer columns than the original recording. This happens when the ARF file was made with a channel list (`arfx-oephys -C`) or with `--skip-empty`. Run `arfx-collect-sampled --dry-run P56_1_3.arf x.dat` first: it lists the channels it would write, and how many. Set the number of channels in kilosort to that count. Use a probe layout whose channel map refers to columns of the rebuilt file, not to the original recording's channel numbers. A channel that wasn't saved can't be recovered. If you pick channels with `arfx-collect-sampled -c` or `-C`, the script will stop with an error if those channels aren't in the file.
+
+Now proceed with step 2. Skip step 4 (the ARF file is already in neurobank), and get Dan's help with step 6, as the old resources will need to be purged or superseded. You can delete the rebuilt `continuous.dat` once the sort is done.
+
+### <a id="InitialSetup"></a> Initial setup ###
+
+#### Alienware
+
+- Install MATLAB and Kilosort 2.5
+- Create and provision a conda environment for phy2: `conda create -n phy2 python=3.10 numpy scipy`
+- Activate the environment: `conda activate phy2`
+- Install phy2: `pip install phy --pre --upgrade`
+- Install melizalab-tools using pipx: `pipx install melizalab-tools`
+- Install arfx using pipx: `pipx install arfx`
+
+#### Grafisia/Sturnus
+
+Install melizalab-tools with neurobank and arfx in one environment, using pipx:
+
+    pipx install "melizalab-tools[oephys]"
+    pipx inject --force --include-apps melizalab-tools neurobank arfx
+
+This gives you `prep-oephys`, `group-kilo-spikes`, `nbank` and `arfx-oephys`. They need to share an environment: `nbank deposit` reads the metadata from ARF files with arfx and from pprox and spike waveform files with melizalab-tools. If you installed neurobank or arfx with pipx before, remove them first (`pipx uninstall neurobank`, `pipx uninstall arfx`); otherwise pipx leaves their `nbank` and `arfx-oephys` in place, and those can't read the metadata (`which nbank` should point into the melizalab-tools environment).
+
+To upgrade all three: `pipx upgrade --include-injected melizalab-tools`. (`pipx upgrade melizalab-tools` only upgrades neurobank and arfx when the new melizalab-tools requires it.)
+
+### Notes
+
+- October 2026:
+  - neurobank 1.0. `nbank deposit` reads the metadata from ARF and pprox files, so the `-k experimenter=... -k bird=...` options are no longer used: they made it too easy to copy the previous recording's values. The metadata are entered once, in `prep-oephys`, which needs arfx 3.1.1 and melizalab-tools TBD or later.
+  - Recordings are deposited after the sort is curated, from the Alienware's share, instead of before sorting.
+  - Recordings converted with the old instructions (`arfx-oephys -T EXTRAC_HP`) are labeled as high-pass filtered, but they're wideband. 
+- May 2026:
+  - we upgraded open-ephys from version 0.5 to 1.0 around May 2026. 
+  - `arfx-oephys` was patched to support the new layout of the default binary format. Make sure you're using arfx 2.8.0 or later.
+  - `group-kilo-spikes` was patched to support using `oeaudio-present` logfiles for the list of stimuli presented in a recording. This is needed for a subset of recordings where the NetworkEvents plugin was not logging these messages. Make sure you're using melizalab-tools `2026.06.17` or later, and add `--oeaudio-log <name-of-logfile>` to your `group-kilo-sort` command. You can use any logfile that matches the stimulus set and seed you used.

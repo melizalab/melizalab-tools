@@ -1,0 +1,39 @@
+# Extracellular Recording
+
+---
+
+**Setup:**
+
+1. Turn on the computer and switch to the real-time kernel using the Advanced Options in the boot menu. Turn on the amplifier, micromanipulator controller, microphone, microphone pre-amp, microscope, and infrared LED strip. Turn on the all-in-one computer, sign in as `.\meliza-lab`, and open the Logitech and Scientifica interfaces.
+2. Line the tube restraint with gauze and place bird inside, making sure it's not too tight. Screw the head pin into the bar inside the recording box and adjust the angle if necessary. Open the recording site if not already done, make a ring of kwik-cast around the opening to form a well and fill with PBS or ACSF.
+3. If using DiI, coat the electrode then attach it to the micromanipulator.
+4. Plug in the OpenEphys box.
+5. Open a terminal and start the OpenEphys software: `cd plugin-GUI` then `Build/Debug/open-ephys`. Load the appropriate configuration file from the `plugin-GUI` directory. Ensure that recording rate, filtering, and channel labels are correct. Also ensure that all desired recording channels are turned on.
+6. Open a second terminal to control stimulus presentation. Make sure you can run `oeaudio-present`.
+5. Using the microscope, position the electrode approximately over the Y-sinus and zero the X and Y axes on the Scientifica software.
+
+**Recording:**
+
+1. Lower the electrode into the bath and position it with the tip just touching the recording area. Zero the Z axis on the Scientifica software. Slowly lower the electrode until all tips have penetrated into the brain, watching to make sure there is no flexing of the electrode shaft. If there is, that means the electrode is hitting something solid (probably bone or dura), and it will be necessary to remove it or shift the electrode to a different position to avoid breaking the shaft.
+2. Check that there is a good bead of fluid in the well and add more if needed. Close the door to the recording chamber and use the Logitech software for continued monitoring.
+3. Turn on acquisition on the OpenEphys software or use a search program. Manually or using the creeper setting on the Scientifica software, lower the electrode to the desired depth, monitoring the brain waveforms for more accurate positioning cues. When the electrode is in the desired position, let it rest so that the electrode is less likely to drift during recording. On first penetration, rest the electrode for about 30 minutes. 20 minutes is usually sufficient for subsequent repositioning of the electrode.
+4. Open the door to the recording chamber and add more fluid to the well if necessary, then close it again. Use the camera to make sure the bird is still. Begin recording.
+5. Start the recording. For example: `oeaudio-present -a tcp://localhost:5556 -d /home/melizalab/open-ephys -k experiment=pilot_chorus -k animal=P50 -k experimenter=smm3rc -k pen=1 -k site=1 -k location=CM -k hemisphere=L -k x=1436.3 -k y=-757.7 -k z=-1610.1 -S 100 -r 10 -g 1 Chorus_rescaled/*.wav`. Check out the [[Ephys_Almanac]] page to see what the parameters mean.
+5. When the recording is finished, either reposition the electrode to a new depth or withdraw it completely and reposition under the microscope to move it to new X-Y coordinates. 
+
+**Clean-up:**
+
+1. Rinse the electrode thoroughly with dH2O as soon as it is removed from the brain, then rinse with contact lens solution to help dissolve protein accumulation.
+2. Unscrew the bird from the head bar and set aside. Put the two screws somewhere safe for next time. Lower the electrode into contact lens solution to soak 30 minutes to overnight.
+3. Setup the perfusion station and perfuse the bird if saving the brain for electrode position verification.
+4. Close the open-ephys GUI
+4. Shutdown the all-in-one computer, microscope, amplifier, microphone, pre-amp, Scientifica box, OpenEphys box, and infrared LED light-strip. Throw away any disposables, and clean any surgical tools used with ethanol.
+5. Once the electrode has soaked, rinse it with dH20 again and then with ethanol.
+
+**Archiving the Data**
+
+Convert the recorded data to ARF using `arfx-oephys`. Make sure to use the optional arguments supported by this script to store important metadata. Make one ARF file per recording site. For example, if your data from one recording are stored under `P56_2020-09-18_10-52-48_chorus`, you would run commands like the following:
+
+`arfx-oephys -T EXTRAC_HP -k experimenter=dmeliza -k bird=f864a1f9-796c-4638-af4e-61f9bede453c -k pen=1 -k site=3 -k protocol=chorus -f P56_1_3.arf P56_2020-09-18_10-52-48_chorus`
+
+The next step is to sort spikes. Currently we use [[KiloSort]]. Make sure you do the ARF conversion before starting the spike sorting.
