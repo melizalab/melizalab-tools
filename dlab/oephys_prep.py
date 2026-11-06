@@ -10,21 +10,27 @@ animal is looked up in the bird colony, and the name, experimenter and animal
 are checked with the registry. Values that differ from what the recording
 says are listed in the entry attribute `revised_after_recording`.
 
-Then arfx-oephys writes the recording to `<name>.arf` beside the session
-directory, the registry checks the ARF as it would be deposited, and the ARF
-and the session directory are copied to the target (the spike sorting
-workstation's share) with `<name>.json`, which records the ARF's hash and
-metadata and where they came from. The ARF is deposited from the target once
-the sort is curated. Then `prep-oephys cleanup <name>.json` removes the ARF
-and the session directory from the recording computer, if the registry has
-the ARF.
+Then the session directory is copied to the target (the spike sorting
+workstation's share), where it can be sorted once it has its own name, and
+arfx-oephys writes the recording to `<name>.arf` in a staging directory on the
+recording computer. The registry checks the ARF as it would be deposited, and
+it's copied to the target with `<name>.json`, which records the ARF's hash and
+metadata, the session's hashes, and where they came from. Each copy is read
+back and checked by hash. Then the session directory is removed from the
+recording computer, leaving the ARF in staging until it's deposited (from the
+target, once the sort is curated) and removed by hand.
+
+Files are written under a temporary name (`.partial`) until they're complete,
+so a run that stops can be run again: what's complete is kept.
 
 """
 
 import argparse
 import datetime
+import hashlib
 import json
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -32,7 +38,7 @@ import socket
 import subprocess
 import sysconfig
 from collections.abc import Callable
-from dataclasses import astuple, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -434,32 +440,63 @@ def prepare(
         defaults = values
 
 
+def partial(path: Path) -> Path:
+    """Where path is written until it's complete"""
+    return path.with_name(path.name + ".partial")
+
+
 @dataclass
 class Outputs:
-    """The files prep-oephys writes: the ARF beside the session directory, and
-    in the target, the ARF, the session directory, and the manifest"""
+    """The files prep-oephys writes: in staging, the ARF and the session's
+    hashes; in the target, the session directory, the ARF and the manifest"""
 
     arf: Path
-    target_arf: Path
+    hashes: Path
     target_session: Path
+    target_arf: Path
     manifest: Path
 
     @classmethod
-    def for_recording(cls, recording: Session, name: str, target: Path) -> "Outputs":
+    def for_recording(
+        cls, recording: Session, name: str, staging: Path, target: Path
+    ) -> "Outputs":
         return cls(
-            arf=recording.path.parent / f"{name}.arf",
-            target_arf=target / f"{name}.arf",
+            arf=staging / f"{name}.arf",
+            hashes=staging / f"{name}.session.json",
             target_session=target / recording.path.name,
+            target_arf=target / f"{name}.arf",
             manifest=target / f"{name}.json",
         )
 
-    def existing(self) -> list[Path]:
-        return [p for p in astuple(self) if p.exists()]
+
+def session_size(path: Path) -> int:
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+def space_warnings(recording: Session, staging: Path, target: Path) -> list[str]:
+    """Advisory: whether staging is on the recording's drive, and whether staging
+    and the target look too full for the ARF and the copies, taking the ARF to
+    be about the size of the recording"""
+    warnings = []
+    if staging.stat().st_dev == recording.path.stat().st_dev:
+        warnings.append(f"{staging} is on the same drive as {recording.path}")
+    size = session_size(recording.path)
+    for where, needed in ((staging, size), (target, 2 * size)):
+        free = shutil.disk_usage(where).free
+        if free < needed:
+            warnings.append(
+                f"{where} has {free / 1e9:.1f} GB free, and may need "
+                f"{needed / 1e9:.1f} GB"
+            )
+    return warnings
 
 
 def convert(cmd: list[str], arffile: Path) -> None:
-    """Runs arfx-oephys. Raises RuntimeError if it fails, after removing what it
-    wrote."""
+    """Runs arfx-oephys, which writes the ARF under its temporary name, then
+    renames it to arffile. Raises RuntimeError if it fails, after removing what
+    it wrote."""
+    # arfx-oephys adds to a file that's there, so one a run left is removed
+    partial(arffile).unlink(missing_ok=True)
     log.info("converting: %s", shlex.join(cmd))
     try:
         result = subprocess.run(cmd)
@@ -468,8 +505,9 @@ def convert(cmd: list[str], arffile: Path) -> None:
             "arfx-oephys isn't installed: install melizalab-tools[oephys]"
         ) from err
     if result.returncode != 0:
-        arffile.unlink(missing_ok=True)
+        partial(arffile).unlink(missing_ok=True)
         raise RuntimeError(f"arfx-oephys failed (exit status {result.returncode})")
+    partial(arffile).rename(arffile)
 
 
 def read_arf_metadata(arffile: Path) -> dict[str, Any]:
@@ -512,41 +550,98 @@ def check_arf(
     return body
 
 
-def copy_contents(src: Path, dst: Path) -> None:
-    """Copies the directory src to dst, which mustn't exist, checking each file's
-    size. Only the contents are copied: a network share may refuse to set
-    permissions and times."""
+CHUNK = 1 << 20
+
+
+def copy_file(src: Path, dst: Path) -> str:
+    """Copies the data of src to dst, and returns the SHA-1 hash of what was
+    read. The copy is flushed to its drive and, where the OS allows, dropped
+    from the cache, so that reading it back reads what was written (on a
+    network share, what the server has)."""
+    sha1 = hashlib.sha1()
+    with open(src, "rb") as fin, open(dst, "wb") as fout:
+        while chunk := fin.read(CHUNK):
+            sha1.update(chunk)
+            fout.write(chunk)
+        fout.flush()
+        os.fsync(fout.fileno())
+        if hasattr(os, "posix_fadvise"):
+            os.posix_fadvise(fout.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+    return sha1.hexdigest()
+
+
+def copy_tree(src: Path, dst: Path) -> dict[str, str]:
+    """Copies the directory src to dst, which mustn't exist, and reads the copy
+    back to check it. Returns each file's SHA-1 hash, by its path in src. Only
+    the contents are copied: a network share may refuse to set permissions and
+    times. Raises OSError if the copy differs."""
     dst.mkdir()
+    hashes = {}
     for path in sorted(src.rglob("*")):
-        target = dst / path.relative_to(src)
+        rel = path.relative_to(src)
         if path.is_dir():
-            target.mkdir()
+            (dst / rel).mkdir()
         else:
-            shutil.copyfile(path, target)
-            if path.stat().st_size != target.stat().st_size:
-                raise OSError(f"{target}: the copy isn't the same size as {path}")
+            hashes[rel.as_posix()] = copy_file(path, dst / rel)
+    for rel, sha1 in hashes.items():
+        if file_sha1(dst / rel) != sha1:
+            raise OSError(f"{dst / rel}: the copy doesn't match {src / rel}")
+    return hashes
 
 
-def copy_to_target(recording: Session, outputs: Outputs, sha1: str) -> None:
-    """Copies the session directory and the ARF to the target, checking each
-    file's size, and the ARF's hash. Raises OSError if a copy fails or differs,
-    after removing the copies."""
+def copy_session(recording: Session, outputs: Outputs) -> dict[str, str]:
+    """Copies the session directory to the target, unless an earlier run did,
+    and returns its files' hashes, which are kept in staging. Raises OSError if
+    the copy fails or differs, after removing it."""
+    target = outputs.target_session
+    if target.exists():
+        if not outputs.hashes.exists():
+            raise OSError(f"{target} is already there, but {PROG} didn't copy it")
+        hashes = json.loads(outputs.hashes.read_text())
+        if hashes["session"] != str(recording.path.resolve()):
+            raise OSError(f"{target} was copied from {hashes['session']}")
+        log.info("%s was copied by an earlier run", target)
+        return hashes["files"]
+    shutil.rmtree(partial(target), ignore_errors=True)
+    log.info("copying %s to %s", recording.path, target)
     try:
-        log.info("copying %s to %s", recording.path, outputs.target_session)
-        copy_contents(recording.path, outputs.target_session)
-        log.info("copying %s to %s", outputs.arf, outputs.target_arf)
-        shutil.copyfile(outputs.arf, outputs.target_arf)
-        if file_sha1(outputs.target_arf) != sha1:
-            raise OSError(f"{outputs.target_arf}: the copy doesn't match {outputs.arf}")
+        files = copy_tree(recording.path, partial(target))
+        with open(outputs.hashes, "w") as fp:
+            json.dump({"session": str(recording.path.resolve()), "files": files}, fp)
+        partial(target).rename(target)
     except BaseException:
-        shutil.rmtree(outputs.target_session, ignore_errors=True)
-        outputs.target_arf.unlink(missing_ok=True)
+        shutil.rmtree(partial(target), ignore_errors=True)
+        raise
+    log.info("%s is copied and can be sorted", target)
+    return files
+
+
+def copy_arf(outputs: Outputs, sha1: str) -> None:
+    """Copies the ARF to the target, unless an earlier run did, and checks the
+    copy's hash. Raises OSError if the copy fails or differs, after removing
+    it."""
+    target = outputs.target_arf
+    if target.exists():
+        if file_sha1(target) != sha1:
+            raise OSError(f"{target} is already there, and isn't {outputs.arf}")
+        log.info("%s was copied by an earlier run", target)
+        return
+    log.info("copying %s to %s", outputs.arf, target)
+    try:
+        read = copy_file(outputs.arf, partial(target))
+        if read != sha1 or file_sha1(partial(target)) != sha1:
+            raise OSError(f"{target}: the copy doesn't match {outputs.arf}")
+        partial(target).rename(target)
+    except BaseException:
+        partial(target).unlink(missing_ok=True)
         raise
 
 
-def write_manifest(recording: Session, outputs: Outputs, resource: dict) -> None:
-    """Writes the manifest: the resource as it will be registered, and where its
-    ARF and session directory came from"""
+def write_manifest(
+    recording: Session, outputs: Outputs, resource: dict, hashes: dict[str, str]
+) -> None:
+    """Writes the manifest: the resource as it will be registered, the session's
+    hashes, and where the ARF and the session directory came from"""
     manifest = {
         **resource,
         "source": {
@@ -555,6 +650,7 @@ def write_manifest(recording: Session, outputs: Outputs, resource: dict) -> None
             "session": str(recording.path.resolve()),
         },
         "session": outputs.target_session.name,
+        "session_sha1": hashes,
         "prepared_by": f"{PROG} {__version__}",
         "prepared_on": datetime.datetime.now().isoformat(timespec="seconds"),
     }
@@ -563,63 +659,24 @@ def write_manifest(recording: Session, outputs: Outputs, resource: dict) -> None
         fp.write("\n")
 
 
-def cleanup_problems(
-    manifest: dict, record: dict | None, arf_sha1: str | None
-) -> list[str]:
-    """Why the recording's files on this host can't be removed yet: the registry
-    must have the ARF (by name and hash, with a location), and the ARF here, if
-    it's still here, must be the one that was prepared"""
-    name = manifest["name"]
-    problems = []
-    host = socket.gethostname()
-    if manifest["source"]["host"] != host:
-        problems.append(
-            f"{name} was prepared on {manifest['source']['host']}, not {host}"
-        )
-    if record is None:
-        problems.append(f"{name} isn't registered")
-    else:
-        if record["sha1"] != manifest["sha1"]:
-            problems.append(f"{name} is registered with a different hash")
-        if not record["locations"]:
-            problems.append(f"{name} has no location in the registry")
-    if arf_sha1 is not None and arf_sha1 != manifest["sha1"]:
-        problems.append(f"{manifest['source']['arf']} isn't the ARF that was prepared")
-    return problems
-
-
-def cleanup(input: Ask, registry_url: str, manifest_path: Path) -> int:
-    """Removes the ARF and the session directory a manifest names from this
-    host, once the registry has the ARF. Asks first. Returns the exit status."""
-    from nbank import core
-
-    with open(manifest_path) as fp:
-        manifest = json.load(fp)
-    arf = Path(manifest["source"]["arf"])
-    session = Path(manifest["source"]["session"])
-    record = core.describe(registry_url, manifest["name"])
-    arf_sha1 = file_sha1(arf) if arf.exists() else None
-    problems = cleanup_problems(manifest, record, arf_sha1)
-    if problems:
-        for problem in problems:
-            log.error("error: %s", problem)
-        return 1
-    log.info(
-        "%s is registered, in %s", manifest["name"], ", ".join(record["locations"])
-    )
-    there = [p for p in (arf, session) if p.exists()]
-    if not there:
-        log.info("nothing left to remove")
-        return 0
-    print("to remove:")
-    for path in there:
-        print(f"  {path}")
-    if not ask(input, "remove them? (y/n)", "n").lower().startswith("y"):
-        return 1
-    arf.unlink(missing_ok=True)
-    shutil.rmtree(session, ignore_errors=True)
-    log.info("removed")
-    return 0
+def remove_session(
+    recording: Session, outputs: Outputs, hashes: dict[str, str]
+) -> None:
+    """Removes the session directory, if it holds only the files that were
+    copied, at the sizes of the copies. Raises OSError otherwise: something may
+    have been recorded into it since."""
+    files = {
+        p.relative_to(recording.path).as_posix(): p
+        for p in recording.path.rglob("*")
+        if p.is_file()
+    }
+    if set(files) != set(hashes):
+        raise OSError(f"{recording.path} holds files that weren't copied")
+    for rel, path in files.items():
+        if path.stat().st_size != (outputs.target_session / rel).stat().st_size:
+            raise OSError(f"{path} has changed since it was copied")
+    log.info("removing %s", recording.path)
+    shutil.rmtree(recording.path)
 
 
 def convert_command(args) -> int:
@@ -627,14 +684,17 @@ def convert_command(args) -> int:
 
     from dlab.neurobank import default_auth
 
-    if not args.target.is_dir():
-        log.error("error: %s isn't a directory", args.target)
-        return 1
+    for dir in (args.staging, args.target):
+        if not dir.is_dir():
+            log.error("error: %s isn't a directory", dir)
+            return 1
     try:
         recording = find_session(args.path)
     except ValueError as err:
         log.error("error: %s", err)
         return 1
+    for warning in space_warnings(recording, args.staging, args.target):
+        log.warning("warning: %s", warning)
     presenter = read_presenter_metadata(recording.recording)
     colony = args.colony or colony_url(args.registry_url)
     with (
@@ -646,21 +706,30 @@ def convert_command(args) -> int:
         )
         if revised:
             log.info("revised after the recording: %s", ", ".join(revised))
-        outputs = Outputs.for_recording(recording, values["name"], args.target)
-        existing = [p for p in outputs.existing() if p != outputs.arf]
-        if existing:
-            log.error("error: already there: %s", ", ".join(map(str, existing)))
+        outputs = Outputs.for_recording(
+            recording, values["name"], args.staging, args.target
+        )
+        if outputs.manifest.exists():
+            log.error(
+                "error: %s is already prepared (%s)", values["name"], outputs.manifest
+            )
             return 1
-        # an ARF from a run whose copy failed is checked and copied again
+        # what an earlier run finished is kept
         reuse = outputs.arf.exists()
         cmd = arfx_command(
-            recording, values, revised, presenter, outputs.arf, args.datatype
+            recording, values, revised, presenter, partial(outputs.arf), args.datatype
         )
         if args.dry_run:
-            if reuse:
-                log.info("%s is already written and won't be again", outputs.arf)
+            for path in (outputs.target_session, outputs.arf, outputs.target_arf):
+                if path.exists():
+                    log.info("%s is already there and won't be written again", path)
             print(shlex.join(cmd))
             return 0
+        try:
+            hashes = copy_session(recording, outputs)
+        except OSError as err:
+            log.error("error: %s", err)
+            return 1
         try:
             if reuse:
                 log.info("%s is already written; checking it", outputs.arf)
@@ -676,11 +745,19 @@ def convert_command(args) -> int:
                 log.error("error: %s", err)
             return 1
     try:
-        copy_to_target(recording, outputs, resource["sha1"])
+        copy_arf(outputs, resource["sha1"])
     except OSError as err:
         log.error("error: %s; run again to copy %s", err, outputs.arf)
         return 1
-    write_manifest(recording, outputs, resource)
+    write_manifest(recording, outputs, resource, hashes)
+    if args.keep_session:
+        log.info("keeping %s", recording.path)
+    else:
+        try:
+            remove_session(recording, outputs, hashes)
+        except OSError as err:
+            log.error("error: %s; %s is kept", err, recording.path)
+            return 1
     log.info(
         "%s is ready for sorting in %s; deposit %s once the sort is curated",
         values["name"],
@@ -690,18 +767,14 @@ def convert_command(args) -> int:
     return 0
 
 
-def cleanup_command(args) -> int:
-    return cleanup(input, args.registry_url, args.manifest)
-
-
 def script(argv=None):
     from nbank import registry
 
     p = argparse.ArgumentParser(
         prog=PROG,
         description="Prepare an open-ephys recording for spike sorting: confirm "
-        "its metadata, convert it to ARF, and copy it to the sorting workstation; "
-        "then remove it once the ARF is deposited",
+        "its metadata, copy it to the sorting workstation, convert it to ARF in a "
+        "staging directory and copy the ARF too, then remove the recording",
     )
     p.add_argument(
         "-v", "--version", action="version", version=f"%(prog)s {__version__}"
@@ -717,8 +790,8 @@ def script(argv=None):
 
     pp = sub.add_parser(
         "convert",
-        help="confirm the metadata, convert the recording to ARF, and copy both "
-        "to the target",
+        help="confirm the metadata, copy the recording and its ARF to the "
+        "target, and remove the recording",
     )
     pp.set_defaults(func=convert_command)
     pp.add_argument(
@@ -736,6 +809,19 @@ def script(argv=None):
         "arfx-oephys --help-datatypes)",
     )
     pp.add_argument(
+        "--staging",
+        type=Path,
+        required=True,
+        metavar="DIR",
+        help="the directory on this host to write the ARF to, where it's kept "
+        "until it's deposited",
+    )
+    pp.add_argument(
+        "--keep-session",
+        action="store_true",
+        help="don't remove the session directory once it's copied",
+    )
+    pp.add_argument(
         "--dry-run",
         action="store_true",
         help="confirm the metadata and show the arfx-oephys command, but don't "
@@ -746,16 +832,6 @@ def script(argv=None):
         "target",
         type=Path,
         help="the directory to copy the ARF and the session directory to",
-    )
-
-    pp = sub.add_parser(
-        "cleanup",
-        help="remove the ARF and the session directory from this host, once the "
-        "ARF is deposited",
-    )
-    pp.set_defaults(func=cleanup_command)
-    pp.add_argument(
-        "manifest", type=Path, help="the manifest (<name>.json) in the target"
     )
 
     args = p.parse_args(argv)

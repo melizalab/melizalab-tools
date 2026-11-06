@@ -424,35 +424,63 @@ def arf_metadata(monkeypatch):
 
 def make_outputs(tmp_path):
     recording = prep.find_session(make_session(tmp_path))
+    staging = tmp_path / "staging"
     target = tmp_path / "share"
+    staging.mkdir()
     target.mkdir()
-    return recording, prep.Outputs.for_recording(recording, "C182_1_4", target)
+    outputs = prep.Outputs.for_recording(recording, "C182_1_4", staging, target)
+    return recording, outputs
 
 
 def test_outputs(tmp_path):
     _, outputs = make_outputs(tmp_path)
-    assert outputs.arf == tmp_path / "C182_1_4.arf"
-    assert outputs.target_arf == tmp_path / "share/C182_1_4.arf"
+    assert outputs.arf == tmp_path / "staging/C182_1_4.arf"
+    assert outputs.hashes == tmp_path / "staging/C182_1_4.session.json"
     assert outputs.target_session == tmp_path / "share" / SESSION_DIR
+    assert outputs.target_arf == tmp_path / "share/C182_1_4.arf"
     assert outputs.manifest == tmp_path / "share/C182_1_4.json"
-    assert outputs.existing() == []
-    outputs.manifest.write_text("{}")
-    assert outputs.existing() == [outputs.manifest]
+
+
+def test_space_warnings(tmp_path, monkeypatch):
+    recording, _ = make_outputs(tmp_path)
+    (recording.recording / "continuous.dat").write_bytes(b"x" * 1000)
+    usage = prep.shutil.disk_usage(tmp_path)
+    monkeypatch.setattr(
+        prep.shutil, "disk_usage", lambda path: usage._replace(free=1500)
+    )
+    warnings = prep.space_warnings(recording, tmp_path / "staging", tmp_path / "share")
+    # staging is on the recording's drive here; the target needs room for two
+    assert len(warnings) == 2
+    assert "same drive" in warnings[0]
+    assert str(tmp_path / "share") in warnings[1]
+
+
+def write_with(arffile, *, status=0):
+    """A command that writes 'arf' to arffile's temporary name and exits"""
+    path = str(prep.partial(arffile))
+    script = f"open({path!r}, 'a').write('arf'); raise SystemExit({status})"
+    return [sys.executable, "-c", script]
 
 
 def test_convert_runs_the_command(tmp_path):
     arffile = tmp_path / "a.arf"
-    cmd = [sys.executable, "-c", f"open({str(arffile)!r}, 'w').write('arf')"]
-    prep.convert(cmd, arffile)
+    prep.convert(write_with(arffile), arffile)
+    assert arffile.read_text() == "arf"
+    assert not prep.partial(arffile).exists()
+
+
+def test_convert_starts_over_from_a_partial_arf(tmp_path):
+    arffile = tmp_path / "a.arf"
+    prep.partial(arffile).write_text("half an ")
+    prep.convert(write_with(arffile), arffile)
     assert arffile.read_text() == "arf"
 
 
 def test_a_failed_conversion_leaves_nothing(tmp_path):
     arffile = tmp_path / "a.arf"
-    script = f"open({str(arffile)!r}, 'w').write('arf'); raise SystemExit(2)"
     with pytest.raises(RuntimeError, match="exit status 2"):
-        prep.convert([sys.executable, "-c", script], arffile)
-    assert not arffile.exists()
+        prep.convert(write_with(arffile, status=2), arffile)
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_convert_without_arfx(tmp_path):
@@ -499,13 +527,17 @@ def test_check_arf_reports_the_registrys_objections(
     assert "locations" not in str(err.value)
 
 
-def test_copy_to_target(tmp_path):
+DATA = "Record Node 101/experiment1/recording1/structure.oebin"
+
+
+def test_copy_session(tmp_path):
     recording, outputs = make_outputs(tmp_path)
-    outputs.arf.write_text("arf")
-    prep.copy_to_target(recording, outputs, file_sha1(outputs.arf))
-    assert outputs.target_arf.read_text() == "arf"
-    copied = outputs.target_session / "Record Node 101/experiment1/recording1"
-    assert (copied / "structure.oebin").read_text() == "{}"
+    hashes = prep.copy_session(recording, outputs)
+    assert hashes == {DATA: file_sha1(recording.path / DATA)}
+    assert (outputs.target_session / DATA).read_text() == "{}"
+    assert not prep.partial(outputs.target_session).exists()
+    kept = json.loads(outputs.hashes.read_text())
+    assert kept == {"session": str(recording.path.resolve()), "files": hashes}
 
 
 def test_copy_to_a_share_that_refuses_permissions_and_times(tmp_path, monkeypatch):
@@ -516,37 +548,131 @@ def test_copy_to_a_share_that_refuses_permissions_and_times(tmp_path, monkeypatc
     monkeypatch.setattr("os.chmod", refuse)
     monkeypatch.setattr("os.utime", refuse)
     recording, outputs = make_outputs(tmp_path)
-    outputs.arf.write_text("arf")
-    prep.copy_to_target(recording, outputs, file_sha1(outputs.arf))
-    copied = outputs.target_session / "Record Node 101/experiment1/recording1"
-    assert (copied / "structure.oebin").read_text() == "{}"
+    prep.copy_session(recording, outputs)
+    assert (outputs.target_session / DATA).read_text() == "{}"
 
 
-def test_a_copy_that_differs_is_removed(tmp_path):
+def corrupt_copies(monkeypatch, under: Path):
+    """Files read back from under hash differently from what was written"""
+    real = prep.file_sha1
+
+    def sha1(path):
+        return "0" * 40 if Path(path).is_relative_to(under) else real(path)
+
+    monkeypatch.setattr(prep, "file_sha1", sha1)
+
+
+def test_a_session_copy_that_differs_is_removed(tmp_path, monkeypatch):
     recording, outputs = make_outputs(tmp_path)
-    outputs.arf.write_text("arf")
+    corrupt_copies(monkeypatch, tmp_path / "share")
     with pytest.raises(OSError, match="doesn't match"):
-        prep.copy_to_target(recording, outputs, "0" * 40)
-    assert outputs.existing() == [outputs.arf]
+        prep.copy_session(recording, outputs)
+    assert list((tmp_path / "share").iterdir()) == []
+    assert not outputs.hashes.exists()
+
+
+def test_a_session_copy_is_done_once(tmp_path, monkeypatch):
+    recording, outputs = make_outputs(tmp_path)
+    hashes = prep.copy_session(recording, outputs)
+    monkeypatch.setattr(prep, "copy_tree", None)
+    assert prep.copy_session(recording, outputs) == hashes
+
+
+def test_a_partial_session_copy_is_redone(tmp_path):
+    recording, outputs = make_outputs(tmp_path)
+    stale = prep.partial(outputs.target_session)
+    stale.mkdir()
+    (stale / "junk").write_text("")
+    prep.copy_session(recording, outputs)
+    assert not stale.exists()
+    assert not (outputs.target_session / "junk").exists()
+
+
+def test_a_session_copy_from_elsewhere_isnt_used(tmp_path):
+    recording, outputs = make_outputs(tmp_path)
+    outputs.target_session.mkdir()
+    with pytest.raises(OSError, match="didn't copy it"):
+        prep.copy_session(recording, outputs)
+    outputs.hashes.write_text(json.dumps({"session": "/elsewhere", "files": {}}))
+    with pytest.raises(OSError, match="copied from /elsewhere"):
+        prep.copy_session(recording, outputs)
+
+
+def test_copy_arf(tmp_path):
+    _, outputs = make_outputs(tmp_path)
+    outputs.arf.write_text("arf")
+    prep.copy_arf(outputs, file_sha1(outputs.arf))
+    assert outputs.target_arf.read_text() == "arf"
+    assert not prep.partial(outputs.target_arf).exists()
+
+
+def test_an_arf_copy_that_differs_is_removed(tmp_path, monkeypatch):
+    _, outputs = make_outputs(tmp_path)
+    outputs.arf.write_text("arf")
+    sha1 = file_sha1(outputs.arf)
+    corrupt_copies(monkeypatch, tmp_path / "share")
+    with pytest.raises(OSError, match="doesn't match"):
+        prep.copy_arf(outputs, sha1)
+    assert list((tmp_path / "share").iterdir()) == []
+
+
+def test_an_arf_already_in_the_target_must_match(tmp_path):
+    _, outputs = make_outputs(tmp_path)
+    outputs.arf.write_text("arf")
+    outputs.target_arf.write_text("other")
+    with pytest.raises(OSError, match="already there"):
+        prep.copy_arf(outputs, file_sha1(outputs.arf))
 
 
 def test_write_manifest(tmp_path):
     recording, outputs = make_outputs(tmp_path)
     resource = {"name": "C182_1_4", "sha1": "ab" * 20}
-    prep.write_manifest(recording, outputs, resource)
+    prep.write_manifest(recording, outputs, resource, {DATA: "cd" * 20})
     manifest = json.loads(outputs.manifest.read_text())
     assert manifest["name"] == "C182_1_4"
     assert manifest["sha1"] == "ab" * 20
     assert manifest["source"]["session"] == str(recording.path.resolve())
     assert manifest["source"]["arf"] == str(outputs.arf.resolve())
     assert manifest["session"] == SESSION_DIR
+    assert manifest["session_sha1"] == {DATA: "cd" * 20}
     assert manifest["prepared_by"].startswith("prep-oephys ")
+
+
+def test_remove_session(tmp_path):
+    recording, outputs = make_outputs(tmp_path)
+    hashes = prep.copy_session(recording, outputs)
+    prep.remove_session(recording, outputs, hashes)
+    assert not recording.path.exists()
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (
+            lambda path: (
+                (path / "experiment2").mkdir()
+                or (path / "experiment2/x").write_text("")
+            ),
+            "weren't copied",
+        ),
+        (lambda path: (path / DATA).write_text("{} "), "has changed"),
+    ],
+)
+def test_a_session_that_changed_isnt_removed(tmp_path, change, problem):
+    recording, outputs = make_outputs(tmp_path)
+    hashes = prep.copy_session(recording, outputs)
+    change(recording.path)
+    with pytest.raises(OSError, match=problem):
+        prep.remove_session(recording, outputs, hashes)
+    assert (recording.path / DATA).exists()
 
 
 @pytest.fixture
 def script_env(tmp_path, monkeypatch, fake, arf_metadata):
     """Runs the script against the fakes: the presenter logged PRESENTER, the
-    user accepts every default, and arfx-oephys writes 'arf'."""
+    user accepts every default, and arfx-oephys writes 'arf'. Returns the
+    session directory, the staging directory, the target, the arfx-oephys
+    commands run, and the argument list."""
     import nbank.util
 
     real_client = httpx.Client
@@ -568,158 +694,112 @@ def script_env(tmp_path, monkeypatch, fake, arf_metadata):
 
     monkeypatch.setattr(prep.subprocess, "run", run)
     session = make_session(tmp_path)
+    staging = tmp_path / "staging"
     target = tmp_path / "share"
+    staging.mkdir()
     target.mkdir()
-    return session, target, commands
+    argv = ["-r", REGISTRY, "convert", "--staging", str(staging)]
+    return session, staging, target, commands, argv
 
 
 def test_script(script_env, tmp_path):
-    session, target, commands = script_env
-    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 0
+    session, staging, target, commands, argv = script_env
+    assert prep.script([*argv, str(session), str(target)]) == 0
     [cmd] = commands
     assert cmd[:5] == [
         "arfx-oephys",
         "-f",
-        str(tmp_path / "C182_1_4.arf"),
+        str(staging / "C182_1_4.arf.partial"),
         "-T",
         "EXTRAC_RAW",
     ]
+    assert (staging / "C182_1_4.arf").read_text() == "arf"
     assert (target / "C182_1_4.arf").read_text() == "arf"
-    assert (target / SESSION_DIR).is_dir()
+    assert (target / SESSION_DIR / DATA).read_text() == "{}"
     manifest = json.loads((target / "C182_1_4.json").read_text())
     assert manifest["sha1"] == file_sha1(target / "C182_1_4.arf")
+    assert manifest["session_sha1"] == {DATA: file_sha1(target / SESSION_DIR / DATA)}
+    assert not session.exists()
 
 
-def test_script_dry_run_writes_nothing(script_env, tmp_path, capsys):
-    session, target, commands = script_env
-    assert (
-        prep.script(["-r", REGISTRY, "convert", "--dry-run", str(session), str(target)])
-        == 0
-    )
+def test_script_keep_session(script_env):
+    session, _, target, _, argv = script_env
+    assert prep.script([*argv, "--keep-session", str(session), str(target)]) == 0
+    assert (target / "C182_1_4.json").exists()
+    assert (session / DATA).exists()
+
+
+def test_script_dry_run_writes_nothing(script_env, capsys):
+    session, staging, target, commands, argv = script_env
+    assert prep.script([*argv, "--dry-run", str(session), str(target)]) == 0
     assert commands == []
+    assert list(staging.iterdir()) == []
     assert list(target.iterdir()) == []
     assert capsys.readouterr().out.rstrip().endswith(str(session))
 
 
 def test_script_datatype(script_env):
-    session, target, commands = script_env
-    argv = ["-r", REGISTRY, "convert", "-T", "EXTRAC_HP", str(session), str(target)]
-    assert prep.script(argv) == 0
+    session, _, target, commands, argv = script_env
+    assert prep.script([*argv, "-T", "EXTRAC_HP", str(session), str(target)]) == 0
     [cmd] = commands
     assert cmd[3:5] == ["-T", "EXTRAC_HP"]
 
 
-def test_script_wont_overwrite(script_env, tmp_path):
-    session, target, commands = script_env
+@pytest.mark.parametrize("missing", ["staging", "share"])
+def test_script_needs_the_directories(script_env, tmp_path, missing):
+    session, _, target, _, argv = script_env
+    (tmp_path / missing).rmdir()
+    assert prep.script([*argv, str(session), str(target)]) == 1
+
+
+def test_script_wont_prepare_twice(script_env):
+    session, _, target, commands, argv = script_env
     (target / "C182_1_4.json").write_text("{}")
-    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 1
+    assert prep.script([*argv, str(session), str(target)]) == 1
     assert commands == []
+    assert session.exists()
 
 
-def test_script_removes_an_arf_the_registry_refuses(script_env, tmp_path, fake):
-    session, target, _ = script_env
+def test_script_removes_an_arf_the_registry_refuses(script_env, fake):
+    session, staging, target, _, argv = script_env
     # the first check (of the values) passes, the second (of the ARF) doesn't
     fake.check_errors = [{}, {"sha1": ["already registered as C182_1_3"]}]
-    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 1
-    assert not (tmp_path / "C182_1_4.arf").exists()
-    assert list(target.iterdir()) == []
+    assert prep.script([*argv, str(session), str(target)]) == 1
+    assert not (staging / "C182_1_4.arf").exists()
+    # the session's copy can still be sorted
+    assert (target / SESSION_DIR).is_dir()
+    assert not (target / "C182_1_4.arf").exists()
+    assert session.exists()
 
 
-def test_script_reuses_the_arf_of_a_failed_copy(script_env, tmp_path):
-    session, target, commands = script_env
-    (tmp_path / "C182_1_4.arf").write_text("arf")
-    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 0
-    assert commands == []
+def test_script_resumes_after_a_failed_copy(script_env, monkeypatch):
+    session, staging, target, commands, argv = script_env
+    real_copy_arf = prep.copy_arf
+    calls = []
+
+    def fail_once(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise OSError("the share went away")
+        return real_copy_arf(*args)
+
+    monkeypatch.setattr(prep, "copy_arf", fail_once)
+    assert prep.script([*argv, str(session), str(target)]) == 1
+    assert (staging / "C182_1_4.arf").exists()
+    assert session.exists()
+    # the second run neither copies the session nor converts it again
+    monkeypatch.setattr("builtins.input", Answers(*ACCEPT_ALL))
+    monkeypatch.setattr(prep, "copy_tree", None)
+    assert prep.script([*argv, str(session), str(target)]) == 0
+    assert len(commands) == 1
     assert (target / "C182_1_4.arf").read_text() == "arf"
-    assert (target / "C182_1_4.json").exists()
+    assert not session.exists()
 
 
-def test_script_keeps_a_reused_arf_the_registry_refuses(script_env, tmp_path, fake):
-    session, target, commands = script_env
-    (tmp_path / "C182_1_4.arf").write_text("arf")
+def test_script_keeps_a_reused_arf_the_registry_refuses(script_env, fake):
+    session, staging, target, commands, argv = script_env
+    (staging / "C182_1_4.arf").write_text("arf")
     fake.check_errors = [{}, {"sha1": ["already registered as C182_1_3"]}]
-    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 1
+    assert prep.script([*argv, str(session), str(target)]) == 1
     assert commands == []
-    assert (tmp_path / "C182_1_4.arf").exists()
-
-
-@pytest.fixture
-def prepared(script_env, tmp_path, fake):
-    """A recording that prep-oephys has converted and copied, and whose ARF is
-    registered, in an archive. Returns the manifest's path."""
-    session, target, _ = script_env
-    assert prep.script(["-r", REGISTRY, "convert", str(session), str(target)]) == 0
-    manifest = target / "C182_1_4.json"
-    sha1 = json.loads(manifest.read_text())["sha1"]
-    fake.resources["C182_1_4"] = {
-        "name": "C182_1_4",
-        "sha1": sha1,
-        "locations": ["chorus"],
-    }
-    return manifest
-
-
-def cleanup(manifest, answer="y"):
-    return prep.cleanup(Answers(answer), REGISTRY, manifest)
-
-
-def test_cleanup(prepared, tmp_path):
-    assert cleanup(prepared) == 0
-    assert not (tmp_path / "C182_1_4.arf").exists()
-    assert not (tmp_path / SESSION_DIR).exists()
-    # the copies in the target are left for the sorting workstation
-    assert (tmp_path / "share" / SESSION_DIR).is_dir()
-
-
-def test_cleanup_asks_first(prepared, tmp_path):
-    assert cleanup(prepared, answer="n") == 1
-    assert (tmp_path / "C182_1_4.arf").exists()
-    assert (tmp_path / SESSION_DIR).is_dir()
-
-
-def test_cleanup_after_the_arf_is_gone(prepared, tmp_path):
-    (tmp_path / "C182_1_4.arf").unlink()
-    assert cleanup(prepared) == 0
-    assert not (tmp_path / SESSION_DIR).exists()
-
-
-@pytest.mark.parametrize(
-    ("change", "problem"),
-    [
-        (lambda fake, tmp: fake.resources.clear(), "isn't registered"),
-        (
-            lambda fake, tmp: fake.resources["C182_1_4"].update(sha1="0" * 40),
-            "different hash",
-        ),
-        (
-            lambda fake, tmp: fake.resources["C182_1_4"].update(locations=[]),
-            "no location",
-        ),
-        (
-            lambda fake, tmp: (tmp / "C182_1_4.arf").write_text("other"),
-            "isn't the ARF that was prepared",
-        ),
-    ],
-)
-def test_cleanup_needs_the_arf_registered(
-    prepared, tmp_path, fake, caplog, change, problem
-):
-    change(fake, tmp_path)
-    assert cleanup(prepared) == 1
-    assert problem in caplog.text
-    assert (tmp_path / SESSION_DIR).is_dir()
-
-
-def test_cleanup_only_on_the_recording_computer(prepared, tmp_path, caplog):
-    manifest = json.loads(prepared.read_text())
-    manifest["source"]["host"] = "elsewhere"
-    prepared.write_text(json.dumps(manifest))
-    assert cleanup(prepared) == 1
-    assert "prepared on elsewhere" in caplog.text
-    assert (tmp_path / SESSION_DIR).is_dir()
-
-
-def test_cleanup_command(prepared, tmp_path, monkeypatch):
-    monkeypatch.setattr("builtins.input", Answers("y"))
-    assert prep.script(["-r", REGISTRY, "cleanup", str(prepared)]) == 0
-    assert not (tmp_path / SESSION_DIR).exists()
+    assert (staging / "C182_1_4.arf").exists()
