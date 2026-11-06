@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `prep-oephys convert` copies the session directory to the target first, so it
+  can be sorted while the ARF is made; reads the copy back to check it; and
+  writes the ARF to a staging directory (`--staging`, required) with
+  arfx-oephys running in the background at lower priority. Once the ARF is
+  checked and copied, it removes the session directory (`--keep-session` keeps
+  it). Files are written under `.partial` names until complete, and a rerun
+  keeps what's complete. The manifest records the session's hashes
+  (`session_sha1`).
+- `prep-oephys cleanup` is removed: delete the staging ARF once it's deposited.
+
 ## 2026.10.30
 
 Requires neurobank 1.0 and melizalab-specs 0.1.2.

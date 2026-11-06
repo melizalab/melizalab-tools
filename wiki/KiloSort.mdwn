@@ -1,6 +1,6 @@
 This guide describes how to sort spikes from extracellular recordings using [kilosort](https://github.com/MouseLand/Kilosort) and [phy](https://github.com/cortex-lab/phy). The work is split across three computers:
 
-- **grafisia** (the recording computer): `prep-oephys convert` checks the recording's metadata, converts it to ARF, and copies the ARF and the raw recording to the Alienware.
+- **grafisia** (the recording computer): `prep-oephys convert` checks the recording's metadata, copies the raw recording to the Alienware, converts it to ARF in your staging directory and copies the ARF to the Alienware too, then removes the raw recording from grafisia.
 - **the Alienware** (the sorting workstation): sort with kilosort and curate with phy. Its `ephys` share appears as `E:\ephys` on the Alienware, sorted by experimenter (e.g. `E:\ephys\Bao\P325_2025-11-17_13-31-57_arc5-syn`). On grafisia and on sturnus, it's mounted at `/mnt/spike_sorting`.
 - **sturnus** (or **basilornis**): deposit the ARF, make the unit files (`group-kilo-spikes`), and deposit them.
 
@@ -12,25 +12,31 @@ Nothing gets deposited until the sort is curated. The metadata (experimenter, an
 
  - In the instructions below, replace `dmeliza` with your username, and `P56_1_3` with the name of your recording. You will need to adjust other names as well.
 
- - <b>If you're using Kilosort 2.5 on MATLAB:</b> Kilosort 2.5 deletes files needed for ARF conversion (i.e. `timestamps.npy`) from the recording it sorts. Step 1 makes the ARF before the recording reaches the Alienware, so this only affects the copy there; just don't run `prep-oephys` on a copy that Kilosort 2.5 has sorted. Kilosort 4 is recommended for new projects. Try to use the same sorter for all the recordings in a project, as there are differences in yield and drift correction.
+ - <b>If you're using Kilosort 2.5 on MATLAB:</b> Kilosort 2.5 deletes files needed for ARF conversion (i.e. `timestamps.npy`) from the recording it sorts. Step 1 makes the ARF from the recording on grafisia, not from the copy on the Alienware, so this only affects the copy there; just don't make an ARF from a copy that Kilosort 2.5 has sorted. Kilosort 4 is recommended for new projects. Try to use the same sorter for all the recordings in a project, as there are differences in yield and drift correction.
 
  - Since the network drive only has a 2TB capacity, do not use the Alienware drive as long-term storage of ephys data. Delete your files from it once the unit files are deposited (step 7).
 
 ### 1. Prepare the recording (on grafisia)
 
-Run `prep-oephys convert` on the session directory, giving your folder on the share as the target:
+Run `prep-oephys convert` on the session directory, giving your folder on the share as the target and your staging directory on grafisia with `--staging`:
 
-`prep-oephys convert /home/melizalab/open-ephys/P56_2026-02-06_11-27-05_chorus /mnt/spike_sorting/dmeliza/`
+`prep-oephys convert --staging /mnt/staging/extracellular_data/dmeliza /home/melizalab/open-ephys/P56_2026-02-06_11-27-05_chorus /mnt/spike_sorting/dmeliza/`
+
+The staging directory holds your ARF files until they're deposited. It should be on a different drive from the one open-ephys records to, so that the recording drive has room for new recordings.
 
 The session directory must contain only one recording (one `experimentN/recordingM`). We're still working out how to deal with a session directory that holds several recordings, and how to combine multiple recordings at the same location. The script will:
 
  - ask for the recording's metadata. Each question starts with what the recording says, from the session directory's name (`<animal>_<date>_<time>_<protocol>`) and the metadata `oeaudio-present` logged (`jpresent` doesn't log any). Press Enter to accept a value, or type a new one. The questions are: experimenter (your registry username), animal, protocol, pen, site, probe, hemisphere, location (the brain area: provisional, as it isn't known for certain until the histology), and the x, y, z coordinates (microns; z from the top of the brain). Pen and site are required.
  - look up the animal in the bird colony by its band (e.g. `P56`) or the start of its UUID, and shows who it is, with the events in its history nearest the recording. If several animals have that band number, pick the right one from the list.
  - propose the recording's name (`P56_1_3`: the band, or the first 8 characters of the UUID if the bird isn't banded, then pen and site), and checks the name, experimenter and animal with the registry. If the registry objects (a name already taken, an unknown username), it asks again.
- - convert the recording to `P56_1_3.arf` beside the session directory, with `arfx-oephys`, and checks the ARF with the registry as it would be deposited. The continuous channels are stored as wideband (`EXTRAC_RAW`); use `-T` for another ARF data type.
- - copy the ARF and the session directory to the target, along with a sidecar (e.g., `P56_1_3.json`) that has a record of the ARF's hash and metadata and where they came from.
+ - copy the session directory to the target, and read the copy back to check it. Until the copy is complete and checked, it's named `P56_2026-02-06_11-27-05_chorus.partial`; once it has its own name, you can start sorting it (step 2) while the rest of this step runs.
+ - at the same time, convert the recording to `P56_1_3.arf` in the staging directory with `arfx-oephys`, and check the ARF with the registry as it would be deposited. The conversion runs at lower priority, so you can start the next recording while it runs. Its output goes to `P56_1_3.arfx-oephys.log` in the staging directory. The continuous channels are stored as wideband (`EXTRAC_RAW`); use `-T` for another ARF data type.
+ - copy the ARF to the target, along with a sidecar (e.g., `P56_1_3.json`) that has a record of the ARF's hash and metadata, the hashes of the session directory's files, and where they came from.
+ - remove the session directory from grafisia. Add `--keep-session` to keep it. If anything was recorded into the session directory after it was copied, it's kept.
 
-Any value you change from what the recording says is listed in the recording's metadata as `revised_after_recording`, so that a correction made after the fact can be found later. To see what it would do without writing anything, add `--dry-run`. If the copy fails, the ARF file is retained and you can run the same command without having to redo the conversion. The raw data and ARF file stay on grafisia until cleanup (see below).
+Any value you change from what the recording says is listed in the recording's metadata as `revised_after_recording`, so that a correction made after the fact can be found later. To see what it would do without writing anything, add `--dry-run`.
+
+If anything fails, or you stop it with Ctrl-C, the session directory stays on grafisia. Run the same command again: what was finished (the copy of the session directory, the ARF) is kept, and the rest is done again. When it's done, there are three copies of the recording: the ARF in your staging directory, and the ARF and the session directory on the Alienware. The ARF stays in your staging directory until you delete it (step 7).
 
 ### 2. Automated Sorting - Pick one of the two options below
 
@@ -109,13 +115,13 @@ Check and curate the unit files if needed, then deposit them. Again, the metadat
 
 ### 7. Cleanup
 
-On grafisia, remove the ARF and the session directory:
+Delete your files for the recording from the Alienware: the session directory, the sorting result folder, and `P56_1_3.json`.
 
-`prep-oephys cleanup /mnt/spike_sorting/dmeliza/P56_1_3.json`
+The ARF in your staging directory on grafisia is a backup until the ARF is deposited (step 4). Delete it when you need the space. Check first that it's the deposited ARF:
 
-This only removes them once the registry has the ARF with the same hash, in an archive, and asks before removing anything. Then delete your files for the recording from the Alienware: the session directory, the sorting result folder, and `P56_1_3.json`.
+`nbank verify /mnt/staging/extracellular_data/dmeliza/P56_1_3.arf`
 
-Move your raw open-ephys output folder to a subdirectory on `/mnt/staging/extracellular_data/`, but this is a temporary store and old recordings are subject to deletion as that drive fills up. 
+Then delete it, with `P56_1_3.session.json` and `P56_1_3.arfx-oephys.log` beside it.
 
 ### 8. Re-sorting a recording
 
@@ -154,6 +160,8 @@ To upgrade all three: `pipx upgrade --include-injected melizalab-tools`. (`pipx 
 
 ### Notes
 
+- November 2026:
+  - `prep-oephys convert` copies the raw recording to the Alienware first, so it can be sorted while the ARF is made, and makes the ARF in a staging directory on grafisia (`--staging`, required). It removes the raw recording from grafisia once everything is copied and checked. `prep-oephys cleanup` is gone: delete the staging ARF yourself once it's deposited (step 7).
 - October 2026:
   - neurobank 1.0. `nbank deposit` reads the metadata from ARF and pprox files, so the `-k experimenter=... -k bird=...` options are no longer used: they made it too easy to copy the previous recording's values. The metadata are entered once, in `prep-oephys`, which needs arfx 3.1.1 and melizalab-tools TBD or later.
   - Recordings are deposited after the sort is curated, from the Alienware's share, instead of before sorting.

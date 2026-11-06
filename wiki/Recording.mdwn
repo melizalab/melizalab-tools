@@ -32,8 +32,6 @@
 
 **Archiving the Data**
 
-Convert the recorded data to ARF using `arfx-oephys`. Make sure to use the optional arguments supported by this script to store important metadata. Make one ARF file per recording site. For example, if your data from one recording are stored under `P56_2020-09-18_10-52-48_chorus`, you would run commands like the following:
+Prepare each recording for spike sorting with `prep-oephys convert`, on grafisia: it confirms the recording's metadata, copies it to the sorting workstation, converts it to ARF, and removes it from grafisia once everything is copied. Make one ARF file per recording site: a session directory must hold one recording. See step 1 of [[KiloSort]].
 
-`arfx-oephys -T EXTRAC_HP -k experimenter=dmeliza -k bird=f864a1f9-796c-4638-af4e-61f9bede453c -k pen=1 -k site=3 -k protocol=chorus -f P56_1_3.arf P56_2020-09-18_10-52-48_chorus`
-
-The next step is to sort spikes. Currently we use [[KiloSort]]. Make sure you do the ARF conversion before starting the spike sorting.
+The next step is to sort spikes. Currently we use [[KiloSort]].
