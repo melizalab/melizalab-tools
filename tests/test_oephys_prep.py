@@ -249,7 +249,7 @@ def test_accepting_what_was_recorded(tmp_path, client, fake):
     assert revised == []
     assert values["animal_uuid"] == COBALT["uuid"]
     assert values["name"] == "C182_1_4"
-    assert "experimenter (registry username) [tbyron]: " in answers.prompts
+    assert "  experimenter (registry username) [tbyron]: " in answers.prompts
     [[body]] = fake.checked
     assert body == {
         "name": "C182_1_4",
@@ -294,7 +294,7 @@ def test_values_entered_for_jpresent_are_not_revisions(tmp_path, client):
     assert values["probe"] == "A1x32"
     assert values["hemisphere"] == "L"
     assert values["location"] == "NCM"
-    assert "location (brain area; provisional until histology): " in answers.prompts
+    assert "  location (brain area; provisional until histology): " in answers.prompts
     assert values["z"] == -2100
     assert values["name"] == "C182_3_1"
     assert revised == []
@@ -326,7 +326,7 @@ def test_registry_objections_ask_again_with_the_answers_as_defaults(
     assert values["experimenter"] == "tbyron"
     assert revised == []
     assert len(fake.checked) == 2
-    assert "experimenter (registry username) [tbyrn]: " in answers.prompts
+    assert "  experimenter (registry username) [tbyrn]: " in answers.prompts
 
 
 def test_a_name_the_user_gave_is_kept_when_asked_again(tmp_path, client, fake):
@@ -508,7 +508,9 @@ def test_a_conversion_starts_over_from_a_partial_arf(tmp_path, conversion):
 def test_a_failed_conversion_leaves_its_log(tmp_path, conversion):
     arffile = tmp_path / "a.arf"
     running = conversion(write_with(arffile, status=2))
-    with pytest.raises(RuntimeError, match=r"exit status 2\).*ends:\nwrote it"):
+    with pytest.raises(
+        RuntimeError, match=r"exit status 2\); the end of its log.*:\n      wrote it$"
+    ):
         running.finish()
     assert list(tmp_path.iterdir()) == [tmp_path / "a.log"]
 
@@ -597,13 +599,13 @@ def test_copy_to_a_share_that_refuses_permissions_and_times(tmp_path, monkeypatc
 
 
 def corrupt_copies(monkeypatch, under: Path):
-    """Files read back from under hash differently from what was written"""
-    real = prep.file_sha1
+    """Copies under read back differently from what was written"""
+    real = prep.read_back
 
-    def sha1(path):
-        return "0" * 40 if Path(path).is_relative_to(under) else real(path)
+    def read_back(path, progress):
+        return "0" * 40 if Path(path).is_relative_to(under) else real(path, progress)
 
-    monkeypatch.setattr(prep, "file_sha1", sha1)
+    monkeypatch.setattr(prep, "read_back", read_back)
 
 
 def test_a_session_copy_that_differs_is_removed(tmp_path, monkeypatch):
@@ -893,7 +895,7 @@ def test_script_converts_even_if_the_session_copy_fails(script_env, monkeypatch)
     assert not session.exists()
 
 
-def test_script_interrupted_stops_the_conversion(script_env, monkeypatch):
+def test_script_interrupted_stops_the_conversion(script_env, monkeypatch, caplog):
     session, staging, target, _, argv = script_env
     stopped = []
 
@@ -911,8 +913,8 @@ def test_script_interrupted_stops_the_conversion(script_env, monkeypatch):
 
     monkeypatch.setattr(prep.subprocess, "Popen", Running)
     monkeypatch.setattr(prep, "copy_session", interrupt)
-    with pytest.raises(KeyboardInterrupt):
-        prep.script([*argv, str(session), str(target)])
+    assert prep.script([*argv, str(session), str(target)]) == 130
     assert stopped == [True]
+    assert "error: interrupted" in caplog.text
     assert list(staging.iterdir()) == [staging / "C182_1_4.arfx-oephys.log"]
     assert session.exists()

@@ -11,6 +11,9 @@
   keeps what's complete. The manifest records the session's hashes
   (`session_sha1`).
 - `prep-oephys cleanup` is removed: delete the staging ARF once it's deposited.
+- `prep-oephys` lists its steps with their results (✓, ✗) beneath them, shows
+  progress bars for the copies and read-backs (tqdm, now in the `oephys`
+  extra), and exits with status 130 on Ctrl-C instead of a traceback.
 
 ## 2026.10.30
 

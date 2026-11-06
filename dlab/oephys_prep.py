@@ -145,8 +145,8 @@ def recorded_values(session: Session, presenter: dict[str, Any]) -> dict[str, An
     protocol = values.setdefault("protocol", session.protocol)
     if session.protocol is not None and protocol != session.protocol:
         log.warning(
-            "- the presenter logged protocol '%s', but the session directory "
-            "is named for '%s'",
+            "  - WARNING: the presenter logged protocol '%s', but the session "
+            "directory is named for '%s'",
             protocol,
             session.protocol,
         )
@@ -178,7 +178,7 @@ def animal_summary(
     r.raise_for_status()
     animal = r.json()
     lines = [
-        f"  {animal['name']} ({animal['uuid']}): {animal['species']}, "
+        f"    {animal['name']} ({animal['uuid']}): {animal['species']}, "
         f"sex {animal['sex']}, {'alive' if animal['alive'] else 'not alive'}, "
         f"last at {animal['last_location'] or 'unknown'}"
     ]
@@ -193,8 +193,8 @@ def animal_summary(
     nearest = sorted(sorted(events, key=distance)[:3], key=lambda e: e["date"])
     for event in nearest:
         description = f" ({event['description']})" if event["description"] else ""
-        lines.append(f"    {event['date']}: {event['status']}{description}")
-    lines.append(f"    {day}: this recording")
+        lines.append(f"      {event['date']}: {event['status']}{description}")
+    lines.append(f"      {day}: this recording")
     return "\n".join(lines)
 
 
@@ -213,16 +213,16 @@ def ask(
     is the default, or None if the value isn't required."""
     shown = f" [{default}]" if default is not None else ""
     while True:
-        text = input(f"{label}{shown}: ").strip()
+        text = input(f"  {label}{shown}: ").strip()
         if not text:
             if default is not None or not required:
                 return default
-            print("  a value is needed")
+            print("    a value is needed")
             continue
         try:
             return parse(text)
         except ValueError as err:
-            print(f"  {err}")
+            print(f"    {err}")
 
 
 def parse_int(text: str) -> int:
@@ -257,15 +257,15 @@ def choose_animal(
         )
         found = find_animals(client, colony, given)
         if not found:
-            print(f"  no animal in the colony matches '{given}'")
+            print(f"    no animal in the colony matches '{given}'")
             default = None
             continue
         if len(found) == 1:
             [animal] = found
         else:
-            print(f"  animals that '{given}' may name:")
+            print(f"    animals that '{given}' may name:")
             for i, animal in enumerate(found, start=1):
-                print(f"   {i}. {animal['name']} ({animal['uuid'][:8]})")
+                print(f"      {i}. {animal['name']} ({animal['uuid'][:8]})")
             choice = ask(input, "which one (blank to give another)", parse=parse_int)
             if choice is None or not 1 <= choice <= len(found):
                 default = None
@@ -424,7 +424,7 @@ def prepare(
     others = sorted(set(presenter) - {"experimenter", "protocol", *FIELDS})
     if others:
         print(
-            "also logged by the presenter: "
+            "  - also logged by the presenter: "
             + ", ".join(f"{k}={presenter[k]!r}" for k in others)
         )
     defaults = recorded
@@ -435,9 +435,10 @@ def prepare(
         )
         if not errors:
             return values, revised_fields(recorded, values)
-        print("the registry would refuse these values:")
+        print("  ✗ the registry would refuse these values:")
         for message in errors:
-            print(f"  {message}")
+            print(f"    - {message}")
+        print("  - correct them (your answers are the defaults):")
         defaults = values
 
 
@@ -477,20 +478,29 @@ def session_size(path: Path) -> int:
     return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
 
 
+def human_size(nbytes: float) -> str:
+    """A byte count in decimal units, e.g. '1.2 GB'"""
+    for unit in ("B", "kB", "MB", "GB"):
+        if nbytes < 1000:
+            return f"{nbytes:.0f} {unit}" if unit == "B" else f"{nbytes:.1f} {unit}"
+        nbytes /= 1000
+    return f"{nbytes:.1f} TB"
+
+
 def space_warnings(recording: Session, staging: Path, target: Path) -> list[str]:
     """Advisory: whether staging is on the recording's drive, and whether staging
     and the target look too full for the ARF and the copies, taking the ARF to
     be about the size of the recording"""
     warnings = []
     if staging.stat().st_dev == recording.path.stat().st_dev:
-        warnings.append(f"{staging} is on the same drive as {recording.path}")
+        warnings.append(f"{staging} is on the same drive as the recording")
     size = session_size(recording.path)
     for where, needed in ((staging, size), (target, 2 * size)):
         free = shutil.disk_usage(where).free
         if free < needed:
             warnings.append(
-                f"{where} has {free / 1e9:.1f} GB free, and may need "
-                f"{needed / 1e9:.1f} GB"
+                f"{where} has {human_size(free)} free, and may need "
+                f"{human_size(needed)}"
             )
     return warnings
 
@@ -521,39 +531,52 @@ class Conversion:
         self.logfile = logfile
         # arfx-oephys adds to a file that's there, so one a run left is removed
         partial(arffile).unlink(missing_ok=True)
-        cmd = lower_priority(cmd)
-        log.info("converting in the background: %s", shlex.join(cmd))
-        log.info("arfx-oephys's output is in %s", logfile)
+        lowered = lower_priority(cmd)
+        log.info(
+            "- converting to ARF in the background%s",
+            ", at lower priority" if lowered != cmd else "",
+        )
+        log.info("  - writing %s", arffile)
+        log.info("  - log: %s", logfile)
+        log.debug("  - command: %s", shlex.join(lowered))
         with open(logfile, "w") as fp:
             self.process = subprocess.Popen(
-                cmd, stdin=subprocess.DEVNULL, stdout=fp, stderr=subprocess.STDOUT
+                lowered, stdin=subprocess.DEVNULL, stdout=fp, stderr=subprocess.STDOUT
             )
 
     def finish(self) -> None:
         """Waits for arfx-oephys and renames the ARF. Raises RuntimeError if it
         failed, after removing what it wrote."""
         if self.process.poll() is None:
-            log.info("waiting for arfx-oephys to finish")
+            log.info("- waiting for arfx-oephys to finish")
+        else:
+            log.info("- arfx-oephys has finished")
         status = self.process.wait()
         if status != 0:
             partial(self.arffile).unlink(missing_ok=True)
-            tail = "".join(self.logfile.read_text().splitlines(True)[-5:])
+            tail = self.logfile.read_text().splitlines()[-5:]
             raise RuntimeError(
-                f"arfx-oephys failed (exit status {status}); its output, in "
-                f"{self.logfile}, ends:\n{tail}"
+                f"arfx-oephys failed (exit status {status}); the end of its log, "
+                f"{self.logfile}:\n" + "\n".join(f"      {line}" for line in tail)
             )
         partial(self.arffile).rename(self.arffile)
+        log.info(
+            "  ✓ wrote %s (%s)",
+            self.arffile.name,
+            human_size(self.arffile.stat().st_size),
+        )
 
     def stop(self) -> None:
         """Stops arfx-oephys, if it's running, and removes what it wrote"""
         if self.process.poll() is None:
-            log.info("stopping arfx-oephys")
+            log.info("- stopping arfx-oephys")
             self.process.terminate()
             try:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait()
+            log.info("  ✓ stopped")
         partial(self.arffile).unlink(missing_ok=True)
 
 
@@ -600,7 +623,23 @@ def check_arf(
 CHUNK = 1 << 20
 
 
-def copy_file(src: Path, dst: Path) -> str:
+def progress_bar(desc: str, total: int):
+    """A progress bar for total bytes, under the step it's part of, shown only if
+    stderr is a terminal"""
+    from tqdm import tqdm
+
+    return tqdm(
+        total=total,
+        desc=f"  {desc}",
+        unit="B",
+        unit_scale=True,
+        unit_divisor=1000,
+        leave=False,
+        disable=None,
+    )
+
+
+def copy_file(src: Path, dst: Path, progress) -> str:
     """Copies the data of src to dst, and returns the SHA-1 hash of what was
     read. The copy is flushed to its drive and, where the OS allows, dropped
     from the cache, so that reading it back reads what was written (on a
@@ -610,10 +649,21 @@ def copy_file(src: Path, dst: Path) -> str:
         while chunk := fin.read(CHUNK):
             sha1.update(chunk)
             fout.write(chunk)
+            progress.update(len(chunk))
         fout.flush()
         os.fsync(fout.fileno())
         if hasattr(os, "posix_fadvise"):
             os.posix_fadvise(fout.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+    return sha1.hexdigest()
+
+
+def read_back(path: Path, progress) -> str:
+    """The SHA-1 hash of a copy, read back"""
+    sha1 = hashlib.sha1()
+    with open(path, "rb") as fp:
+        while chunk := fp.read(CHUNK):
+            sha1.update(chunk)
+            progress.update(len(chunk))
     return sha1.hexdigest()
 
 
@@ -622,17 +672,21 @@ def copy_tree(src: Path, dst: Path) -> dict[str, str]:
     back to check it. Returns each file's SHA-1 hash, by its path in src. Only
     the contents are copied: a network share may refuse to set permissions and
     times. Raises OSError if the copy differs."""
+    paths = sorted(src.rglob("*"))
+    total = sum(p.stat().st_size for p in paths if p.is_file())
     dst.mkdir()
     hashes = {}
-    for path in sorted(src.rglob("*")):
-        rel = path.relative_to(src)
-        if path.is_dir():
-            (dst / rel).mkdir()
-        else:
-            hashes[rel.as_posix()] = copy_file(path, dst / rel)
-    for rel, sha1 in hashes.items():
-        if file_sha1(dst / rel) != sha1:
-            raise OSError(f"{dst / rel}: the copy doesn't match {src / rel}")
+    with progress_bar("copying", total) as progress:
+        for path in paths:
+            rel = path.relative_to(src)
+            if path.is_dir():
+                (dst / rel).mkdir()
+            else:
+                hashes[rel.as_posix()] = copy_file(path, dst / rel, progress)
+    with progress_bar("reading back", total) as progress:
+        for rel, sha1 in hashes.items():
+            if read_back(dst / rel, progress) != sha1:
+                raise OSError(f"{dst / rel}: the copy doesn't match {src / rel}")
     return hashes
 
 
@@ -647,10 +701,9 @@ def copy_session(recording: Session, outputs: Outputs) -> dict[str, str]:
         hashes = json.loads(outputs.hashes.read_text())
         if hashes["session"] != str(recording.path.resolve()):
             raise OSError(f"{target} was copied from {hashes['session']}")
-        log.info("%s was copied by an earlier run", target)
+        log.info("  ✓ copied by an earlier run")
         return hashes["files"]
     shutil.rmtree(partial(target), ignore_errors=True)
-    log.info("copying %s to %s", recording.path, target)
     try:
         files = copy_tree(recording.path, partial(target))
         with open(outputs.hashes, "w") as fp:
@@ -659,7 +712,12 @@ def copy_session(recording: Session, outputs: Outputs) -> dict[str, str]:
     except BaseException:
         shutil.rmtree(partial(target), ignore_errors=True)
         raise
-    log.info("%s is copied and can be sorted", target)
+    log.info(
+        "  ✓ %d %s (%s), read back and checked: ready for sorting",
+        len(files),
+        "file" if len(files) == 1 else "files",
+        human_size(session_size(target)),
+    )
     return files
 
 
@@ -671,17 +729,21 @@ def copy_arf(outputs: Outputs, sha1: str) -> None:
     if target.exists():
         if file_sha1(target) != sha1:
             raise OSError(f"{target} is already there, and isn't {outputs.arf}")
-        log.info("%s was copied by an earlier run", target)
+        log.info("  ✓ copied by an earlier run")
         return
-    log.info("copying %s to %s", outputs.arf, target)
+    size = outputs.arf.stat().st_size
     try:
-        read = copy_file(outputs.arf, partial(target))
-        if read != sha1 or file_sha1(partial(target)) != sha1:
+        with progress_bar("copying", size) as progress:
+            read = copy_file(outputs.arf, partial(target), progress)
+        with progress_bar("reading back", size) as progress:
+            copied = read_back(partial(target), progress)
+        if read != sha1 or copied != sha1:
             raise OSError(f"{target}: the copy doesn't match {outputs.arf}")
         partial(target).rename(target)
     except BaseException:
         partial(target).unlink(missing_ok=True)
         raise
+    log.info("  ✓ %s, read back and checked", human_size(size))
 
 
 def write_manifest(
@@ -722,7 +784,6 @@ def remove_session(
     for rel, path in files.items():
         if path.stat().st_size != (outputs.target_session / rel).stat().st_size:
             raise OSError(f"{path} has changed since it was copied")
-    log.info("removing %s", recording.path)
     shutil.rmtree(recording.path)
 
 
@@ -740,26 +801,26 @@ def convert_command(args) -> int:
     except ValueError as err:
         log.error("error: %s", err)
         return 1
+    log.info("- recording: %s", recording.path)
     for warning in space_warnings(recording, args.staging, args.target):
-        log.warning("warning: %s", warning)
+        log.warning("  - WARNING: %s", warning)
     presenter = read_presenter_metadata(recording.recording)
     colony = args.colony or colony_url(args.registry_url)
     with (
         httpx.Client(auth=default_auth) as client,
         util.registry_session(args.registry_url, auth=default_auth) as session,
     ):
+        log.info("- metadata (press Enter to accept the value in brackets):")
         values, revised = prepare(
             input, client, colony, session, args.registry_url, recording, presenter
         )
+        name = values["name"]
+        log.info("  ✓ the registry accepts %s", name)
         if revised:
-            log.info("revised after the recording: %s", ", ".join(revised))
-        outputs = Outputs.for_recording(
-            recording, values["name"], args.staging, args.target
-        )
+            log.info("  - revised after the recording: %s", ", ".join(revised))
+        outputs = Outputs.for_recording(recording, name, args.staging, args.target)
         if outputs.manifest.exists():
-            log.error(
-                "error: %s is already prepared (%s)", values["name"], outputs.manifest
-            )
+            log.error("error: %s is already prepared: %s", name, outputs.manifest)
             return 1
         # what an earlier run finished is kept
         reuse = outputs.arf.exists()
@@ -767,63 +828,86 @@ def convert_command(args) -> int:
             recording, values, revised, presenter, partial(outputs.arf), args.datatype
         )
         if args.dry_run:
+            log.info("- dry run: nothing is written")
             for path in (outputs.target_session, outputs.arf, outputs.target_arf):
                 if path.exists():
-                    log.info("%s is already there and won't be written again", path)
+                    log.info("  - %s is already there", path)
             print(shlex.join(cmd if reuse else lower_priority(cmd)))
             return 0
         conversion = None
         try:
-            if reuse:
-                log.info("%s is already written", outputs.arf)
-            else:
+            if not reuse:
                 conversion = Conversion(cmd, outputs.arf, outputs.conversion_log)
             # the conversion finishes even if the copy fails, for the next run
+            log.info("- copying %s to %s", recording.path.name, args.target)
             try:
                 hashes = copy_session(recording, outputs)
             except OSError as err:
-                log.error("error: %s", err)
+                log.error("  ✗ %s", err)
                 hashes = None
             if conversion is not None:
                 conversion.finish()
-            log.info("checking %s", outputs.arf)
+            else:
+                log.info("- checking %s, written by an earlier run", outputs.arf)
             resource = check_arf(session, args.registry_url, outputs.arf, values)
+            log.info("  ✓ the registry would accept it")
         except (RuntimeError, ValueError) as err:
+            log.error("  ✗ %s", err)
             if reuse:
-                log.error("error: %s; remove it to convert the recording again", err)
+                log.error(
+                    "error: remove %s to convert the recording again", outputs.arf
+                )
             else:
                 # an ARF the registry would refuse has to be written again
                 outputs.arf.unlink(missing_ok=True)
-                log.error("error: %s", err)
+                log.error(
+                    "error: %s isn't ready; %s is kept. Run the same command again "
+                    "once the problem is fixed",
+                    name,
+                    recording.path,
+                )
             return 1
         except BaseException:
             if conversion is not None:
                 conversion.stop()
             raise
     if hashes is None:
-        log.error("error: %s isn't copied; run again to copy it", recording.path)
+        log.error(
+            "error: %s isn't copied, so it's kept; run the same command again to "
+            "copy it",
+            recording.path,
+        )
         return 1
+    log.info("- copying %s to %s", outputs.arf.name, args.target)
     try:
         copy_arf(outputs, resource["sha1"])
     except OSError as err:
-        log.error("error: %s; run again to copy %s", err, outputs.arf)
+        log.error("  ✗ %s", err)
+        log.error(
+            "error: %s isn't copied; run the same command again to copy it",
+            outputs.arf.name,
+        )
         return 1
     write_manifest(recording, outputs, resource, hashes)
+    log.info("  ✓ wrote %s", outputs.manifest.name)
+    status = 0
     if args.keep_session:
-        log.info("keeping %s", recording.path)
+        log.info("- keeping %s (--keep-session)", recording.path)
     else:
+        log.info("- removing %s", recording.path)
         try:
             remove_session(recording, outputs, hashes)
+            log.info("  ✓ removed")
         except OSError as err:
-            log.error("error: %s; %s is kept", err, recording.path)
-            return 1
+            log.error("  ✗ %s; it's kept, for you to check and remove", err)
+            status = 1
     log.info(
-        "%s is ready for sorting in %s; deposit %s once the sort is curated",
-        values["name"],
-        args.target,
+        "%s is ready: sort %s, and deposit %s once the sort is curated",
+        name,
+        outputs.target_session,
         outputs.target_arf.name,
     )
-    return 0
+    return status
 
 
 def script(argv=None):
@@ -897,4 +981,8 @@ def script(argv=None):
     setup_log(args.debug, args.debug_http)
     if args.registry_url is None:
         p.error("give the registry's URL with -r or NBANK_REGISTRY")
-    return args.func(args)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        log.error("\nerror: interrupted")
+        return 130
