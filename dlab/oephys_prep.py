@@ -11,9 +11,10 @@ are checked with the registry. Values that differ from what the recording
 says are listed in the entry attribute `revised_after_recording`.
 
 Then the session directory is copied to the target (the spike sorting
-workstation's share), where it can be sorted once it has its own name, and
-arfx-oephys writes the recording to `<name>.arf` in a staging directory on the
-recording computer. The registry checks the ARF as it would be deposited, and
+workstation's share), where it can be sorted once it has its own name. At the
+same time, arfx-oephys writes the recording to `<name>.arf` in a staging
+directory on the recording computer, at lower priority, so that a new
+recording can be made meanwhile. The registry checks the ARF as it would be deposited, and
 it's copied to the target with `<name>.json`, which records the ARF's hash and
 metadata, the session's hashes, and where they came from. Each copy is read
 back and checked by hash. Then the session directory is removed from the
@@ -447,10 +448,12 @@ def partial(path: Path) -> Path:
 
 @dataclass
 class Outputs:
-    """The files prep-oephys writes: in staging, the ARF and the session's
-    hashes; in the target, the session directory, the ARF and the manifest"""
+    """The files prep-oephys writes: in staging, the ARF, arfx-oephys's log and
+    the session's hashes; in the target, the session directory, the ARF and the
+    manifest"""
 
     arf: Path
+    conversion_log: Path
     hashes: Path
     target_session: Path
     target_arf: Path
@@ -462,6 +465,7 @@ class Outputs:
     ) -> "Outputs":
         return cls(
             arf=staging / f"{name}.arf",
+            conversion_log=staging / f"{name}.arfx-oephys.log",
             hashes=staging / f"{name}.session.json",
             target_session=target / recording.path.name,
             target_arf=target / f"{name}.arf",
@@ -491,23 +495,66 @@ def space_warnings(recording: Session, staging: Path, target: Path) -> list[str]
     return warnings
 
 
-def convert(cmd: list[str], arffile: Path) -> None:
-    """Runs arfx-oephys, which writes the ARF under its temporary name, then
-    renames it to arffile. Raises RuntimeError if it fails, after removing what
-    it wrote."""
-    # arfx-oephys adds to a file that's there, so one a run left is removed
-    partial(arffile).unlink(missing_ok=True)
-    log.info("converting: %s", shlex.join(cmd))
-    try:
-        result = subprocess.run(cmd)
-    except FileNotFoundError as err:
-        raise RuntimeError(
-            "arfx-oephys isn't installed: install melizalab-tools[oephys]"
-        ) from err
-    if result.returncode != 0:
+def lower_priority(cmd: list[str]) -> list[str]:
+    """cmd, run at lower CPU and I/O priority where nice and ionice are found, so
+    that a recording going on at the same time isn't slowed. ionice's lowest
+    best-effort level, not its idle class, which a busy drive could starve."""
+    prefix = []
+    if shutil.which("ionice"):
+        prefix += ["ionice", "-c2", "-n7"]
+    if shutil.which("nice"):
+        prefix += ["nice", "-n", "10"]
+    return prefix + cmd
+
+
+class Conversion:
+    """arfx-oephys running in the background, at lower priority, with its output
+    in a log file. It writes the ARF under its temporary name, which is renamed
+    to arffile when it finishes."""
+
+    def __init__(self, cmd: list[str], arffile: Path, logfile: Path):
+        if shutil.which(cmd[0]) is None:
+            raise RuntimeError(
+                "arfx-oephys isn't installed: install melizalab-tools[oephys]"
+            )
+        self.arffile = arffile
+        self.logfile = logfile
+        # arfx-oephys adds to a file that's there, so one a run left is removed
         partial(arffile).unlink(missing_ok=True)
-        raise RuntimeError(f"arfx-oephys failed (exit status {result.returncode})")
-    partial(arffile).rename(arffile)
+        cmd = lower_priority(cmd)
+        log.info("converting in the background: %s", shlex.join(cmd))
+        log.info("arfx-oephys's output is in %s", logfile)
+        with open(logfile, "w") as fp:
+            self.process = subprocess.Popen(
+                cmd, stdin=subprocess.DEVNULL, stdout=fp, stderr=subprocess.STDOUT
+            )
+
+    def finish(self) -> None:
+        """Waits for arfx-oephys and renames the ARF. Raises RuntimeError if it
+        failed, after removing what it wrote."""
+        if self.process.poll() is None:
+            log.info("waiting for arfx-oephys to finish")
+        status = self.process.wait()
+        if status != 0:
+            partial(self.arffile).unlink(missing_ok=True)
+            tail = "".join(self.logfile.read_text().splitlines(True)[-5:])
+            raise RuntimeError(
+                f"arfx-oephys failed (exit status {status}); its output, in "
+                f"{self.logfile}, ends:\n{tail}"
+            )
+        partial(self.arffile).rename(self.arffile)
+
+    def stop(self) -> None:
+        """Stops arfx-oephys, if it's running, and removes what it wrote"""
+        if self.process.poll() is None:
+            log.info("stopping arfx-oephys")
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+        partial(self.arffile).unlink(missing_ok=True)
 
 
 def read_arf_metadata(arffile: Path) -> dict[str, Any]:
@@ -723,18 +770,23 @@ def convert_command(args) -> int:
             for path in (outputs.target_session, outputs.arf, outputs.target_arf):
                 if path.exists():
                     log.info("%s is already there and won't be written again", path)
-            print(shlex.join(cmd))
+            print(shlex.join(cmd if reuse else lower_priority(cmd)))
             return 0
-        try:
-            hashes = copy_session(recording, outputs)
-        except OSError as err:
-            log.error("error: %s", err)
-            return 1
+        conversion = None
         try:
             if reuse:
-                log.info("%s is already written; checking it", outputs.arf)
+                log.info("%s is already written", outputs.arf)
             else:
-                convert(cmd, outputs.arf)
+                conversion = Conversion(cmd, outputs.arf, outputs.conversion_log)
+            # the conversion finishes even if the copy fails, for the next run
+            try:
+                hashes = copy_session(recording, outputs)
+            except OSError as err:
+                log.error("error: %s", err)
+                hashes = None
+            if conversion is not None:
+                conversion.finish()
+            log.info("checking %s", outputs.arf)
             resource = check_arf(session, args.registry_url, outputs.arf, values)
         except (RuntimeError, ValueError) as err:
             if reuse:
@@ -744,6 +796,13 @@ def convert_command(args) -> int:
                 outputs.arf.unlink(missing_ok=True)
                 log.error("error: %s", err)
             return 1
+        except BaseException:
+            if conversion is not None:
+                conversion.stop()
+            raise
+    if hashes is None:
+        log.error("error: %s isn't copied; run again to copy it", recording.path)
+        return 1
     try:
         copy_arf(outputs, resource["sha1"])
     except OSError as err:

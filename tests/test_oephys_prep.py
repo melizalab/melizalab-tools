@@ -4,8 +4,8 @@ httpx.MockTransport, and the user's answers are scripted."""
 
 import datetime
 import json
-import subprocess
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -435,6 +435,7 @@ def make_outputs(tmp_path):
 def test_outputs(tmp_path):
     _, outputs = make_outputs(tmp_path)
     assert outputs.arf == tmp_path / "staging/C182_1_4.arf"
+    assert outputs.conversion_log == tmp_path / "staging/C182_1_4.arfx-oephys.log"
     assert outputs.hashes == tmp_path / "staging/C182_1_4.session.json"
     assert outputs.target_session == tmp_path / "share" / SESSION_DIR
     assert outputs.target_arf == tmp_path / "share/C182_1_4.arf"
@@ -455,37 +456,80 @@ def test_space_warnings(tmp_path, monkeypatch):
     assert str(tmp_path / "share") in warnings[1]
 
 
-def write_with(arffile, *, status=0):
-    """A command that writes 'arf' to arffile's temporary name and exits"""
+def test_lower_priority(monkeypatch):
+    monkeypatch.setattr(prep.shutil, "which", lambda name: f"/usr/bin/{name}")
+    assert prep.lower_priority(["cmd"]) == [
+        "ionice",
+        "-c2",
+        "-n7",
+        "nice",
+        "-n",
+        "10",
+        "cmd",
+    ]
+    monkeypatch.setattr(prep.shutil, "which", lambda name: None)
+    assert prep.lower_priority(["cmd"]) == ["cmd"]
+
+
+def write_with(arffile, *, status=0, then="pass"):
+    """A command that writes 'arf' to arffile's temporary name, says so, runs
+    then, and exits"""
     path = str(prep.partial(arffile))
-    script = f"open({path!r}, 'a').write('arf'); raise SystemExit({status})"
+    script = (
+        f"open({path!r}, 'a').write('arf'); print('wrote it', flush=True); "
+        f"{then}; raise SystemExit({status})"
+    )
     return [sys.executable, "-c", script]
 
 
-def test_convert_runs_the_command(tmp_path):
+@pytest.fixture
+def conversion(tmp_path, monkeypatch):
+    """Starts a conversion with a command, at the usual priority"""
+    monkeypatch.setattr(prep, "lower_priority", lambda cmd: cmd)
     arffile = tmp_path / "a.arf"
-    prep.convert(write_with(arffile), arffile)
+    return lambda cmd: prep.Conversion(cmd, arffile, tmp_path / "a.log")
+
+
+def test_conversion(tmp_path, conversion):
+    arffile = tmp_path / "a.arf"
+    conversion(write_with(arffile)).finish()
     assert arffile.read_text() == "arf"
     assert not prep.partial(arffile).exists()
+    assert (tmp_path / "a.log").read_text() == "wrote it\n"
 
 
-def test_convert_starts_over_from_a_partial_arf(tmp_path):
+def test_a_conversion_starts_over_from_a_partial_arf(tmp_path, conversion):
     arffile = tmp_path / "a.arf"
     prep.partial(arffile).write_text("half an ")
-    prep.convert(write_with(arffile), arffile)
+    conversion(write_with(arffile)).finish()
     assert arffile.read_text() == "arf"
 
 
-def test_a_failed_conversion_leaves_nothing(tmp_path):
+def test_a_failed_conversion_leaves_its_log(tmp_path, conversion):
     arffile = tmp_path / "a.arf"
-    with pytest.raises(RuntimeError, match="exit status 2"):
-        prep.convert(write_with(arffile, status=2), arffile)
+    running = conversion(write_with(arffile, status=2))
+    with pytest.raises(RuntimeError, match=r"exit status 2\).*ends:\nwrote it"):
+        running.finish()
+    assert list(tmp_path.iterdir()) == [tmp_path / "a.log"]
+
+
+def test_a_conversion_without_arfx(tmp_path, conversion):
+    with pytest.raises(RuntimeError, match="isn't installed"):
+        conversion(["no-such-command-for-prep-oephys"])
     assert list(tmp_path.iterdir()) == []
 
 
-def test_convert_without_arfx(tmp_path):
-    with pytest.raises(RuntimeError, match="isn't installed"):
-        prep.convert(["no-such-command-for-prep-oephys"], tmp_path / "a.arf")
+def test_stopping_a_conversion(tmp_path, conversion):
+    arffile = tmp_path / "a.arf"
+    running = conversion(write_with(arffile, then="import time; time.sleep(60)"))
+    deadline = time.monotonic() + 10
+    while "wrote it" not in (tmp_path / "a.log").read_text():
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
+    running.stop()
+    assert running.process.poll() is not None
+    assert not prep.partial(arffile).exists()
+    assert not arffile.exists()
 
 
 def test_check_arf(tmp_path, client, fake, arf_metadata):
@@ -667,6 +711,26 @@ def test_a_session_that_changed_isnt_removed(tmp_path, change, problem):
     assert (recording.path / DATA).exists()
 
 
+class FakeProcess:
+    """arfx-oephys, which has written 'arf' and finished"""
+
+    def __init__(self, cmd):
+        arffile = Path(cmd[cmd.index("-f") + 1])
+        arffile.write_text("arf")
+        self.returncode = 0
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def arfx_args(cmd):
+    """cmd, without what lowers its priority"""
+    return cmd[cmd.index("arfx-oephys") :]
+
+
 @pytest.fixture
 def script_env(tmp_path, monkeypatch, fake, arf_metadata):
     """Runs the script against the fakes: the presenter logged PRESENTER, the
@@ -685,14 +749,16 @@ def script_env(tmp_path, monkeypatch, fake, arf_metadata):
     monkeypatch.setattr(nbank.util, "check_registry_version", lambda *a: None)
     monkeypatch.setattr(prep, "read_presenter_metadata", lambda path: PRESENTER)
     monkeypatch.setattr("builtins.input", Answers(*ACCEPT_ALL))
+    # nice, ionice and arfx-oephys are found, whether or not they're installed
+    monkeypatch.setattr(prep.shutil, "which", lambda name: f"/usr/bin/{name}")
     commands = []
 
-    def run(cmd):
-        commands.append(cmd)
-        Path(cmd[2]).write_text("arf")
-        return subprocess.CompletedProcess(cmd, 0)
+    class Process(FakeProcess):
+        def __init__(self, cmd, **kwargs):
+            commands.append(cmd)
+            super().__init__(cmd)
 
-    monkeypatch.setattr(prep.subprocess, "run", run)
+    monkeypatch.setattr(prep.subprocess, "Popen", Process)
     session = make_session(tmp_path)
     staging = tmp_path / "staging"
     target = tmp_path / "share"
@@ -706,7 +772,8 @@ def test_script(script_env, tmp_path):
     session, staging, target, commands, argv = script_env
     assert prep.script([*argv, str(session), str(target)]) == 0
     [cmd] = commands
-    assert cmd[:5] == [
+    assert cmd[:6] == ["ionice", "-c2", "-n7", "nice", "-n", "10"]
+    assert arfx_args(cmd)[:5] == [
         "arfx-oephys",
         "-f",
         str(staging / "C182_1_4.arf.partial"),
@@ -714,6 +781,7 @@ def test_script(script_env, tmp_path):
         "EXTRAC_RAW",
     ]
     assert (staging / "C182_1_4.arf").read_text() == "arf"
+    assert (staging / "C182_1_4.arfx-oephys.log").exists()
     assert (target / "C182_1_4.arf").read_text() == "arf"
     assert (target / SESSION_DIR / DATA).read_text() == "{}"
     manifest = json.loads((target / "C182_1_4.json").read_text())
@@ -742,7 +810,7 @@ def test_script_datatype(script_env):
     session, _, target, commands, argv = script_env
     assert prep.script([*argv, "-T", "EXTRAC_HP", str(session), str(target)]) == 0
     [cmd] = commands
-    assert cmd[3:5] == ["-T", "EXTRAC_HP"]
+    assert arfx_args(cmd)[3:5] == ["-T", "EXTRAC_HP"]
 
 
 @pytest.mark.parametrize("missing", ["staging", "share"])
@@ -803,3 +871,48 @@ def test_script_keeps_a_reused_arf_the_registry_refuses(script_env, fake):
     assert prep.script([*argv, str(session), str(target)]) == 1
     assert commands == []
     assert (staging / "C182_1_4.arf").exists()
+
+
+def test_script_converts_even_if_the_session_copy_fails(script_env, monkeypatch):
+    session, staging, target, commands, argv = script_env
+    real_copy_session = prep.copy_session
+
+    def fail(*args):
+        raise OSError("the share went away")
+
+    monkeypatch.setattr(prep, "copy_session", fail)
+    assert prep.script([*argv, str(session), str(target)]) == 1
+    assert (staging / "C182_1_4.arf").exists()
+    assert list(target.iterdir()) == []
+    # the next run copies the session and uses the ARF
+    monkeypatch.setattr(prep, "copy_session", real_copy_session)
+    monkeypatch.setattr("builtins.input", Answers(*ACCEPT_ALL))
+    assert prep.script([*argv, str(session), str(target)]) == 0
+    assert len(commands) == 1
+    assert (target / SESSION_DIR / DATA).exists()
+    assert not session.exists()
+
+
+def test_script_interrupted_stops_the_conversion(script_env, monkeypatch):
+    session, staging, target, _, argv = script_env
+    stopped = []
+
+    class Running(FakeProcess):
+        def __init__(self, cmd, **kwargs):
+            super().__init__(cmd)
+            self.returncode = None
+
+        def terminate(self):
+            stopped.append(True)
+            self.returncode = -15
+
+    def interrupt(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(prep.subprocess, "Popen", Running)
+    monkeypatch.setattr(prep, "copy_session", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        prep.script([*argv, str(session), str(target)])
+    assert stopped == [True]
+    assert list(staging.iterdir()) == [staging / "C182_1_4.arfx-oephys.log"]
+    assert session.exists()
