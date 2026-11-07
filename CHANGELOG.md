@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2026.11.7
 
+- Bumped neurobank dependency to 1.0
 - `group-kilo-spikes` reads the waveforms of all the units from `temp_wh.dat` in
   one pass in time order, instead of a pass per unit, which read the whole file
   again for each unit when it was bigger than memory (very slow on a network

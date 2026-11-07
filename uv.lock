@@ -431,7 +431,7 @@ requires-dist = [
     { name = "libtfr", specifier = ">=2.1.9" },
     { name = "melizalab-specs", extras = ["validate"], specifier = ">=0.1.2" },
     { name = "neo", specifier = ">=0.14,<0.15" },
-    { name = "neurobank", specifier = ">=1.0.0rc2,<2" },
+    { name = "neurobank", specifier = ">=1.0,<2" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "quickspikes", specifier = ">=2.0.8" },
@@ -475,14 +475,14 @@ wheels = [
 
 [[package]]
 name = "neurobank"
-version = "1.0.0rc2"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/a6/40f3372906311e6b4e3f267c20ac3683870928a58bf77f8cfd6be36d6410/neurobank-1.0.0rc2.tar.gz", hash = "sha256:73b7a3cc6592291d516b79efe2868baf7364c81595639c568e0090747b4bce54", size = 79381, upload-time = "2026-10-30T19:22:21.126Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/be/b06d7d6e15c62aaeb48c30b74d6e70c1e9ad9bdbbf0ee0944e116be50ecb/neurobank-1.0.0.tar.gz", hash = "sha256:0d133a535110a299bed1f68ae0af4d9e51ce163daae8d868909d815d71210afa", size = 79378, upload-time = "2026-11-07T21:17:31.435Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/e1/f2937e357edb98a7b94e11b197f192563654f1775cc8281177aa51a311a4/neurobank-1.0.0rc2-py3-none-any.whl", hash = "sha256:1ae16104f1f69edb5d618359157b6cfa376a468197da91c677679c6081231907", size = 94738, upload-time = "2026-10-30T19:22:19.427Z" },
+    { url = "https://files.pythonhosted.org/packages/41/97/e00e51e8ff5985b4cd90d9174791ee41a6bb581030b2c02026a523398132/neurobank-1.0.0-py3-none-any.whl", hash = "sha256:e49e188c6deb45250251f89ca43e7d1f8ac685b36e7441ea42c60e3672305e48", size = 94701, upload-time = "2026-11-07T21:17:29.783Z" },
 ]
 
 [[package]]
@@ -988,7 +988,7 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version < '3.12'" },
+    { name = "numpy" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -1064,7 +1064,7 @@ resolution-markers = [
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version >= '3.12'" },
+    { name = "numpy" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7e/74/66de6258867beb2ef08f35f9f2ac017a52cacd5081714d239ff1a442d458/scipy-1.18.1.tar.gz", hash = "sha256:52c4b7422442aba924d03ad4019852b08a92e64ea187b933135687bfe2747307", size = 30781235, upload-time = "2026-08-21T23:28:50.599Z" }
 wheels = [
