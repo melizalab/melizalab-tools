@@ -566,3 +566,36 @@ def test_resource_to_metadata_leaves_out_recording_fields():
         }
     }
     assert kilo.resource_to_metadata(record) == {"pen": 5}
+
+
+@pytest.mark.parametrize("batch", [kilo.WAVEFORM_BATCH, 7])
+def test_read_waveforms_is_indexing_by_spike(tmp_path, monkeypatch, batch):
+    """read_waveforms gives each spike's window on its column, as indexing the
+    recording spike by spike does, whatever the order of the spikes and the
+    size of the batches"""
+    monkeypatch.setattr(kilo, "WAVEFORM_BATCH", batch)
+    rng = np.random.default_rng(1)
+    path = tmp_path / "temp_wh.dat"
+    rng.integers(-1000, 1000, (5000, 4), dtype="int16").tofile(path)
+    recording = np.memmap(path, mode="r", dtype="int16").reshape(-1, 4)
+    n_before, n_after = 6, 15
+    # unsorted, with duplicate times on different columns, and both ends
+    rows = np.concatenate(
+        [rng.integers(n_before, 5000 - n_after, 50), [n_before, 4984, 300, 300]]
+    )
+    columns = np.concatenate([rng.integers(0, 4, 50), [0, 3, 1, 2]])
+    waveforms = kilo.read_waveforms(recording, rows, columns, n_before, n_after)
+    expected = np.stack(
+        [
+            recording[r - n_before : r + n_after, c]
+            for r, c in zip(rows, columns, strict=True)
+        ]
+    )
+    assert waveforms.dtype == recording.dtype
+    np.testing.assert_array_equal(waveforms, expected)
+
+
+def test_read_waveforms_without_spikes():
+    recording = np.zeros((100, 2), dtype="int16")
+    empty = np.array([], dtype="int64")
+    assert kilo.read_waveforms(recording, empty, empty, 3, 5).shape == (0, 8)

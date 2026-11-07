@@ -1291,6 +1291,34 @@ def assign_spikes(times: np.ndarray, trial_starts: np.ndarray) -> np.ndarray:
     return np.searchsorted(trial_starts, times, side="left") - 1
 
 
+# spikes whose windows are read from temp_wh.dat at a time
+WAVEFORM_BATCH = 10_000
+
+
+def read_waveforms(
+    recording: np.ndarray,
+    rows: np.ndarray,
+    columns: np.ndarray,
+    n_before: int,
+    n_after: int,
+) -> np.ndarray:
+    """The window of recording (samples x columns) around each spike, rows[i] -
+    n_before to rows[i] + n_after on column columns[i], as an array of spikes x
+    samples. The windows are read in time order, in batches, so a memmapped
+    file is read once, front to back, which read-ahead serves well; on a
+    network share, reading each cluster's spikes in turn reads the file again
+    for every cluster if it's bigger than memory."""
+    rows = np.asarray(rows)
+    columns = np.asarray(columns)
+    order = np.argsort(rows, kind="stable")
+    offsets = np.arange(-n_before, n_after)
+    out = np.empty((rows.size, offsets.size), dtype=recording.dtype)
+    for start in range(0, rows.size, WAVEFORM_BATCH):
+        batch = order[start : start + WAVEFORM_BATCH]
+        out[batch] = recording[rows[batch, None] + offsets, columns[batch, None]]
+    return out
+
+
 def waveforms_to_events(
     times: np.ndarray, pprox_trials: list[dict], sampling_rate: float
 ) -> tuple[list[np.ndarray], int]:
@@ -1948,6 +1976,24 @@ def group_spikes_script(argv=None):
             amplitude_file = h5.File(datafile, "r")
             amplitude_entry = amplitude_file[entry_name]
     noise = {}
+    # the waveforms of the spikes in good clusters with a full window, read in
+    # one pass, by cluster in the same order as below
+    good = events[events.index.map(info["group"]).isin(good_clust_types)]
+    sorted_times = good.time - data_origin  # in temp_wh.dat
+    good = good[(sorted_times > n_before) & (sorted_times < (nsamples - n_after))]
+    log.info("- reading the waveforms of %d spikes from %s", len(good), recfile)
+    all_waveforms = read_waveforms(
+        recording,
+        good.time.to_numpy() - data_origin,
+        good.index.map(info["ch"]).to_numpy(),
+        n_before,
+        n_after,
+    )
+    cluster_waveforms = {
+        clust_id: all_waveforms[rows]
+        for clust_id, rows in good.groupby("clust").indices.items()
+    }
+    del all_waveforms
     total_spikes = 0
     total_clusters = 0
     for clust_id, cluster in events.groupby("clust"):
@@ -1974,12 +2020,10 @@ def group_spikes_script(argv=None):
             (sorted_times > n_before) & (sorted_times < (nsamples - n_after))
         ]
         n_clean = len(spikes)
-        # the same windows qs.peaks would extract; indexing the read-only
-        # memmap directly reads only the samples around each spike
-        windows = (spikes.time.to_numpy() - data_origin)[:, None] + np.arange(
-            -n_before, n_after
+        # the same windows qs.peaks would extract, in the order of spikes
+        waveforms = cluster_waveforms.get(
+            clust_id, np.empty((0, n_before + n_after), dtype=recording.dtype)
         )
-        waveforms = recording[windows, clust_info["ch"]]
         mean_spike = waveforms.mean(0)
         included = np.abs(waveforms).max(-1) < (
             np.abs(mean_spike).max(-1) * args.artifact_reject_thresh

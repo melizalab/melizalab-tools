@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `group-kilo-spikes` reads the waveforms of all the units from `temp_wh.dat` in
+  one pass in time order, instead of a pass per unit, which read the whole file
+  again for each unit when it was bigger than memory (very slow on a network
+  share). The outputs are the same.
 - `prep-oephys convert` copies the session directory to the target first, so it
   can be sorted while the ARF is made; reads the copy back to check it; and
   writes the ARF to a staging directory (`--staging`, required) with
